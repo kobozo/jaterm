@@ -31,6 +31,17 @@ export default function App() {
       const sid = String(id);
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, cwd: path, panes: [sid], activePane: sid } : t)));
       setActiveTab(tabId);
+      // Fallback: ensure shell is in the desired folder even if the PTY cwd wasn’t applied by the shell
+      try {
+        const isWin = navigator.userAgent.includes('Windows');
+        if (isWin) {
+          const p = path.replace(/"/g, '""');
+          ptyWrite({ ptyId: sid, data: `cd /d "${p}"\r` });
+        } else {
+          const p = path.replace(/'/g, "'\\''");
+          ptyWrite({ ptyId: sid, data: `cd '${p}'\n` });
+        }
+      } catch {}
     } catch (e) {
       console.error('ptyOpen failed', e);
     }
@@ -55,8 +66,8 @@ export default function App() {
       if (t.id !== activeTab) return t;
       const nextPanes = t.panes.filter((p) => p !== id);
       const updated = { ...t, panes: nextPanes, activePane: nextPanes[nextPanes.length - 1] ?? null, cwd: nextPanes.length ? t.cwd : null };
-      if (t.panes.length > 0 && nextPanes.length === 0 && t.cwd) {
-        addRecentSession({ cwd: t.cwd, closedAt: Date.now(), panes: t.panes.length });
+      if (t.panes.length > 0 && nextPanes.length === 0 && (t.status.cwd || t.cwd)) {
+        addRecentSession({ cwd: (t.status.cwd ?? t.cwd) as string, closedAt: Date.now(), panes: t.panes.length });
       }
       return updated;
     }));
@@ -81,8 +92,8 @@ export default function App() {
   function closeTab(id: string) {
     // record session for the tab if it had a cwd
     const toRecord = tabs.find((t) => t.id === id);
-    if (toRecord?.cwd) {
-      addRecentSession({ cwd: toRecord.cwd, closedAt: Date.now(), panes: toRecord.panes.length });
+    if (toRecord && (toRecord.status.cwd || toRecord.cwd)) {
+      addRecentSession({ cwd: (toRecord.status.cwd ?? toRecord.cwd) as string, closedAt: Date.now(), panes: toRecord.panes.length });
     }
     setTabs((prev) => {
       if (prev.length <= 1) {
@@ -107,7 +118,11 @@ export default function App() {
   return (
     <div className="app-root">
       <TabsBar
-        tabs={tabs.map((t) => ({ id: t.id, title: t.cwd ? t.cwd : 'Welcome', isWelcome: !t.cwd }))}
+        tabs={tabs.map((t) => {
+          const full = t.status.cwd ?? t.cwd;
+          const title = full ? (full.split(/[\\/]/).filter(Boolean).pop() || full) : 'Welcome';
+          return { id: t.id, title, isWelcome: !full };
+        })}
         activeId={activeTab}
         onSelect={setActiveTab}
         onClose={closeTab}
