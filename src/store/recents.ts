@@ -25,6 +25,8 @@ export function addRecent(path: string) {
   filtered.unshift({ path, lastOpenedAt: now });
   localStorage.setItem(KEY, JSON.stringify(filtered.slice(0, 50)));
   localStorage.setItem(KEY + '.last', path);
+  // persist to ~/.jaterm/state.json
+  void saveAppState({ recents: filtered.slice(0, 50) });
 }
 
 export function getLastOpened(): string | null {
@@ -44,10 +46,20 @@ export function removeRecent(path: string) {
     localStorage.setItem(KEY, JSON.stringify(next));
     const last = localStorage.getItem(KEY + '.last');
     if (last === path) localStorage.removeItem(KEY + '.last');
+    void saveAppState({ recents: next });
   } catch {}
 }
 
 export function clearRecents() {
+import { saveAppState, loadAppState } from '@/store/persist';
   localStorage.removeItem(KEY);
   localStorage.removeItem(KEY + '.last');
+  void saveAppState({ recents: [] });
+}
+
+export async function hydrateRecentsFromFile() {
+  const s = await loadAppState();
+  if (s.recents) {
+    localStorage.setItem(KEY, JSON.stringify(s.recents));
+  }
 }

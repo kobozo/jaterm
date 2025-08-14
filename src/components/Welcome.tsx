@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
-import { addRecent, getRecents, removeRecent, clearRecents } from '@/store/recents';
-import { getRecentSessions, removeRecentSession, clearRecentSessions } from '@/store/sessions';
+import { addRecent, getRecents, removeRecent, clearRecents, hydrateRecentsFromFile } from '@/store/recents';
+import { getRecentSessions, removeRecentSession, clearRecentSessions, hydrateSessionsFromFile } from '@/store/sessions';
 
 type Props = {
   onOpenFolder: (path: string) => void;
@@ -11,6 +11,14 @@ type Props = {
 export default function Welcome({ onOpenFolder }: Props) {
   const [recents, setRecents] = useState(() => getRecents());
   const [recentSessions, setRecentSessions] = useState(() => getRecentSessions());
+  useEffect(() => {
+    (async () => {
+      await hydrateRecentsFromFile();
+      await hydrateSessionsFromFile();
+      setRecents(getRecents());
+      setRecentSessions(getRecentSessions());
+    })();
+  }, []);
 
   const handleHome = async () => {
     try {

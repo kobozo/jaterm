@@ -24,6 +24,7 @@ export function addRecentSession(sess: RecentSession) {
   const filtered = list.filter((s) => s.cwd !== sess.cwd);
   filtered.unshift(sess);
   localStorage.setItem(KEY, JSON.stringify(filtered.slice(0, 50)));
+  void saveAppState({ recentSessions: filtered.slice(0, 50) });
 }
 
 export function removeRecentSession(cwd: string) {
@@ -32,9 +33,19 @@ export function removeRecentSession(cwd: string) {
     const list = raw ? (JSON.parse(raw) as RecentSession[]) : [];
     const next = list.filter((s) => s.cwd !== cwd);
     localStorage.setItem(KEY, JSON.stringify(next));
+    void saveAppState({ recentSessions: next });
   } catch {}
 }
 
 export function clearRecentSessions() {
+import { saveAppState, loadAppState } from '@/store/persist';
   localStorage.removeItem(KEY);
+  void saveAppState({ recentSessions: [] });
+}
+
+export async function hydrateSessionsFromFile() {
+  const s = await loadAppState();
+  if (s.recentSessions) {
+    localStorage.setItem(KEY, JSON.stringify(s.recentSessions));
+  }
 }
