@@ -1,0 +1,7 @@
+{
+  "files.eol": "\n",
+  "editor.formatOnSave": true,
+  "rust-analyzer.checkOnSave.command": "clippy",
+  "typescript.tsdk": "node_modules/typescript/lib"
+}
+

@@ -1,0 +1,29 @@
+:root {
+  color-scheme: light dark;
+  --bg: #0f111a;
+  --fg: #e6e6e6;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.app-root {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+}
+
+.status-bar {
+  padding: 6px 10px;
+  border-top: 1px solid #333;
+  font-size: 12px;
+}
+

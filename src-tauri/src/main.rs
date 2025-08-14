@@ -1,0 +1,34 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod commands;
+mod events;
+mod state;
+mod utils;
+use tauri::Manager;
+
+fn main() {
+  tauri::Builder::default()
+    .plugin(tauri_plugin_dialog::init())
+    .manage(crate::state::app_state::AppState::default())
+    .invoke_handler(tauri::generate_handler![
+      commands::pty::pty_open,
+      commands::pty::pty_write,
+      commands::pty::pty_resize,
+      commands::pty::pty_kill,
+      commands::ssh::ssh_open_tunnel,
+      commands::ssh::ssh_close_tunnel,
+      commands::git::git_status,
+      commands::watcher::watch_subscribe
+    ])
+    .setup(|app| {
+      // Initialize shared state or services here.
+      #[cfg(debug_assertions)]
+      if let Some(main) = app.get_webview_window("main") {
+        main.open_devtools();
+        let _ = main.set_focus();
+      }
+      Ok(())
+    })
+    .run(tauri::generate_context!())
+    .expect("error while running tauri application");
+}

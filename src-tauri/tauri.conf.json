@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.kobozo.jaterm",
+  "productName": "JATerm",
+  "version": "0.1.0",
+  "build": {
+    "beforeDevCommand": "pnpm vite",
+    "beforeBuildCommand": "pnpm vite build",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "JATerm",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "icon": []
+  }
+}

@@ -1,0 +1,27 @@
+# Node / Vite
+node_modules/
+dist/
+.vite/
+.DS_Store
+*.log
+
+# PNPM/Yarn/npm
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Rust / Cargo
+target/
+debug/
+Cargo.lock
+
+# Tauri
+src-tauri/target/
+src-tauri/.tauri-build
+src-tauri/gen/
+
+# Tests
+coverage/
+
