@@ -3,18 +3,14 @@ import SplitView from '@/components/SplitView';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
 import Welcome from '@/components/Welcome';
-import { addRecent, getLastOpened } from '@/store/recents';
+import { addRecent } from '@/store/recents';
 import { ptyOpen } from '@/types/ipc';
 
 export default function App() {
   const [cwd, setCwd] = useState<string | null>(null);
   const [panes, setPanes] = useState<string[]>([]);
 
-  useEffect(() => {
-    const last = getLastOpened();
-    if (last) void openFolder(last, { remember: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Start on the Welcome screen by default; no auto-open on launch.
 
   async function openFolder(path: string, opts: { remember?: boolean } = { remember: true }) {
     setCwd(path);
