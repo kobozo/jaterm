@@ -3,6 +3,7 @@ import SplitView from '@/components/SplitView';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
 import Welcome from '@/components/Welcome';
+import ComposeDrawer from '@/components/ComposeDrawer';
 import { addRecent } from '@/store/recents';
 import { gitStatus, ptyOpen, ptyKill } from '@/types/ipc';
 
@@ -11,6 +12,7 @@ export default function App() {
   const [panes, setPanes] = useState<string[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [status, setStatus] = useState<{ cwd?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number }>({});
+  const [composeOpen, setComposeOpen] = useState(false);
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
@@ -70,9 +72,18 @@ export default function App() {
               <TerminalPane key={id} id={id} onCwd={handleCwd} onFocusPane={setActive} onClose={closePane} />
             ))}
           </SplitView>
-          <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
             <button onClick={newTerminal}>New Terminal</button>
+            <button onClick={() => setComposeOpen((v) => !v)}>Compose (Cmd/Ctrl+E)</button>
             <GitStatusBar cwd={status.cwd} branch={status.branch} ahead={status.ahead} behind={status.behind} staged={status.staged} unstaged={status.unstaged} />
+            <ComposeDrawer
+              open={composeOpen}
+              onClose={() => setComposeOpen(false)}
+              onSend={(text) => {
+                if (active) ptyWrite({ ptyId: active, data: text });
+                setComposeOpen(false);
+              }}
+            />
           </div>
         </>
       ) : (

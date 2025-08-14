@@ -49,8 +49,11 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     const sub = term.onData((data) => {
       if (id) ptyWrite({ ptyId: id, data });
     });
-    // Track focus
-    const focusSub = term.onFocus(() => onFocusPane?.(id));
+    // Track focus via DOM focus/mouse events (xterm has no onFocus API)
+    const elem = term.element as HTMLElement | null;
+    const handleFocus = () => onFocusPane?.(id);
+    elem?.addEventListener('focusin', handleFocus);
+    elem?.addEventListener('mousedown', handleFocus);
     // Send resize events only when term reports size change
     const resizeSub = term.onResize(({ cols, rows }) => {
       if (id) ptyResize({ ptyId: id, cols, rows });
@@ -72,14 +75,15 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     }).then((u) => (unlisten = u));
     return () => {
       sub.dispose();
-      focusSub.dispose();
+      elem?.removeEventListener('focusin', handleFocus);
+      elem?.removeEventListener('mousedown', handleFocus);
       resizeSub.dispose();
       if (unlisten) unlisten();
     };
   }, [id, term]);
 
   return (
-    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+    <div style={{ height: '100%', width: '100%', position: 'relative' }} onMouseDown={() => onFocusPane?.(id)}>
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
       {onClose && (
         <button

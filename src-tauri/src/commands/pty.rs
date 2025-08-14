@@ -38,6 +38,9 @@ pub async fn pty_open(
     if let Some(c) = cwd.clone() {
         cmd.cwd(c);
     }
+    // Ensure reasonable terminal env for colors and width-sensitive tools
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
 
     let child = pair
         .slave
