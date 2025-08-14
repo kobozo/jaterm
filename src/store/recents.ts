@@ -36,3 +36,18 @@ export function setLastOpened(path: string | null) {
   else localStorage.removeItem(KEY + '.last');
 }
 
+export function removeRecent(path: string) {
+  try {
+    const raw = localStorage.getItem(KEY);
+    const list = raw ? (JSON.parse(raw) as RecentItem[]) : [];
+    const next = list.filter((r) => r.path !== path);
+    localStorage.setItem(KEY, JSON.stringify(next));
+    const last = localStorage.getItem(KEY + '.last');
+    if (last === path) localStorage.removeItem(KEY + '.last');
+  } catch {}
+}
+
+export function clearRecents() {
+  localStorage.removeItem(KEY);
+  localStorage.removeItem(KEY + '.last');
+}

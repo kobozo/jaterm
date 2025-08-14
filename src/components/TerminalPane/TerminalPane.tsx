@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useTerminal } from './useTerminal';
 import '@xterm/xterm/css/xterm.css';
 import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
+import { homeDir } from '@tauri-apps/api/path';
 import { FitAddon } from '@xterm/addon-fit';
 
 type Props = { id: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void };
@@ -112,7 +113,15 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose, onTitle 
       try {
         const looksPath = title.startsWith('/') || /^[A-Za-z]:\\/.test(title) || title.startsWith('~');
         if (looksPath) {
-          onCwd?.(id, title.startsWith('~') ? title.replace(/^~/, '') : title);
+          if (title.startsWith('~')) {
+            const rest = title.slice(1);
+            homeDir().then((hd) => {
+              const abs = (hd.replace(/\/$/, '')) + rest;
+              onCwd?.(id, abs);
+            }).catch(() => {});
+          } else {
+            onCwd?.(id, title);
+          }
         }
       } catch {}
     });

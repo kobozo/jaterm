@@ -7,7 +7,7 @@ import ComposeDrawer from '@/components/ComposeDrawer';
 import TabsBar from '@/components/TabsBar';
 import { addRecent } from '@/store/recents';
 import { addRecentSession } from '@/store/sessions';
-import { appQuit, gitStatus, ptyOpen, ptyKill, ptyWrite } from '@/types/ipc';
+import { appQuit, gitStatus, installZshOsc7, ptyOpen, ptyKill, ptyWrite } from '@/types/ipc';
 
 export default function App() {
   type Tab = {
@@ -32,6 +32,27 @@ export default function App() {
       const sid = String(id);
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, cwd: path, panes: [sid], activePane: sid } : t)));
       setActiveTab(tabId);
+      // Auto-install zsh OSC7 helper on mac if missing (once)
+      try {
+        const ua = navigator.userAgent.toLowerCase();
+        const isMac = ua.includes('mac');
+        const already = localStorage.getItem('jaterm.zsh.osc7.auto') === 'done';
+        if (isMac && !already) {
+          setTimeout(async () => {
+            const t = tabs.find((x) => x.id === tabId);
+            const seen = t?.status && (t.status as any).seenOsc7;
+            if (!seen) {
+              try {
+                const ok = await installZshOsc7();
+                if (ok) {
+                  localStorage.setItem('jaterm.zsh.osc7.auto', 'done');
+                  alert('Enabled zsh cwd tracking in ~/.zshrc. Restart your shell for live cwd.');
+                }
+              } catch {}
+            }
+          }, 1500);
+        }
+      } catch {}
       // Fallback: ensure shell is in the desired folder even if the PTY cwd wasn’t applied by the shell (no OSC7 injection)
       try {
         const isWin = navigator.userAgent.includes('Windows');
