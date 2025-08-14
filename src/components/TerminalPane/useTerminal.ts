@@ -5,8 +5,9 @@ export function useTerminal(id: string) {
   const term = useMemo(() => new Terminal({
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
     cursorBlink: true,
-    allowProposedApi: true,
-    convertEol: true,
+    allowProposedApi: false,
+    convertEol: false,
+    scrollback: 5000,
   }), [id]);
 
   const attach = useCallback((el: HTMLDivElement) => {
