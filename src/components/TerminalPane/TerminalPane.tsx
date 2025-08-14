@@ -57,6 +57,13 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     const sub = term.onData((data) => {
       if (id) ptyWrite({ ptyId: id, data });
     });
+    // Intercept Shift+Enter and send LF (\n) instead of default CR
+    const keySub = term.onKey(({ key, domEvent }) => {
+      if (domEvent.key === 'Enter' && domEvent.shiftKey) {
+        domEvent.preventDefault();
+        if (id) ptyWrite({ ptyId: id, data: '\n' });
+      }
+    });
     // Track focus via DOM focus/mouse events (xterm has no onFocus API)
     const elem = term.element as HTMLElement | null;
     const handleFocus = () => onFocusPane?.(id);
@@ -98,6 +105,7 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
       sub.dispose();
       elem?.removeEventListener('focusin', handleFocus);
       elem?.removeEventListener('mousedown', handleFocus);
+      keySub.dispose();
       resizeSub.dispose();
       if (unlisten) unlisten();
     };
