@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { useTerminal } from './useTerminal';
 import '@xterm/xterm/css/xterm.css';
-import { onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
+import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
 import { FitAddon } from '@xterm/addon-fit';
 
 type Props = { id: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void };
@@ -17,6 +17,37 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
     return bytes;
+  }
+
+  function parseOsc7Cwds(s: string): string[] {
+    // OSC 7 format: ESC ] 7 ; file://<host><path> BEL or ST
+    // We extract <path>
+    const results: string[] = [];
+    let i = 0;
+    while (i < s.length) {
+      const idx = s.indexOf("\x1b]7;file://", i);
+      if (idx === -1) break;
+      const start = idx + 11; // after prefix
+      // find terminator: BEL (\x07) or ST (ESC \\)
+      let j = s.indexOf("\x07", start);
+      let end = j;
+      if (j === -1) {
+        const st = s.indexOf("\x1b\\", start);
+        end = st;
+      }
+      if (end && end > start) {
+        // path starts after host, which ends at first '/' after start
+        const firstSlash = s.indexOf('/', start);
+        if (firstSlash !== -1 && firstSlash < end) {
+          const path = s.slice(firstSlash, end);
+          results.push(path);
+        }
+        i = end + 1;
+      } else {
+        break;
+      }
+    }
+    return results;
   }
 
   useEffect(() => {
@@ -75,6 +106,7 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     });
     // Listen for backend PTY output and parse OSC 7 CWD
     let unlisten: (() => void) | undefined;
+    let unlistenExit: (() => void) | undefined;
     onPtyOutput((e: any) => {
       if (e.ptyId !== id) return;
       if (e.dataBytes) {
@@ -82,25 +114,29 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
         // Parse OSC 7 in the decoded string for cwd updates
         try {
           const dataStr = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-          const regex = /\x1b\]7;file:\/\/[^/]*\/(.*?)\x07|\x1b\\/g;
-          let m: RegExpExecArray | null;
-          while ((m = regex.exec(dataStr))) {
-            const p = m[1];
-            if (p) onCwd?.(id, '/' + p);
-          }
+          const cwds = parseOsc7Cwds(dataStr);
+          cwds.forEach((p) => {
+            console.debug('[osc7] pane', id, 'cwd', p);
+            onCwd?.(id, p);
+          });
         } catch {}
         term.write(bytes);
       } else if (e.data) {
         const data = e.data as string;
-        const regex = /\x1b\]7;file:\/\/[^/]*\/(.*?)\x07|\x1b\\/g;
-        let m: RegExpExecArray | null;
-        while ((m = regex.exec(data))) {
-          const p = m[1];
-          if (p) onCwd?.(id, '/' + p);
-        }
+        const cwds = parseOsc7Cwds(data);
+        cwds.forEach((p) => {
+          console.debug('[osc7] pane', id, 'cwd', p);
+          onCwd?.(id, p);
+        });
         term.write(data);
       }
     }).then((u) => (unlisten = u));
+    onPtyExit((e) => {
+      if (e.ptyId === id) {
+        console.debug('[pty] exit', id);
+        onClose?.(id);
+      }
+    }).then((u) => (unlistenExit = u));
     return () => {
       sub.dispose();
       elem?.removeEventListener('focusin', handleFocus);
@@ -108,6 +144,7 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
       keySub.dispose();
       resizeSub.dispose();
       if (unlisten) unlisten();
+      if (unlistenExit) unlistenExit();
     };
   }, [id, term]);
 

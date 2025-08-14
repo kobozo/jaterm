@@ -36,10 +36,15 @@ export default function App() {
         const isWin = navigator.userAgent.includes('Windows');
         if (isWin) {
           const p = path.replace(/"/g, '""');
+          console.debug('[reopen] cd fallback (win)', p);
           ptyWrite({ ptyId: sid, data: `cd /d "${p}"\r` });
         } else {
           const p = path.replace(/'/g, "'\\''");
+          console.debug('[reopen] cd fallback (posix)', p);
           ptyWrite({ ptyId: sid, data: `cd '${p}'\n` });
+          // Also emit OSC7 so we update immediately
+          const seq = `printf '\\033]7;file://%s%s\\007' "$(hostname)" "$PWD"\n`;
+          ptyWrite({ ptyId: sid, data: seq });
         }
       } catch {}
     } catch (e) {
