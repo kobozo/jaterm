@@ -6,6 +6,7 @@ import Welcome from '@/components/Welcome';
 import ComposeDrawer from '@/components/ComposeDrawer';
 import TabsBar from '@/components/TabsBar';
 import { addRecent } from '@/store/recents';
+import { addRecentSession } from '@/store/sessions';
 import { appQuit, gitStatus, ptyOpen, ptyKill, ptyWrite } from '@/types/ipc';
 
 export default function App() {
@@ -53,7 +54,11 @@ export default function App() {
     setTabs((prev) => prev.map((t) => {
       if (t.id !== activeTab) return t;
       const nextPanes = t.panes.filter((p) => p !== id);
-      return { ...t, panes: nextPanes, activePane: nextPanes[nextPanes.length - 1] ?? null, cwd: nextPanes.length ? t.cwd : null };
+      const updated = { ...t, panes: nextPanes, activePane: nextPanes[nextPanes.length - 1] ?? null, cwd: nextPanes.length ? t.cwd : null };
+      if (t.panes.length > 0 && nextPanes.length === 0 && t.cwd) {
+        addRecentSession({ cwd: t.cwd, closedAt: Date.now(), panes: t.panes.length });
+      }
+      return updated;
     }));
   }
 
@@ -74,6 +79,11 @@ export default function App() {
   }
 
   function closeTab(id: string) {
+    // record session for the tab if it had a cwd
+    const toRecord = tabs.find((t) => t.id === id);
+    if (toRecord?.cwd) {
+      addRecentSession({ cwd: toRecord.cwd, closedAt: Date.now(), panes: toRecord.panes.length });
+    }
     setTabs((prev) => {
       if (prev.length <= 1) {
         // last tab being closed: quit the app
