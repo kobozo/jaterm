@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::sync::Arc;
+// use std::sync::Arc;
 use std::thread;
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};

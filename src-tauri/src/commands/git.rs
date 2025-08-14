@@ -20,31 +20,25 @@ pub async fn git_status(path: String) -> Result<GitStatus, String> {
         }
     };
 
-    // Branch name
-    let mut branch_name = "-".to_string();
-    if let Ok(head) = repo.head() {
+    // Branch name (or DETACHED / -)
+    let branch_name = if let Ok(head) = repo.head() {
         if head.is_branch() {
-            if let Some(name) = head.shorthand() { branch_name = name.to_string(); }
-        } else if head.is_detached() {
-            branch_name = "DETACHED".into();
+            head.shorthand().unwrap_or("-").to_string()
+        } else {
+            "DETACHED".to_string()
         }
-    }
+    } else { "-".to_string() };
 
     // Ahead/behind vs upstream if configured
     let (mut ahead, mut behind) = (0u32, 0u32);
-    if let Ok(mut branch_iter) = repo.branches(Some(BranchType::Local)) {
-        while let Some(Ok((branch, _))) = branch_iter.next() {
-            if let Ok(name) = branch.name() {
-                if name == Some(branch_name.as_str()) {
-                    if let Ok(upstream) = branch.upstream() {
-                        if let (Ok(local_oid), Ok(upstream_oid)) = (branch.get().target(), upstream.into_reference().target()) {
-                            if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, upstream_oid) {
-                                ahead = a as u32;
-                                behind = b as u32;
-                            }
-                        }
-                    }
-                    break;
+    if let Ok(local_branch) = repo.find_branch(&branch_name, BranchType::Local) {
+        if let Ok(upstream) = local_branch.upstream() {
+            let local_oid = local_branch.get().target();
+            let upstream_oid = upstream.get().target();
+            if let (Some(lo), Some(up)) = (local_oid, upstream_oid) {
+                if let Ok((a, b)) = repo.graph_ahead_behind(lo, up) {
+                    ahead = a as u32;
+                    behind = b as u32;
                 }
             }
         }

@@ -74,7 +74,7 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
 
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
-      <div ref={containerRef} style={{ height: '100%, width: '100%' }} />
+      <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
       {onClose && (
         <button
           onClick={() => onClose(id)}
