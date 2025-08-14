@@ -61,6 +61,8 @@ export default function App() {
   }
 
   async function closePane(id: string) {
+    emitCwdViaOsc7(id);
+    await new Promise((r) => setTimeout(r, 120));
     try { await ptyKill({ ptyId: id }); } catch {}
     setTabs((prev) => prev.map((t) => {
       if (t.id !== activeTab) return t;
@@ -73,14 +75,21 @@ export default function App() {
     }));
   }
 
-  async function handleCwd(_paneId: string, dir: string) {
-    setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, status: { ...t.status, cwd: dir } } : t)));
+  async function updateTabCwd(tabId: string, dir: string) {
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, cwd: dir } } : t)));
     try {
       const st = await gitStatus(dir);
-      setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, status: { cwd: dir, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged } } : t)));
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { cwd: dir, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged } } : t)));
     } catch {
-      setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, status: { ...t.status, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 } } : t)));
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 } } : t)));
     }
+  }
+
+  function emitCwdViaOsc7(ptyId: string) {
+    try {
+      const seq = `printf '\\033]7;file://%s%s\\007' "$(hostname)" "$PWD"\n`;
+      ptyWrite({ ptyId: ptyId, data: seq });
+    } catch {}
   }
 
   function newTab() {
@@ -89,11 +98,15 @@ export default function App() {
     setActiveTab(id);
   }
 
-  function closeTab(id: string) {
+  async function closeTab(id: string) {
     // record session for the tab if it had a cwd
     const toRecord = tabs.find((t) => t.id === id);
     if (toRecord && (toRecord.status.cwd || toRecord.cwd)) {
       addRecentSession({ cwd: (toRecord.status.cwd ?? toRecord.cwd) as string, closedAt: Date.now(), panes: toRecord.panes.length });
+    }
+    if (toRecord?.activePane) {
+      emitCwdViaOsc7(toRecord.activePane);
+      await new Promise((r) => setTimeout(r, 120));
     }
     setTabs((prev) => {
       if (prev.length <= 1) {
@@ -134,7 +147,7 @@ export default function App() {
           {t.cwd ? (
             <SplitView>
               {t.panes.map((id) => (
-                <TerminalPane key={id} id={id} onCwd={handleCwd} onFocusPane={(pid) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pid } : tt)))} onClose={closePane} />
+                <TerminalPane key={id} id={id} onCwd={(_pid, dir) => updateTabCwd(t.id, dir)} onFocusPane={(pid) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pid } : tt)))} onClose={closePane} />
               ))}
             </SplitView>
           ) : (
