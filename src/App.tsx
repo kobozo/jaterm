@@ -22,13 +22,14 @@ export default function App() {
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
-  async function openFolder(path: string, opts: { remember?: boolean } = { remember: true }) {
+  async function openFolderFor(tabId: string, path: string, opts: { remember?: boolean } = { remember: true }) {
     if (opts.remember !== false) addRecent(path);
     try {
       const res = await ptyOpen({ cwd: path });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
       const sid = String(id);
-      setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, cwd: path, panes: [sid], activePane: sid } : t)));
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, cwd: path, panes: [sid], activePane: sid } : t)));
+      setActiveTab(tabId);
     } catch (e) {
       console.error('ptyOpen failed', e);
     }
@@ -89,6 +90,10 @@ export default function App() {
   }
 
   const active = tabs.find((t) => t.id === activeTab)!;
+  // When switching tabs, ask panes to refit when shown
+  React.useEffect(() => {
+    window.dispatchEvent(new CustomEvent('jaterm:panes-resized'));
+  }, [activeTab]);
   return (
     <div className="app-root">
       <TabsBar
@@ -98,30 +103,34 @@ export default function App() {
         onClose={closeTab}
         onAdd={newTab}
       />
-      {active.cwd ? (
-        <>
-          <SplitView>
-            {active.panes.map((id) => (
-              <TerminalPane key={id} id={id} onCwd={handleCwd} onFocusPane={(pid) => setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, activePane: pid } : t)))} onClose={closePane} />
-            ))}
-          </SplitView>
-          <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
-            <button onClick={newTerminal}>New Terminal</button>
-            <button onClick={() => setComposeOpen((v) => !v)}>Compose (Cmd/Ctrl+E)</button>
-            <GitStatusBar cwd={active.status.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} staged={active.status.staged} unstaged={active.status.unstaged} />
-            <ComposeDrawer
-              open={composeOpen}
-              onClose={() => setComposeOpen(false)}
-              onSend={(text) => {
-                if (active.activePane) ptyWrite({ ptyId: active.activePane, data: text });
-                setComposeOpen(false);
-              }}
-            />
-          </div>
-        </>
-      ) : (
-        <Welcome onOpenFolder={(p) => openFolder(p)} />
-      )}
+      {/* Render all tabs' content; hide inactive with display:none to preserve xterm buffers */}
+      {tabs.map((t) => (
+        <div key={t.id} style={{ display: t.id === activeTab ? 'block' : 'none', height: '100%' }}>
+          {t.cwd ? (
+            <SplitView>
+              {t.panes.map((id) => (
+                <TerminalPane key={id} id={id} onCwd={handleCwd} onFocusPane={(pid) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pid } : tt)))} onClose={closePane} />
+              ))}
+            </SplitView>
+          ) : (
+            <Welcome onOpenFolder={(p) => openFolderFor(t.id, p)} />
+          )}
+        </div>
+      ))}
+      {/* Single status bar for active tab */}
+      <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
+        {active.cwd && <button onClick={newTerminal}>New Terminal</button>}
+        <button onClick={() => setComposeOpen((v) => !v)}>Compose (Cmd/Ctrl+E)</button>
+        <GitStatusBar cwd={active.status.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} staged={active.status.staged} unstaged={active.status.unstaged} />
+        <ComposeDrawer
+          open={composeOpen}
+          onClose={() => setComposeOpen(false)}
+          onSend={(text) => {
+            if (active.activePane) ptyWrite({ ptyId: active.activePane, data: text });
+            setComposeOpen(false);
+          }}
+        />
+      </div>
     </div>
   );
 }
