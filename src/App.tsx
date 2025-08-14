@@ -1,43 +1,47 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import SplitView from '@/components/SplitView';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
 import Welcome from '@/components/Welcome';
 import ComposeDrawer from '@/components/ComposeDrawer';
+import TabsBar from '@/components/TabsBar';
 import { addRecent } from '@/store/recents';
-import { gitStatus, ptyOpen, ptyKill } from '@/types/ipc';
+import { gitStatus, ptyOpen, ptyKill, ptyWrite } from '@/types/ipc';
 
 export default function App() {
-  const [cwd, setCwd] = useState<string | null>(null);
-  const [panes, setPanes] = useState<string[]>([]);
-  const [active, setActive] = useState<string | null>(null);
-  const [status, setStatus] = useState<{ cwd?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number }>({});
+  type Tab = {
+    id: string;
+    cwd: string | null;
+    panes: string[];
+    activePane: string | null;
+    status: { cwd?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number };
+  };
+  const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
+  const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
   const [composeOpen, setComposeOpen] = useState(false);
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
   async function openFolder(path: string, opts: { remember?: boolean } = { remember: true }) {
-    setCwd(path);
     if (opts.remember !== false) addRecent(path);
     try {
       const res = await ptyOpen({ cwd: path });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
       const sid = String(id);
-      setPanes([sid]);
-      setActive(sid);
+      setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, cwd: path, panes: [sid], activePane: sid } : t)));
     } catch (e) {
       console.error('ptyOpen failed', e);
     }
   }
 
   async function newTerminal() {
-    if (!cwd) return;
+    const t = tabs.find((x) => x.id === activeTab);
+    if (!t || !t.cwd) return;
     try {
-      const res = await ptyOpen({ cwd });
+      const res = await ptyOpen({ cwd: t.cwd });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
       const sid = String(id);
-      setPanes((prev) => [...prev, sid]);
-      setActive(sid);
+      setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, panes: [...tb.panes, sid], activePane: sid } : tb)));
     } catch (e) {
       console.error('ptyOpen failed', e);
     }
@@ -45,42 +49,63 @@ export default function App() {
 
   async function closePane(id: string) {
     try { await ptyKill({ ptyId: id }); } catch {}
-    setPanes((prev) => prev.filter((p) => p !== id));
-    if (active === id) setActive(null);
-    if (panes.length <= 1) {
-      setCwd(null);
-      setStatus({});
-    }
+    setTabs((prev) => prev.map((t) => {
+      if (t.id !== activeTab) return t;
+      const nextPanes = t.panes.filter((p) => p !== id);
+      return { ...t, panes: nextPanes, activePane: nextPanes[nextPanes.length - 1] ?? null, cwd: nextPanes.length ? t.cwd : null };
+    }));
   }
 
-  async function handleCwd(paneId: string, dir: string) {
-    setStatus((s) => ({ ...s, cwd: dir }));
+  async function handleCwd(_paneId: string, dir: string) {
+    setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, status: { ...t.status, cwd: dir } } : t)));
     try {
       const st = await gitStatus(dir);
-      setStatus({ cwd: dir, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged });
+      setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, status: { cwd: dir, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged } } : t)));
     } catch {
-      setStatus((s) => ({ ...s, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 }));
+      setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, status: { ...t.status, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 } } : t)));
     }
   }
 
+  function newTab() {
+    const id = crypto.randomUUID();
+    setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
+    setActiveTab(id);
+  }
+
+  function closeTab(id: string) {
+    setTabs((prev) => prev.filter((t) => t.id !== id));
+    if (activeTab === id && tabs.length > 1) {
+      const next = tabs.find((t) => t.id !== id);
+      if (next) setActiveTab(next.id);
+    }
+  }
+
+  const active = tabs.find((t) => t.id === activeTab)!;
   return (
     <div className="app-root">
-      {cwd ? (
+      <TabsBar
+        tabs={tabs.map((t) => ({ id: t.id, title: t.cwd ? t.cwd : 'Welcome', isWelcome: !t.cwd }))}
+        activeId={activeTab}
+        onSelect={setActiveTab}
+        onClose={closeTab}
+        onAdd={newTab}
+      />
+      {active.cwd ? (
         <>
           <SplitView>
-            {panes.map((id) => (
-              <TerminalPane key={id} id={id} onCwd={handleCwd} onFocusPane={setActive} onClose={closePane} />
+            {active.panes.map((id) => (
+              <TerminalPane key={id} id={id} onCwd={handleCwd} onFocusPane={(pid) => setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, activePane: pid } : t)))} onClose={closePane} />
             ))}
           </SplitView>
           <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
             <button onClick={newTerminal}>New Terminal</button>
             <button onClick={() => setComposeOpen((v) => !v)}>Compose (Cmd/Ctrl+E)</button>
-            <GitStatusBar cwd={status.cwd} branch={status.branch} ahead={status.ahead} behind={status.behind} staged={status.staged} unstaged={status.unstaged} />
+            <GitStatusBar cwd={active.status.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} staged={active.status.staged} unstaged={active.status.unstaged} />
             <ComposeDrawer
               open={composeOpen}
               onClose={() => setComposeOpen(false)}
               onSend={(text) => {
-                if (active) ptyWrite({ ptyId: active, data: text });
+                if (active.activePane) ptyWrite({ ptyId: active.activePane, data: text });
                 setComposeOpen(false);
               }}
             />
