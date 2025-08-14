@@ -11,9 +11,6 @@ pub struct PtySession {
     pub writer: Mutex<Box<dyn IoWrite + Send>>, // single writer taken once
 }
 
-#[derive(Default)]
-pub struct InnerState {}
-
 pub type Shared<T> = Arc<Mutex<T>>;
 
 pub struct AppState(pub Shared<Inner>);

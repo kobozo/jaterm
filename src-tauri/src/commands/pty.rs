@@ -4,6 +4,7 @@ use std::thread;
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
 use tauri::{AppHandle, Emitter, State};
+use base64::Engine; // for .encode on base64 engines
 
 #[tauri::command]
 pub async fn pty_open(
@@ -74,13 +75,13 @@ pub async fn pty_open(
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => {
-                    let _ = app_clone.emit("PTY_EXIT", &serde_json::json!({"ptyId": id_clone}));
+                    let _ = app_clone.emit(crate::events::PTY_EXIT, &serde_json::json!({"ptyId": id_clone}));
                     break;
                 }
                 Ok(n) => {
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
                     let _ = app_clone.emit(
-                        "PTY_OUTPUT",
+                        crate::events::PTY_OUTPUT,
                         &serde_json::json!({"ptyId": id_clone, "dataBytes": b64}),
                     );
                 }
