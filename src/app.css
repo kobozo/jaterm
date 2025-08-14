@@ -17,7 +17,7 @@ body {
 
 .app-root {
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: auto 1fr auto;
   height: 100%;
 }
 
@@ -26,4 +26,3 @@ body {
   border-top: 1px solid #333;
   font-size: 12px;
 }
-

@@ -12,7 +12,15 @@ type Props = {
 
 export default function TabsBar({ tabs, activeId, onSelect, onClose, onAdd }: Props) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderBottom: '1px solid #333' }}>
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '4px 6px',
+      borderBottom: '1px solid #333',
+      height: 36,
+      minHeight: 36,
+    }}>
       {tabs.map((t) => (
         <div
           key={t.id}
@@ -48,4 +56,3 @@ export default function TabsBar({ tabs, activeId, onSelect, onClose, onAdd }: Pr
     </div>
   );
 }
-
