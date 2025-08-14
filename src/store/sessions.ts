@@ -1,51 +1,31 @@
-const KEY = 'jaterm.sessions.v1';
+import { loadAppState, saveAppState } from '@/store/persist';
 
-export type RecentSession = {
-  cwd: string;
-  closedAt: number;
-  panes?: number;
-};
+export type RecentSession = { cwd: string; closedAt: number; panes?: number };
 
-export function getRecentSessions(limit = 10): RecentSession[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    const list = raw ? (JSON.parse(raw) as RecentSession[]) : [];
-    return list
-      .filter((s) => typeof s.cwd === 'string' && typeof s.closedAt === 'number')
-      .sort((a, b) => b.closedAt - a.closedAt)
-      .slice(0, limit);
-  } catch {
-    return [];
-  }
-}
-
-export function addRecentSession(sess: RecentSession) {
-  const list = getRecentSessions(100);
-  const filtered = list.filter((s) => s.cwd !== sess.cwd);
-  filtered.unshift(sess);
-  localStorage.setItem(KEY, JSON.stringify(filtered.slice(0, 50)));
-  void saveAppState({ recentSessions: filtered.slice(0, 50) });
-}
-
-export function removeRecentSession(cwd: string) {
-  try {
-    const raw = localStorage.getItem(KEY);
-    const list = raw ? (JSON.parse(raw) as RecentSession[]) : [];
-    const next = list.filter((s) => s.cwd !== cwd);
-    localStorage.setItem(KEY, JSON.stringify(next));
-    void saveAppState({ recentSessions: next });
-  } catch {}
-}
-
-export function clearRecentSessions() {
-import { saveAppState, loadAppState } from '@/store/persist';
-  localStorage.removeItem(KEY);
-  void saveAppState({ recentSessions: [] });
-}
-
-export async function hydrateSessionsFromFile() {
+export async function getRecentSessions(limit = 10): Promise<RecentSession[]> {
   const s = await loadAppState();
-  if (s.recentSessions) {
-    localStorage.setItem(KEY, JSON.stringify(s.recentSessions));
-  }
+  const list = (s.recentSessions || []) as RecentSession[];
+  return list
+    .filter((r) => typeof r.cwd === 'string' && typeof r.closedAt === 'number')
+    .sort((a, b) => b.closedAt - a.closedAt)
+    .slice(0, limit);
+}
+
+export async function addRecentSession(sess: RecentSession) {
+  const s = await loadAppState();
+  const list = (s.recentSessions || []) as RecentSession[];
+  const filtered = list.filter((r) => r.cwd !== sess.cwd);
+  filtered.unshift(sess);
+  await saveAppState({ recentSessions: filtered.slice(0, 50) });
+}
+
+export async function removeRecentSession(cwd: string) {
+  const s = await loadAppState();
+  const list = (s.recentSessions || []) as RecentSession[];
+  const next = list.filter((r) => r.cwd !== cwd);
+  await saveAppState({ recentSessions: next });
+}
+
+export async function clearRecentSessions() {
+  await saveAppState({ recentSessions: [] });
 }

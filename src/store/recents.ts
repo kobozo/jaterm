@@ -1,65 +1,42 @@
-const KEY = 'jaterm.recents.v1';
+import { loadAppState, saveAppState } from '@/store/persist';
 
-export type RecentItem = {
-  path: string;
-  lastOpenedAt: number;
-};
+export type RecentItem = { path: string; lastOpenedAt: number };
 
-export function getRecents(limit = 10): RecentItem[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    const list = raw ? (JSON.parse(raw) as RecentItem[]) : [];
-    return list
-      .filter((r) => typeof r.path === 'string' && typeof r.lastOpenedAt === 'number')
-      .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
-      .slice(0, limit);
-  } catch {
-    return [];
-  }
+export async function getRecents(limit = 10): Promise<RecentItem[]> {
+  const s = await loadAppState();
+  const list = (s.recents || []) as RecentItem[];
+  return list
+    .filter((r) => typeof r.path === 'string' && typeof r.lastOpenedAt === 'number')
+    .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+    .slice(0, limit);
 }
 
-export function addRecent(path: string) {
+export async function addRecent(path: string) {
   const now = Date.now();
-  const list = getRecents(100);
+  const s = await loadAppState();
+  const list = (s.recents || []) as RecentItem[];
   const filtered = list.filter((r) => r.path !== path);
   filtered.unshift({ path, lastOpenedAt: now });
-  localStorage.setItem(KEY, JSON.stringify(filtered.slice(0, 50)));
-  localStorage.setItem(KEY + '.last', path);
-  // persist to ~/.jaterm/state.json
-  void saveAppState({ recents: filtered.slice(0, 50) });
+  await saveAppState({ recents: filtered.slice(0, 50), lastOpenedPath: path });
 }
 
-export function getLastOpened(): string | null {
-  return localStorage.getItem(KEY + '.last');
-}
-
-export function setLastOpened(path: string | null) {
-  if (path) localStorage.setItem(KEY + '.last', path);
-  else localStorage.removeItem(KEY + '.last');
-}
-
-export function removeRecent(path: string) {
-  try {
-    const raw = localStorage.getItem(KEY);
-    const list = raw ? (JSON.parse(raw) as RecentItem[]) : [];
-    const next = list.filter((r) => r.path !== path);
-    localStorage.setItem(KEY, JSON.stringify(next));
-    const last = localStorage.getItem(KEY + '.last');
-    if (last === path) localStorage.removeItem(KEY + '.last');
-    void saveAppState({ recents: next });
-  } catch {}
-}
-
-export function clearRecents() {
-import { saveAppState, loadAppState } from '@/store/persist';
-  localStorage.removeItem(KEY);
-  localStorage.removeItem(KEY + '.last');
-  void saveAppState({ recents: [] });
-}
-
-export async function hydrateRecentsFromFile() {
+export async function getLastOpened(): Promise<string | null> {
   const s = await loadAppState();
-  if (s.recents) {
-    localStorage.setItem(KEY, JSON.stringify(s.recents));
-  }
+  return (s.lastOpenedPath as string) ?? null;
+}
+
+export async function setLastOpened(path: string | null) {
+  await saveAppState({ lastOpenedPath: path ?? null });
+}
+
+export async function removeRecent(path: string) {
+  const s = await loadAppState();
+  const list = (s.recents || []) as RecentItem[];
+  const next = list.filter((r) => r.path !== path);
+  const nextLast = s.lastOpenedPath === path ? null : s.lastOpenedPath ?? null;
+  await saveAppState({ recents: next, lastOpenedPath: nextLast });
+}
+
+export async function clearRecents() {
+  await saveAppState({ recents: [], lastOpenedPath: null });
 }

@@ -25,7 +25,7 @@ export default function App() {
   // Start on the Welcome screen by default; no auto-open on launch.
 
   async function openFolderFor(tabId: string, path: string, opts: { remember?: boolean } = { remember: true }) {
-    if (opts.remember !== false) addRecent(path);
+    if (opts.remember !== false) await addRecent(path);
     try {
       const res = await ptyOpen({ cwd: path });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;

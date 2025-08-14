@@ -3,6 +3,7 @@ import { loadState, saveState } from '@/types/ipc';
 export type AppPersistState = {
   recents?: { path: string; lastOpenedAt: number }[];
   recentSessions?: { cwd: string; closedAt: number; panes?: number }[];
+  lastOpenedPath?: string | null;
 };
 
 export async function loadAppState(): Promise<AppPersistState> {
@@ -23,4 +24,3 @@ export async function saveAppState(partial: AppPersistState): Promise<void> {
     // ignore
   }
 }
-

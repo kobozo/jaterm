@@ -1,22 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
-import { addRecent, getRecents, removeRecent, clearRecents, hydrateRecentsFromFile } from '@/store/recents';
-import { getRecentSessions, removeRecentSession, clearRecentSessions, hydrateSessionsFromFile } from '@/store/sessions';
+import { addRecent, getRecents, removeRecent, clearRecents } from '@/store/recents';
+import { getRecentSessions, removeRecentSession, clearRecentSessions } from '@/store/sessions';
 
 type Props = {
   onOpenFolder: (path: string) => void;
 };
 
 export default function Welcome({ onOpenFolder }: Props) {
-  const [recents, setRecents] = useState(() => getRecents());
-  const [recentSessions, setRecentSessions] = useState(() => getRecentSessions());
+  const [recents, setRecents] = useState<{ path: string; lastOpenedAt: number }[]>([]);
+  const [recentSessions, setRecentSessions] = useState<{ cwd: string; closedAt: number; panes?: number }[]>([]);
   useEffect(() => {
     (async () => {
-      await hydrateRecentsFromFile();
-      await hydrateSessionsFromFile();
-      setRecents(getRecents());
-      setRecentSessions(getRecentSessions());
+      setRecents(await getRecents());
+      setRecentSessions(await getRecentSessions());
     })();
   }, []);
 
@@ -58,15 +56,15 @@ export default function Welcome({ onOpenFolder }: Props) {
         <div>
           <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>Recent folders</span>
-            <button onClick={() => { clearRecents(); setRecents([]); }} title="Clear recent folders">Clear</button>
+            <button onClick={async () => { await clearRecents(); setRecents(await getRecents()); }} title="Clear recent folders">Clear</button>
           </h3>
           <ul>
             {recents.map((r) => (
               <li key={r.path} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <a href="#" onClick={(e) => { e.preventDefault(); addRecent(r.path); onOpenFolder(r.path); }}>
+                <a href="#" onClick={async (e) => { e.preventDefault(); await addRecent(r.path); onOpenFolder(r.path); }}>
                   {r.path}
                 </a>
-                <button onClick={() => { removeRecent(r.path); setRecents(getRecents()); }} title="Remove">×</button>
+                <button onClick={async () => { await removeRecent(r.path); setRecents(await getRecents()); }} title="Remove">×</button>
               </li>
             ))}
           </ul>
@@ -76,7 +74,7 @@ export default function Welcome({ onOpenFolder }: Props) {
         <div style={{ marginTop: 16 }}>
           <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>Recent sessions</span>
-            <button onClick={() => { clearRecentSessions(); setRecentSessions([]); }} title="Clear recent sessions">Clear</button>
+            <button onClick={async () => { await clearRecentSessions(); setRecentSessions(await getRecentSessions()); }} title="Clear recent sessions">Clear</button>
           </h3>
           <ul>
             {recentSessions.map((s) => (
@@ -84,7 +82,7 @@ export default function Welcome({ onOpenFolder }: Props) {
                 <a href="#" onClick={(e) => { e.preventDefault(); onOpenFolder(s.cwd); }} title={new Date(s.closedAt).toLocaleString()}>
                   {s.cwd} {typeof s.panes === 'number' ? `(panes: ${s.panes})` : ''}
                 </a>
-                <button onClick={() => { removeRecentSession(s.cwd); setRecentSessions(getRecentSessions()); }} title="Remove">×</button>
+                <button onClick={async () => { await removeRecentSession(s.cwd); setRecentSessions(await getRecentSessions()); }} title="Remove">×</button>
               </li>
             ))}
           </ul>
