@@ -8,7 +8,7 @@ import { ptyOpen } from '@/types/ipc';
 
 export default function App() {
   const [cwd, setCwd] = useState<string | null>(null);
-  const [ptyId, setPtyId] = useState<string | null>(null);
+  const [panes, setPanes] = useState<string[]>([]);
 
   useEffect(() => {
     const last = getLastOpened();
@@ -22,7 +22,18 @@ export default function App() {
     try {
       const res = await ptyOpen({ cwd: path });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
-      setPtyId(String(id));
+      setPanes([String(id)]);
+    } catch (e) {
+      console.error('ptyOpen failed', e);
+    }
+  }
+
+  async function newTerminal() {
+    if (!cwd) return;
+    try {
+      const res = await ptyOpen({ cwd });
+      const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
+      setPanes((prev) => [...prev, String(id)]);
     } catch (e) {
       console.error('ptyOpen failed', e);
     }
@@ -33,9 +44,12 @@ export default function App() {
       {cwd ? (
         <>
           <SplitView>
-            <TerminalPane id={ptyId ?? 'main'} />
+            {panes.map((id) => (
+              <TerminalPane key={id} id={id} />
+            ))}
           </SplitView>
-          <div className="status-bar">
+          <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button onClick={newTerminal}>New Terminal</button>
             <GitStatusBar />
           </div>
         </>
