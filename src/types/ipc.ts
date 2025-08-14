@@ -135,3 +135,16 @@ export function onTunnelState(handler: (e: TunnelStateEvent) => void): Promise<U
 export function appQuit(): Promise<void> {
   return invoke('app_quit');
 }
+
+// Config / State persistence
+export function getConfigDir(appName?: string): Promise<string> {
+  return invoke('get_config_dir', { appName } as any);
+}
+
+export function loadState(appName?: string): Promise<any> {
+  return invoke('load_state', { appName } as any);
+}
+
+export function saveState(state: any, appName?: string): Promise<void> {
+  return invoke('save_state', { appName, state } as any);
+}

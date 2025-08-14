@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod config;
 mod events;
 mod state;
 mod utils;
@@ -12,6 +13,9 @@ fn main() {
     .manage(crate::state::app_state::AppState::default())
     .invoke_handler(tauri::generate_handler![
       commands::app::app_quit,
+      config::get_config_dir,
+      config::load_state,
+      config::save_state,
       commands::pty::pty_open,
       commands::pty::pty_write,
       commands::pty::pty_resize,
