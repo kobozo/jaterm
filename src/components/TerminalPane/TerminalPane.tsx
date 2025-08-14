@@ -30,15 +30,16 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
       const prevCols = term.cols;
       const prevRows = term.rows;
       fit.fit();
-      if ((term.cols !== prevCols || term.rows !== prevRows) && id) {
-        ptyResize({ ptyId: id, cols: term.cols, rows: term.rows });
-      }
+      // ptyResize is sent via term.onResize handler below
     };
     window.addEventListener('resize', onWinResize);
+    const paneResize = () => onWinResize();
+    window.addEventListener('jaterm:panes-resized', paneResize as any);
 
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onWinResize);
+      window.removeEventListener('jaterm:panes-resized', paneResize as any);
       dispose();
     };
   }, [attach, dispose, id, term]);
@@ -50,6 +51,10 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     });
     // Track focus
     const focusSub = term.onFocus(() => onFocusPane?.(id));
+    // Send resize events only when term reports size change
+    const resizeSub = term.onResize(({ cols, rows }) => {
+      if (id) ptyResize({ ptyId: id, cols, rows });
+    });
     // Listen for backend PTY output and parse OSC 7 CWD
     let unlisten: (() => void) | undefined;
     onPtyOutput((e) => {
@@ -68,6 +73,7 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     return () => {
       sub.dispose();
       focusSub.dispose();
+      resizeSub.dispose();
       if (unlisten) unlisten();
     };
   }, [id, term]);
