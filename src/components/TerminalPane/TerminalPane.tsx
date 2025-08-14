@@ -11,6 +11,14 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
 
+  function b64ToUint8Array(b64: string): Uint8Array {
+    const bin = atob(b64);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
+    return bytes;
+  }
+
   useEffect(() => {
     if (!containerRef.current) return;
     attach(containerRef.current);
@@ -60,10 +68,23 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     });
     // Listen for backend PTY output and parse OSC 7 CWD
     let unlisten: (() => void) | undefined;
-    onPtyOutput((e) => {
-      if (e.ptyId === id) {
+    onPtyOutput((e: any) => {
+      if (e.ptyId !== id) return;
+      if (e.dataBytes) {
+        const bytes = b64ToUint8Array(e.dataBytes);
+        // Parse OSC 7 in the decoded string for cwd updates
+        try {
+          const dataStr = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+          const regex = /\x1b\]7;file:\/\/[^/]*\/(.*?)\x07|\x1b\\/g;
+          let m: RegExpExecArray | null;
+          while ((m = regex.exec(dataStr))) {
+            const p = m[1];
+            if (p) onCwd?.(id, '/' + p);
+          }
+        } catch {}
+        term.write(bytes);
+      } else if (e.data) {
         const data = e.data as string;
-        // Parse OSC 7 sequences: ESC ] 7;file://host/path BEL or ESC \
         const regex = /\x1b\]7;file:\/\/[^/]*\/(.*?)\x07|\x1b\\/g;
         let m: RegExpExecArray | null;
         while ((m = regex.exec(data))) {

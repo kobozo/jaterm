@@ -78,8 +78,11 @@ pub async fn pty_open(
                     break;
                 }
                 Ok(n) => {
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app_clone.emit("PTY_OUTPUT", &serde_json::json!({"ptyId": id_clone, "data": data}));
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+                    let _ = app_clone.emit(
+                        "PTY_OUTPUT",
+                        &serde_json::json!({"ptyId": id_clone, "dataBytes": b64}),
+                    );
                 }
                 Err(_) => break,
             }
