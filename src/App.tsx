@@ -15,7 +15,7 @@ export default function App() {
     cwd: string | null;
     panes: string[];
     activePane: string | null;
-    status: { cwd?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number };
+    status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean };
     title?: string;
   };
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
@@ -92,20 +92,26 @@ export default function App() {
       if (t.id !== activeTab) return t;
       const nextPanes = t.panes.filter((p) => p !== id);
       const updated = { ...t, panes: nextPanes, activePane: nextPanes[nextPanes.length - 1] ?? null, cwd: nextPanes.length ? t.cwd : null };
-      if (t.panes.length > 0 && nextPanes.length === 0 && (t.status.cwd || t.cwd)) {
-        addRecentSession({ cwd: (t.status.cwd ?? t.cwd) as string, closedAt: Date.now(), panes: t.panes.length });
+      if (t.panes.length > 0 && nextPanes.length === 0 && (t.status.fullPath || t.cwd)) {
+        addRecentSession({ cwd: (t.status.fullPath ?? t.cwd) as string, closedAt: Date.now(), panes: t.panes.length });
       }
       return updated;
     }));
   }
 
   async function updateTabCwd(tabId: string, dir: string) {
-    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, cwd: dir, seenOsc7: true as any } } : t)));
+    // Resolve to absolute so we persist correct paths
+    let abs = dir;
     try {
-      const st = await gitStatus(dir);
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { cwd: dir, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true as any } } : t)));
+      const mod = await import('@/types/ipc');
+      abs = await (mod as any).resolvePathAbsolute(dir);
+    } catch {}
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, cwd: abs, fullPath: abs, seenOsc7: true } } : t)));
+    try {
+      const st = await gitStatus(abs);
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true } } : t)));
     } catch {
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 } } : t)));
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, fullPath: abs, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 } } : t)));
     }
   }
 
@@ -156,9 +162,9 @@ export default function App() {
     <div className="app-root">
       <TabsBar
         tabs={tabs.map((t) => {
-          const full = t.status.cwd ?? t.cwd;
-          const derived = full ? (full.split(/[\\/]/).filter(Boolean).pop() || full) : 'Welcome';
-          const title = t.title ?? derived;
+          const full = t.status.fullPath ?? t.cwd;
+          // Default title is the full path (not just basename) to prevent ambiguity
+          const title = t.title ?? (full ?? 'Welcome');
           return { id: t.id, title, isWelcome: !full };
         })}
         activeId={activeTab}
@@ -191,7 +197,7 @@ export default function App() {
       <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
         {active.cwd && <button onClick={newTerminal}>New Terminal</button>}
         {/* Offer zsh helper if no OSC7 observed yet */}
-        {!((active as any).status?.seenOsc7) && (
+        {!active.status?.seenOsc7 && (
           <button
             onClick={async () => {
               try {
@@ -207,7 +213,7 @@ export default function App() {
           </button>
         )}
         <button onClick={() => setComposeOpen((v) => !v)}>Compose (Cmd/Ctrl+E)</button>
-        <GitStatusBar cwd={active.status.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} staged={active.status.staged} unstaged={active.status.unstaged} />
+        <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} staged={active.status.staged} unstaged={active.status.unstaged} />
         <ComposeDrawer
           open={composeOpen}
           onClose={() => setComposeOpen(false)}

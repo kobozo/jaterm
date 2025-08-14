@@ -153,3 +153,7 @@ export function saveState(state: any, appName?: string): Promise<void> {
 export function installZshOsc7(): Promise<boolean> {
   return invoke('install_zsh_osc7');
 }
+
+export function resolvePathAbsolute(path: string): Promise<string> {
+  return invoke('resolve_path_absolute', { path } as any);
+}

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use serde_json::Value;
+use std::path::Path;
 
 fn dir_name_from(app_name: Option<&str>) -> String {
   let from_env = std::env::var("JATERM_DIR_NAME").ok();
@@ -49,3 +50,35 @@ pub async fn save_state(app_name: Option<String>, state: Value) -> Result<(), St
   fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
+fn expand_tilde(p: &str) -> Option<String> {
+  if let Some(stripped) = p.strip_prefix("~") {
+    if let Some(home) = dirs::home_dir() {
+      let mut s = home.display().to_string();
+      if !stripped.is_empty() {
+        if !s.ends_with('/') { s.push('/'); }
+        s.push_str(stripped.trim_start_matches('/'));
+      }
+      return Some(s);
+    }
+  }
+  None
+}
+
+#[tauri::command]
+pub async fn resolve_path_absolute(path: String) -> Result<String, String> {
+  let mut p = path.clone();
+  if path.starts_with('~') {
+    if let Some(exp) = expand_tilde(&path) { p = exp; }
+  }
+  // if already absolute, try to canonicalize, else try joining with home
+  let abs = if Path::new(&p).is_absolute() {
+    std::fs::canonicalize(&p).unwrap_or_else(|_| PathBuf::from(&p))
+  } else {
+    let base = dirs::home_dir().ok_or_else(|| "Cannot resolve home".to_string())?;
+    let joined = base.join(p);
+    std::fs::canonicalize(&joined).unwrap_or(joined)
+  };
+  abs.to_str()
+    .map(|s| s.to_string())
+    .ok_or_else(|| "Non-utf8 path".to_string())
+}

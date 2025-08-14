@@ -17,6 +17,7 @@ fn main() {
       config::get_config_dir,
       config::load_state,
       config::save_state,
+      config::resolve_path_absolute,
       shell::install_zsh_osc7,
       commands::pty::pty_open,
       commands::pty::pty_write,

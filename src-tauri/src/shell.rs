@@ -17,8 +17,8 @@ fn snippet() -> &'static str {
   r#"
 # >>> jaterm cwd tracking >>>
 autoload -Uz add-zsh-hook
-function _jaterm_osc7_precmd() { print -Pn '\e]7;file://%m%~\e\\' }
-function _jaterm_osc7_chpwd()  { print -Pn '\e]7;file://%m%~\e\\' }
+function _jaterm_osc7_precmd() { print -Pn '\e]7;file://%m%d\e\\' }
+function _jaterm_osc7_chpwd()  { print -Pn '\e]7;file://%m%d\e\\' }
 add-zsh-hook precmd _jaterm_osc7_precmd
 add-zsh-hook chpwd  _jaterm_osc7_chpwd
 # <<< jaterm cwd tracking <<<
@@ -51,4 +51,3 @@ pub async fn install_zsh_osc7() -> Result<bool, String> {
   })()
   .map_err(|e| e.to_string())
 }
-

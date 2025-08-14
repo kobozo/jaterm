@@ -1,4 +1,5 @@
 import { loadAppState, saveAppState } from '@/store/persist';
+import { resolvePathAbsolute } from '@/types/ipc';
 
 export type RecentItem = { path: string; lastOpenedAt: number };
 
@@ -13,10 +14,11 @@ export async function getRecents(limit = 10): Promise<RecentItem[]> {
 
 export async function addRecent(path: string) {
   const now = Date.now();
+  const abs = await resolvePathAbsolute(path);
   const s = await loadAppState();
   const list = (s.recents || []) as RecentItem[];
-  const filtered = list.filter((r) => r.path !== path);
-  filtered.unshift({ path, lastOpenedAt: now });
+  const filtered = list.filter((r) => r.path !== abs);
+  filtered.unshift({ path: abs, lastOpenedAt: now });
   await saveAppState({ recents: filtered.slice(0, 50), lastOpenedPath: path });
 }
 
