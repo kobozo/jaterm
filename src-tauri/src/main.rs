@@ -11,6 +11,7 @@ fn main() {
     .plugin(tauri_plugin_dialog::init())
     .manage(crate::state::app_state::AppState::default())
     .invoke_handler(tauri::generate_handler![
+      commands::app::app_quit,
       commands::pty::pty_open,
       commands::pty::pty_write,
       commands::pty::pty_resize,

@@ -130,3 +130,8 @@ export function onWatchEvent(handler: (e: WatchEvent) => void): Promise<Unlisten
 export function onTunnelState(handler: (e: TunnelStateEvent) => void): Promise<UnlistenFn> {
   return listen<TunnelStateEvent>('SSH_TUNNEL_STATE', (ev) => handler(ev.payload));
 }
+
+// App controls
+export function appQuit(): Promise<void> {
+  return invoke('app_quit');
+}

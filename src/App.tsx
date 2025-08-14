@@ -6,7 +6,7 @@ import Welcome from '@/components/Welcome';
 import ComposeDrawer from '@/components/ComposeDrawer';
 import TabsBar from '@/components/TabsBar';
 import { addRecent } from '@/store/recents';
-import { gitStatus, ptyOpen, ptyKill, ptyWrite } from '@/types/ipc';
+import { appQuit, gitStatus, ptyOpen, ptyKill, ptyWrite } from '@/types/ipc';
 
 export default function App() {
   type Tab = {
@@ -73,11 +73,19 @@ export default function App() {
   }
 
   function closeTab(id: string) {
-    setTabs((prev) => prev.filter((t) => t.id !== id));
-    if (activeTab === id && tabs.length > 1) {
-      const next = tabs.find((t) => t.id !== id);
-      if (next) setActiveTab(next.id);
-    }
+    setTabs((prev) => {
+      if (prev.length <= 1) {
+        // last tab being closed: quit the app
+        appQuit();
+        return prev; // will terminate shortly
+      }
+      const next = prev.filter((t) => t.id !== id);
+      if (activeTab === id) {
+        const fallback = next[0];
+        if (fallback) setActiveTab(fallback.id);
+      }
+      return next;
+    });
   }
 
   const active = tabs.find((t) => t.id === activeTab)!;
