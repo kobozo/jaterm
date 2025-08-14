@@ -4,9 +4,9 @@ import '@xterm/xterm/css/xterm.css';
 import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
 import { FitAddon } from '@xterm/addon-fit';
 
-type Props = { id: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void };
+type Props = { id: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void };
 
-export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props) {
+export default function TerminalPane({ id, onCwd, onFocusPane, onClose, onTitle }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
@@ -104,6 +104,18 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
     const resizeSub = term.onResize(({ cols, rows }) => {
       if (id) ptyResize({ ptyId: id, cols, rows });
     });
+    // Title changes via OSC 0/2
+    const titleSub = term.onTitleChange?.((title: string) => {
+      console.debug('[title] pane', id, title);
+      onTitle?.(id, title);
+      // Heuristic: if title looks like an absolute path, treat it as cwd fallback
+      try {
+        const looksPath = title.startsWith('/') || /^[A-Za-z]:\\/.test(title) || title.startsWith('~');
+        if (looksPath) {
+          onCwd?.(id, title.startsWith('~') ? title.replace(/^~/, '') : title);
+        }
+      } catch {}
+    });
     // Listen for backend PTY output and parse OSC 7 CWD
     let unlisten: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
@@ -143,6 +155,7 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose }: Props)
       elem?.removeEventListener('mousedown', handleFocus);
       keySub.dispose();
       resizeSub.dispose();
+      titleSub?.dispose?.();
       if (unlisten) unlisten();
       if (unlistenExit) unlistenExit();
     };

@@ -2,6 +2,7 @@
 
 mod commands;
 mod config;
+mod shell;
 mod events;
 mod state;
 mod utils;
@@ -16,6 +17,7 @@ fn main() {
       config::get_config_dir,
       config::load_state,
       config::save_state,
+      shell::install_zsh_osc7,
       commands::pty::pty_open,
       commands::pty::pty_write,
       commands::pty::pty_resize,

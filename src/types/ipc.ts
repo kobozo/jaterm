@@ -148,3 +148,8 @@ export function loadState(appName?: string): Promise<any> {
 export function saveState(state: any, appName?: string): Promise<void> {
   return invoke('save_state', { appName, state } as any);
 }
+
+// Shell helpers
+export function installZshOsc7(): Promise<boolean> {
+  return invoke('install_zsh_osc7');
+}
