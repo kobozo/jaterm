@@ -77,11 +77,21 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
     window.addEventListener('resize', onWinResize);
     const paneResize = () => onWinResize();
     window.addEventListener('jaterm:panes-resized', paneResize as any);
+    const onTabShown = () => {
+      // After becoming visible, refit and scroll to bottom
+      requestAnimationFrame(() => {
+        try { fit.fit(); } catch {}
+        try { (term as any).scrollToBottom?.(); } catch {}
+        if (id) ptyResize({ ptyId: id, cols: term.cols, rows: term.rows });
+      });
+    };
+    window.addEventListener('jaterm:tab-shown', onTabShown as any);
 
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onWinResize);
       window.removeEventListener('jaterm:panes-resized', paneResize as any);
+      window.removeEventListener('jaterm:tab-shown', onTabShown as any);
       dispose();
     };
   }, [attach, dispose, id, term]);
@@ -93,7 +103,7 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
     });
     // Intercept Shift+Enter and send LF (\n) instead of default CR
     const keySub = term.onKey(({ key, domEvent }) => {
-      if (domEvent.key === 'Enter' && domEvent.shiftKey) {
+      if ((domEvent.key === 'Enter' || domEvent.code === 'Enter') && domEvent.shiftKey) {
         domEvent.preventDefault();
         if (id) ptyWrite({ ptyId: id, data: '\n' });
       }

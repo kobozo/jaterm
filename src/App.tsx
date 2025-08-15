@@ -261,6 +261,10 @@ export default function App() {
   // When switching tabs, ask panes to refit when shown
   React.useEffect(() => {
     window.dispatchEvent(new CustomEvent('jaterm:panes-resized'));
+    // Notify panes the tab became visible so they can scroll bottom after fit
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('jaterm:tab-shown'));
+    }, 0);
   }, [activeTab]);
 
   // Persist workspace on changes (local tabs only)

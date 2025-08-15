@@ -73,10 +73,19 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     window.addEventListener('resize', onWinResize);
     const paneResize = () => onWinResize();
     window.addEventListener('jaterm:panes-resized', paneResize as any);
+    const onTabShown = () => {
+      requestAnimationFrame(() => {
+        try { fit.fit(); } catch {}
+        try { (term as any).scrollToBottom?.(); } catch {}
+        if (id) sshResize({ channelId: id, cols: term.cols, rows: term.rows });
+      });
+    };
+    window.addEventListener('jaterm:tab-shown', onTabShown as any);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onWinResize);
       window.removeEventListener('jaterm:panes-resized', paneResize as any);
+      window.removeEventListener('jaterm:tab-shown', onTabShown as any);
       dispose();
     };
   }, [attach, dispose, id, term]);
@@ -84,7 +93,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   useEffect(() => {
     const sub = term.onData((data) => { if (id) sshWrite({ channelId: id, data }); });
     const keySub = term.onKey(({ key, domEvent }) => {
-      if (domEvent.key === 'Enter' && domEvent.shiftKey) { domEvent.preventDefault(); if (id) sshWrite({ channelId: id, data: '\n' }); }
+      if ((domEvent.key === 'Enter' || domEvent.code === 'Enter') && domEvent.shiftKey) { domEvent.preventDefault(); if (id) sshWrite({ channelId: id, data: '\n' }); }
     });
     const elem = term.element as HTMLElement | null;
     const handleFocus = () => onFocusPane?.(id);
