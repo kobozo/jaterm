@@ -4,6 +4,10 @@ export type AppPersistState = {
   recents?: { path: string; lastOpenedAt: number }[];
   recentSessions?: { cwd: string; closedAt: number; panes?: number }[];
   lastOpenedPath?: string | null;
+  workspace?: {
+    activeTabIndex?: number;
+    tabs?: { cwd: string; title?: string; layoutShape?: any }[];
+  };
 };
 
 export async function loadAppState(): Promise<AppPersistState> {

@@ -26,3 +26,11 @@ body {
   border-top: 1px solid #333;
   font-size: 12px;
 }
+
+/* Ensure xterm fills its container completely */
+.xterm {
+  height: 100% !important;
+}
+.xterm-viewport {
+  height: 100% !important;
+}

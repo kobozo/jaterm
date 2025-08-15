@@ -3,6 +3,9 @@ use std::io::Write as IoWrite;
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{Child, MasterPty, PtySize};
+use ssh2::{Session as SshSessionInner, Channel};
+use std::net::TcpStream;
+use std::sync::Mutex as StdMutex;
 
 pub struct PtySession {
     pub id: String,
@@ -17,11 +20,13 @@ pub struct AppState(pub Shared<Inner>);
 
 pub struct Inner {
     pub sessions: HashMap<String, PtySession>,
+    pub ssh: HashMap<String, SshSession>,
+    pub ssh_channels: HashMap<String, SshChannel>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(Inner { sessions: HashMap::new() })))
+        Self(Arc::new(Mutex::new(Inner { sessions: HashMap::new(), ssh: HashMap::new(), ssh_channels: HashMap::new() })))
     }
 }
 
@@ -45,4 +50,16 @@ impl Inner {
             });
         }
     }
+}
+
+pub struct SshSession {
+    pub id: String,
+    pub tcp: TcpStream,
+    pub sess: SshSessionInner,
+}
+
+pub struct SshChannel {
+    pub id: String,
+    pub session_id: String,
+    pub chan: Arc<StdMutex<Channel>>,
 }

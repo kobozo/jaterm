@@ -19,7 +19,7 @@ export async function addRecent(path: string) {
   const list = (s.recents || []) as RecentItem[];
   const filtered = list.filter((r) => r.path !== abs);
   filtered.unshift({ path: abs, lastOpenedAt: now });
-  await saveAppState({ recents: filtered.slice(0, 50), lastOpenedPath: path });
+  await saveAppState({ recents: filtered.slice(0, 50), lastOpenedPath: abs });
 }
 
 export async function getLastOpened(): Promise<string | null> {

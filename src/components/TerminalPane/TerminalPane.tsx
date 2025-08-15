@@ -5,12 +5,14 @@ import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
 import { homeDir } from '@tauri-apps/api/path';
 import { FitAddon } from '@xterm/addon-fit';
 
-type Props = { id: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void };
+type Props = { id: string; desiredCwd?: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void; onSplit?: (id: string, dir: 'row' | 'column') => void };
 
-export default function TerminalPane({ id, onCwd, onFocusPane, onClose, onTitle }: Props) {
+export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
+  const correctedRef = useRef(false);
+  useEffect(() => { correctedRef.current = false; }, [id, desiredCwd]);
 
   function b64ToUint8Array(b64: string): Uint8Array {
     const bin = atob(b64);
@@ -139,6 +141,11 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose, onTitle 
           cwds.forEach((p) => {
             console.debug('[osc7] pane', id, 'cwd', p);
             onCwd?.(id, p);
+            if (!correctedRef.current && desiredCwd && p !== desiredCwd) {
+              console.debug('[cwd-correct] pane', id, 'expected', desiredCwd, 'got', p);
+              ptyWrite({ ptyId: id, data: `cd '${desiredCwd.replace(/'/g, "'\\''")}'\n` });
+              correctedRef.current = true;
+            }
           });
         } catch {}
         term.write(bytes);
@@ -148,6 +155,11 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose, onTitle 
         cwds.forEach((p) => {
           console.debug('[osc7] pane', id, 'cwd', p);
           onCwd?.(id, p);
+          if (!correctedRef.current && desiredCwd && p !== desiredCwd) {
+            console.debug('[cwd-correct] pane', id, 'expected', desiredCwd, 'got', p);
+            ptyWrite({ ptyId: id, data: `cd '${desiredCwd.replace(/'/g, "'\\''")}'\n` });
+            correctedRef.current = true;
+          }
         });
         term.write(data);
       }
@@ -170,8 +182,52 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose, onTitle 
     };
   }, [id, term]);
 
+  const [menu, setMenu] = React.useState<{x:number;y:number}|null>(null);
+  const onCtx = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+  React.useEffect(() => {
+    const onCloseMenu = () => setMenu(null);
+    window.addEventListener('click', onCloseMenu);
+    return () => window.removeEventListener('click', onCloseMenu);
+  }, []);
+
+  // Context menu actions
+  const copySelection = async () => {
+    try {
+      const sel = term.getSelection?.() || '';
+      if (sel) await navigator.clipboard.writeText(sel);
+    } catch {}
+  };
+  const pasteClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) ptyWrite({ ptyId: id, data: text });
+    } catch {}
+  };
+  const selectAll = () => {
+    try { (term as any).selectAll?.(); } catch {}
+  };
+  const clearBuffer = () => {
+    try { term.clear?.(); } catch {}
+  };
+
   return (
-    <div style={{ height: '100%', width: '100%', position: 'relative' }} onMouseDown={() => onFocusPane?.(id)}>
+    <div
+      style={{
+        height: '100%',
+        width: '100%',
+        position: 'relative',
+        boxSizing: 'border-box',
+        border: '1px solid #444',
+        borderRadius: 4,
+        minHeight: 0,
+        overflow: 'hidden',
+      }}
+      onMouseDown={() => onFocusPane?.(id)}
+      onContextMenu={onCtx}
+    >
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
       {onClose && (
         <button
@@ -181,6 +237,19 @@ export default function TerminalPane({ id, onCwd, onFocusPane, onClose, onTitle 
         >
           ×
         </button>
+      )}
+      {menu && (
+        <div style={{ position: 'fixed', left: menu.x, top: menu.y, background: '#222', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 4, zIndex: 20, minWidth: 180 }}>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'row'); setMenu(null); }}>Split Horizontally</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'column'); setMenu(null); }}>Split Vertically</div>
+          <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { copySelection(); setMenu(null); }}>Copy Selection</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { pasteClipboard(); setMenu(null); }}>Paste</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { selectAll(); setMenu(null); }}>Select All</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { clearBuffer(); setMenu(null); }}>Clear</div>
+          <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
+          <div style={{ padding: '6px 10px', cursor: 'pointer', color: '#ff7777' }} onClick={() => { onClose?.(id); setMenu(null); }}>Close Pane</div>
+        </div>
       )}
     </div>
   );

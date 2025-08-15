@@ -73,12 +73,31 @@ export function ptyKill(args: { ptyId: string }) {
   return invoke('pty_kill', { ptyId: args.ptyId } as any);
 }
 
-export async function sshConnect(profileId: string): Promise<{ sessionId: string } | string> {
-  return invoke('ssh_connect', { profileId } as any);
+export type JsSshAuth = { password?: string; key_path?: string; passphrase?: string; agent?: boolean };
+export type JsSshProfile = { host: string; port?: number; user: string; auth?: JsSshAuth; timeout_ms?: number };
+
+export async function sshConnect(profile: JsSshProfile): Promise<string> {
+  return invoke('ssh_connect', { profile } as any);
 }
 
 export function sshDisconnect(sessionId: string) {
-  return invoke('ssh_disconnect', { sessionId } as any);
+  return invoke('ssh_disconnect', { session_id: sessionId } as any);
+}
+
+export async function sshOpenShell(args: { sessionId: string; cwd?: string; cols?: number; rows?: number }): Promise<string> {
+  return invoke('ssh_open_shell', { sessionId: args.sessionId, cwd: args.cwd, cols: args.cols, rows: args.rows } as any);
+}
+
+export function sshWrite(args: { channelId: string; data: string }) {
+  return invoke('ssh_write', { channelId: args.channelId, data: args.data } as any);
+}
+
+export function sshResize(args: { channelId: string; cols: number; rows: number }) {
+  return invoke('ssh_resize', { channelId: args.channelId, cols: args.cols, rows: args.rows } as any);
+}
+
+export function sshCloseShell(channelId: string) {
+  return invoke('ssh_close_shell', { channelId } as any);
 }
 
 export async function sshOpenForward(args: {
@@ -131,6 +150,22 @@ export function onTunnelState(handler: (e: TunnelStateEvent) => void): Promise<U
   return listen<TunnelStateEvent>('SSH_TUNNEL_STATE', (ev) => handler(ev.payload));
 }
 
+export type SshOutputEvent = { channelId: string; dataBytes?: string; data?: string };
+export type SshExitEvent = { channelId: string };
+export type SshOpenedEvent = { channelId: string };
+
+export function onSshOutput(handler: (e: SshOutputEvent) => void): Promise<UnlistenFn> {
+  return listen<SshOutputEvent>('SSH_OUTPUT', (ev) => handler(ev.payload));
+}
+
+export function onSshExit(handler: (e: SshExitEvent) => void): Promise<UnlistenFn> {
+  return listen<SshExitEvent>('SSH_EXIT', (ev) => handler(ev.payload));
+}
+
+export function onSshOpened(handler: (e: SshOpenedEvent) => void): Promise<UnlistenFn> {
+  return listen<SshOpenedEvent>('SSH_OPENED', (ev) => handler(ev.payload));
+}
+
 // App controls
 export function appQuit(): Promise<void> {
   return invoke('app_quit');
@@ -156,4 +191,16 @@ export function installZshOsc7(): Promise<boolean> {
 
 export function resolvePathAbsolute(path: string): Promise<string> {
   return invoke('resolve_path_absolute', { path } as any);
+}
+
+export function installBashOsc7(): Promise<boolean> {
+  return invoke('install_bash_osc7');
+}
+
+export function installFishOsc7(): Promise<boolean> {
+  return invoke('install_fish_osc7');
+}
+
+export function openPathSystem(path?: string): Promise<void> {
+  return invoke('open_path_system', { path } as any);
 }

@@ -1,6 +1,10 @@
 import { loadAppState, saveAppState } from '@/store/persist';
 
-export type RecentSession = { cwd: string; closedAt: number; panes?: number };
+export type LayoutShapeLeaf = { type: 'leaf' };
+export type LayoutShapeSplit = { type: 'split'; direction: 'row' | 'column'; sizes?: number[]; children: LayoutShape[] };
+export type LayoutShape = LayoutShapeLeaf | LayoutShapeSplit;
+
+export type RecentSession = { cwd: string; closedAt: number; panes?: number; title?: string; layoutShape?: LayoutShape };
 
 export async function getRecentSessions(limit = 10): Promise<RecentSession[]> {
   const s = await loadAppState();

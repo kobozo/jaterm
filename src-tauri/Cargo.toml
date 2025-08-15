@@ -23,6 +23,7 @@ nanoid = "0.4"
 git2 = { version = "0.18", default-features = false, features = ["https"] }
 base64 = "0.22"
 dirs = "6"
+ssh2 = "0.9"
 
 [features]
 default = []
