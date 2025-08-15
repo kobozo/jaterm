@@ -107,8 +107,20 @@ export default function App() {
 
   async function splitPane(paneId: string, direction: 'row' | 'column') {
     const t = tabs.find((x) => x.id === activeTab);
-    if (!t || !t.cwd) return;
-    if (t.kind === 'ssh') { return; }
+    if (!t) return;
+    if (t.kind === 'ssh') {
+      if (!t.sshSessionId) return;
+      try {
+        const newId = await sshOpenShell({ sessionId: t.sshSessionId, cwd: t.cwd ?? undefined, cols: 120, rows: 30 });
+        const replacement: LayoutNode = { type: 'split', direction, children: [{ type: 'leaf', paneId }, { type: 'leaf', paneId: newId }] };
+        const newLayout: LayoutNode = t.layout ? replaceLeaf(t.layout as any, paneId, replacement) : replacement;
+        setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, panes: [...tb.panes, newId], activePane: newId, layout: newLayout } : tb)));
+      } catch (e) {
+        console.error('ssh split failed', e);
+      }
+      return;
+    }
+    if (!t.cwd) return;
     try {
       const res = await ptyOpen({ cwd: t.cwd });
       const newId = String(typeof res === 'string' ? res : (res as any).ptyId ?? res);
@@ -375,19 +387,39 @@ export default function App() {
       {tabs.map((t) => (
         <div key={t.id} style={{ display: t.id === activeTab ? 'block' : 'none', height: '100%' }}>
           {t.kind === 'ssh' ? (
-            <div style={{ height: '100%' }}>
-              {t.panes.map((pid) => (
-                <RemoteTerminalPane
-                  key={pid}
-                  id={pid}
-                  desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                  onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
-                  onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
-                  onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
-                  onClose={closePane}
-                />
-              ))}
-            </div>
+            t.layout ? (
+              <SplitTree
+                node={t.layout as any}
+                onChange={(n) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, layout: n } : tb)))}
+                renderLeaf={(pid) => (
+                  <RemoteTerminalPane
+                    key={pid}
+                    id={pid}
+                    desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
+                    onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
+                    onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
+                    onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
+                    onClose={closePane}
+                    onSplit={(pane, dir) => splitPane(pane, dir)}
+                  />
+                )}
+              />
+            ) : (
+              <SplitView>
+                {t.panes.map((pid) => (
+                  <RemoteTerminalPane
+                    key={pid}
+                    id={pid}
+                    desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
+                    onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
+                    onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
+                    onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
+                    onClose={closePane}
+                    onSplit={(pane, dir) => splitPane(pane, dir)}
+                  />
+                ))}
+              </SplitView>
+            )
           ) : t.cwd ? (
             t.layout ? (
               <SplitTree

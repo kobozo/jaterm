@@ -12,14 +12,21 @@ type Props = {
   onFocusPane?: (id: string) => void;
   onClose?: (id: string) => void;
   onTitle?: (id: string, title: string) => void;
+  onSplit?: (id: string, dir: 'row' | 'column') => void;
 };
 
-export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle }: Props) {
+export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
   const correctedRef = useRef(false);
   useEffect(() => { correctedRef.current = false; }, [id, desiredCwd]);
+  const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+  React.useEffect(() => {
+    const onCloseMenu = () => setMenu(null);
+    window.addEventListener('click', onCloseMenu);
+    return () => window.removeEventListener('click', onCloseMenu);
+  }, []);
 
   function b64ToUint8Array(b64: string): Uint8Array {
     const bin = atob(b64);
@@ -161,10 +168,27 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   }, [id, term]);
 
   return (
-    <div style={{ height: '100%', width: '100%', position: 'relative', boxSizing: 'border-box', border: '1px solid #444', borderRadius: 4, minHeight: 0, overflow: 'hidden' }} onMouseDown={() => onFocusPane?.(id)}>
+    <div
+      style={{ height: '100%', width: '100%', position: 'relative', boxSizing: 'border-box', border: '1px solid #444', borderRadius: 4, minHeight: 0, overflow: 'hidden' }}
+      onMouseDown={() => onFocusPane?.(id)}
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+    >
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
       {onClose && (
         <button onClick={() => onClose(id)} style={{ position: 'absolute', right: 6, top: 6, fontSize: 12 }} title="Close SSH terminal">×</button>
+      )}
+      {menu && (
+        <div style={{ position: 'fixed', left: menu.x, top: menu.y, background: '#222', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 4, zIndex: 20, minWidth: 180 }}>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'row'); setMenu(null); }}>Split Horizontally</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'column'); setMenu(null); }}>Split Vertically</div>
+          <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const sel = term.getSelection?.() || ''; if (sel) await navigator.clipboard.writeText(sel); } catch {} setMenu(null); }}>Copy Selection</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const text = await navigator.clipboard.readText(); if (text) sshWrite({ channelId: id, data: text }); } catch {} setMenu(null); }}>Paste</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { try { (term as any).selectAll?.(); } catch {} setMenu(null); }}>Select All</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { try { term.clear?.(); } catch {} setMenu(null); }}>Clear</div>
+          <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
+          <div style={{ padding: '6px 10px', cursor: 'pointer', color: '#ff7777' }} onClick={() => { onClose?.(id); setMenu(null); }}>Close Pane</div>
+        </div>
       )}
     </div>
   );
