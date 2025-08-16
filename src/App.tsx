@@ -642,27 +642,8 @@ export default function App() {
       ))}
       {/* Single status bar for active tab */}
       <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
-        {active.cwd && <button onClick={newTerminal}>New Terminal</button>}
-        {/* Offer zsh helper if no OSC7 observed yet */}
-        {!active.status?.seenOsc7 && (
-          <button
-            onClick={async () => {
-              try {
-                const ok = await (await import('@/types/ipc')).installZshOsc7();
-                alert(ok ? 'Installed zsh cwd tracking to ~/.zshrc. Restart your shell.' : 'zsh cwd tracking already installed.');
-              } catch (e) {
-                alert('Failed to install zsh cwd tracking: ' + (e as any));
-              }
-            }}
-            title="Enable automatic cwd tracking in zsh"
-          >
-            Enable zsh cwd tracking
-          </button>
-        )}
-        <button onClick={() => setComposeOpen((v) => !v)}>Compose (Cmd/Ctrl+E)</button>
-        <button onClick={() => openPathSystem(undefined)}>Open Config Folder</button>
-        <button onClick={async () => openPathSystem((await import('@/types/ipc')).getConfigDir ? await (await import('@/types/ipc')).getConfigDir() : undefined)}>View state.json</button>
         <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} />
+        <button onClick={() => setComposeOpen((v) => !v)}>Compose with AI</button>
         {/* Helper status on all tabs for parity */}
         <div style={{ fontSize: 12, color: active.status.helperOk ? '#8fe18f' : '#f0a1a1' }}>
           Helper: {active.status.helperOk ? `Ready${active.status.helperVersion ? ' v' + active.status.helperVersion : ''}` : 'Checking / Not installed'}
