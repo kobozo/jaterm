@@ -139,6 +139,78 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, kind, sessionId, helperPath]);
 
+  // Build a simple always-expanded tree for a given staged state
+  type TreeNode = { name: string; children?: TreeNode[]; file?: GitChange; fullPath: string };
+  function buildTree(group: GitChange[]): TreeNode[] {
+    const root: Record<string, any> = {};
+    for (const f of group) {
+      const parts = f.path.split('/');
+      let cur = root;
+      let acc = '';
+      for (let i = 0; i < parts.length; i++) {
+        const seg = parts[i];
+        acc = acc ? acc + '/' + seg : seg;
+        if (i === parts.length - 1) {
+          if (!cur['__files']) cur['__files'] = [] as any[];
+          cur['__files'].push({ name: seg, file: f, fullPath: acc });
+        } else {
+          cur[seg] = cur[seg] || { __dir: {} };
+          cur = cur[seg].__dir;
+        }
+      }
+    }
+    function toNodes(dir: Record<string, any>, base: string): TreeNode[] {
+      const dirs: TreeNode[] = [];
+      const files: TreeNode[] = [];
+      for (const key of Object.keys(dir)) {
+        if (key === '__files') continue;
+        const child = dir[key].__dir as Record<string, any>;
+        const full = base ? base + '/' + key : key;
+        dirs.push({ name: key, fullPath: full, children: toNodes(child, full) });
+      }
+      if (dir['__files']) {
+        for (const f of dir['__files']) {
+          files.push({ name: f.name, fullPath: f.fullPath, file: f.file });
+        }
+      }
+      // Sort: dirs first alphabetically, then files
+      dirs.sort((a, b) => a.name.localeCompare(b.name));
+      files.sort((a, b) => a.name.localeCompare(b.name));
+      return [...dirs, ...files];
+    }
+    return toNodes(root, '');
+  }
+
+  function renderTree(nodes: TreeNode[], depth: number, stagedFlag: boolean) {
+    return nodes.map((n) => {
+      const pad = { padding: '4px 6px', paddingLeft: 6 + depth * 14 } as React.CSSProperties;
+      if (n.file) {
+        const f = n.file as GitChange;
+        const isSel = selected?.path === f.path && selected?.staged === stagedFlag;
+        return (
+          <li key={(stagedFlag ? 'st-' : 'ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', cursor: 'pointer', background: isSel ? '#2b2b2b' : 'transparent' }} onClick={async () => {
+            setSelected({ path: f.path, staged: stagedFlag });
+            const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
+            const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, stagedFlag);
+            setDiffText(dt);
+          }}>
+            <span style={{ opacity: 0.8, marginRight: 6 }}>{stagedFlag ? f.x : f.y}</span>
+            <span>{n.name}</span>
+          </li>
+        );
+      }
+      // directory node
+      return (
+        <li key={(stagedFlag ? 'dir-st-' : 'dir-ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', color: '#bbb' }}>
+          {n.name}
+          <ul style={{ margin: 0, padding: 0 }}>
+            {renderTree(n.children || [], depth + 1, stagedFlag)}
+          </ul>
+        </li>
+      );
+    });
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* Left: file tree grouped by Staged / Changes */}
@@ -184,31 +256,11 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
         </div>
         <div style={{ fontWeight: 600, margin: '4px 0' }}>Staged</div>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-          {files.filter(f => f.staged).map((f) => (
-            <li key={`st-${f.path}`} style={{ padding: '4px 6px', cursor: 'pointer', background: selected?.path===f.path && selected?.staged ? '#2b2b2b' : 'transparent' }} onClick={async () => {
-              setSelected({ path: f.path, staged: true });
-              const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
-              const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, true);
-              setDiffText(dt);
-            }}>
-              <span style={{ opacity: 0.8, marginRight: 6 }}>{f.x}</span>
-              <span>{f.path}</span>
-            </li>
-          ))}
+          {renderTree(buildTree(files.filter(f => f.staged)), 0, true)}
         </ul>
         <div style={{ fontWeight: 600, margin: '8px 0 4px' }}>Changes</div>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-          {files.filter(f => !f.staged).map((f) => (
-            <li key={`ch-${f.path}`} style={{ padding: '4px 6px', cursor: 'pointer', background: selected?.path===f.path && !selected?.staged ? '#2b2b2b' : 'transparent' }} onClick={async () => {
-              setSelected({ path: f.path, staged: false });
-              const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
-              const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, false);
-              setDiffText(dt);
-            }}>
-              <span style={{ opacity: 0.8, marginRight: 6 }}>{f.y}</span>
-              <span>{f.path}</span>
-            </li>
-          ))}
+          {renderTree(buildTree(files.filter(f => !f.staged)), 0, false)}
         </ul>
       </div>
       {/* Right: diff viewer (simple pre styled) */}
