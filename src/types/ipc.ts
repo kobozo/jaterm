@@ -166,6 +166,15 @@ export function onSshOpened(handler: (e: SshOpenedEvent) => void): Promise<Unlis
   return listen<SshOpenedEvent>('SSH_OPENED', (ev) => handler(ev.payload));
 }
 
+export function sshHomeDir(sessionId: string): Promise<string> {
+  return invoke('ssh_home_dir', { sessionId } as any);
+}
+
+export type SftpEntry = { name: string; path: string; is_dir: boolean };
+export function sshSftpList(sessionId: string, path: string): Promise<SftpEntry[]> {
+  return invoke('ssh_sftp_list', { sessionId, path } as any);
+}
+
 // App controls
 export function appQuit(): Promise<void> {
   return invoke('app_quit');

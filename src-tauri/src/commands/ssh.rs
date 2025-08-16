@@ -4,6 +4,7 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
 use base64::Engine;
+use serde::Serialize;
 
 #[derive(serde::Deserialize)]
 pub struct SshAuth {
@@ -65,6 +66,43 @@ pub async fn ssh_connect(state: State<'_, crate::state::app_state::AppState>, pr
     inner.ssh.insert(id.clone(), crate::state::app_state::SshSession { id: id.clone(), tcp, sess });
   }
   Ok(id)
+}
+
+#[tauri::command]
+pub async fn ssh_home_dir(state: State<'_, crate::state::app_state::AppState>, session_id: String) -> Result<String, String> {
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+  let path = sftp.realpath(Path::new(".")).map_err(|e| e.to_string())?;
+  path.to_str().map(|s| s.to_string()).ok_or_else(|| "non-utf8 path".to_string())
+}
+
+#[derive(Serialize)]
+pub struct SftpEntry { pub name: String, pub path: String, pub is_dir: bool }
+
+use std::path::Path;
+
+#[tauri::command]
+pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<Vec<SftpEntry>, String> {
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+  let dir = sftp.opendir(Path::new(&path)).map_err(|e| e.to_string())?;
+  let mut out = Vec::new();
+  for item in dir {
+    let (file, stat) = item.map_err(|e| e.to_string())?;
+    if let Some(name_os) = file.filename() {
+      if let Some(name) = name_os.to_str() {
+        if name == "." { continue; }
+        let is_dir = stat.is_dir();
+        let child_path = if path.ends_with('/') { format!("{}{}", path, name) } else { format!("{}/{}", path, name) };
+        out.push(SftpEntry { name: name.to_string(), path: child_path, is_dir });
+      }
+    }
+  }
+  // Sort: directories first, then names
+  out.sort_by(|a,b| b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+  Ok(out)
 }
 
 #[tauri::command]
