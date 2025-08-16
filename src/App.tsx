@@ -264,7 +264,7 @@ export default function App() {
       }
       return next;
     });
-    // Record SSH recent if opened from a profile (use final path normalization, prefer title-derived path if deeper)
+    // Record SSH recent if opened from a profile (use final path normalization, prefer title-derived path if deeper when normalized)
     if (toRecord?.kind === 'ssh' && toRecord.profileId) {
       // Prefer parsing the tab title for the final cwd if present
       let path = (toRecord.status.fullPath ?? toRecord.cwd) as string | undefined;
@@ -292,6 +292,10 @@ export default function App() {
             if (idx > 0) home = hp.slice(0, idx);
           }
           if (home) {
+            // Expand tilde in path if present
+            if (path.startsWith('~/')) {
+              path = home.replace(/\/$/, '') + path.slice(1);
+            }
             if (titleCandidate) {
               if (titleCandidate.startsWith('~/')) {
                 titleCandidate = home.replace(/\/$/, '') + titleCandidate.slice(1);
@@ -308,8 +312,8 @@ export default function App() {
             }
           }
         } catch {}
-        // If title-derived candidate looks deeper, prefer it
-        if (titleCandidate && (!path || titleCandidate.length > path.length)) {
+        // Only prefer title candidate if it was normalized (i.e., not starting with '~') and is deeper
+        if (titleCandidate && !titleCandidate.startsWith('~/') && (!path || titleCandidate.length > path.length)) {
           path = titleCandidate;
         }
         console.info('[ssh][recents] save final path=', path);
