@@ -1,10 +1,11 @@
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream, SocketAddr};
 use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
 use base64::Engine;
 use serde::Serialize;
+use serde::Deserialize;
 
 #[derive(serde::Deserialize)]
 pub struct SshAuth {
@@ -250,13 +251,145 @@ pub async fn ssh_disconnect(state: State<'_, crate::state::app_state::AppState>,
 }
 
 #[tauri::command]
-pub async fn ssh_open_tunnel(_opts: serde_json::Value) -> Result<String, String> {
-  // TODO: implement local/remote/reverse forwarders
-  Ok("ssh_tunnel_stub".into())
+pub async fn ssh_open_forward(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, forward: PortForward) -> Result<String, String> {
+  let fid = format!("fwd_{}", nanoid::nanoid!(8));
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let sess = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+  let (src_host, src_port, dst_host, dst_port) = (forward.src_host.clone(), forward.src_port, forward.dst_host.clone(), forward.dst_port);
+  match forward.r#type.as_str() {
+    "L" => {
+      let listener = TcpListener::bind(format!("{}:{}", src_host, src_port)).map_err(|e| format!("bind: {e}"))?;
+      listener.set_nonblocking(true).ok();
+      let sess_arc = std::sync::Arc::new(std::sync::Mutex::new(sess.sess.try_clone().map_err(|e| e.to_string())?));
+      let shut = shutdown.clone();
+      let appcl = app.clone();
+      let fidcl = fid.clone();
+      let dst_host_cl = dst_host.clone();
+      let th = std::thread::spawn(move || {
+        let _ = appcl.emit(crate::events::SSH_TUNNEL_STATE, &serde_json::json!({"forwardId": fidcl, "status":"active"}));
+        loop {
+          if shut.load(std::sync::atomic::Ordering::Relaxed) { break; }
+          match listener.accept() {
+            Ok((mut stream, addr)) => {
+              let sess_arc2 = sess_arc.clone();
+              let shut2 = shut.clone();
+              let host = dst_host_cl.clone();
+              std::thread::spawn(move || {
+                stream.set_nonblocking(true).ok();
+                let (orig_host, orig_port) = match addr { SocketAddr::V4(a) => (a.ip().to_string(), a.port()), SocketAddr::V6(a) => (a.ip().to_string(), a.port()) };
+                let mut chan = {
+                  let sessg = sess_arc2.lock().unwrap();
+                  // open direct-tcpip channel to destination
+                  sessg.channel_direct_tcpip(&host, dst_port, Some((&orig_host, orig_port))).ok()
+                };
+                if chan.is_none() { return; }
+                let mut chan = chan.unwrap();
+                // Pump data both ways with small sleeps on WouldBlock
+                let mut c2s = chan.clone();
+                let mut s_in = stream.try_clone().ok();
+                let mut s_out = stream;
+                let t1 = std::thread::spawn(move || {
+                  let mut buf = [0u8; 8192];
+                  loop {
+                    if shut2.load(std::sync::atomic::Ordering::Relaxed) { break; }
+                    match c2s.read(&mut buf) {
+                      Ok(0) => break,
+                      Ok(n) => { if let Some(ref mut sin) = s_in { let _ = sin.write_all(&buf[..n]); } },
+                      Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { std::thread::sleep(std::time::Duration::from_millis(5)); },
+                      Err(_) => break,
+                    }
+                  }
+                });
+                let mut chan2 = chan;
+                let t2 = std::thread::spawn(move || {
+                  let mut buf = [0u8; 8192];
+                  loop {
+                    match s_out.read(&mut buf) {
+                      Ok(0) => { let _ = chan2.close(); break; },
+                      Ok(n) => { let _ = chan2.write_all(&buf[..n]); },
+                      Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { std::thread::sleep(std::time::Duration::from_millis(5)); },
+                      Err(_) => { let _ = chan2.close(); break; }
+                    }
+                  }
+                });
+                let _ = t1.join(); let _ = t2.join();
+              });
+            },
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { std::thread::sleep(std::time::Duration::from_millis(20)); },
+            Err(_) => { break; }
+          }
+        }
+      });
+      inner.forwards.insert(fid.clone(), crate::state::app_state::SshForward { id: fid.clone(), session_id: session_id.clone(), ftype: crate::state::app_state::ForwardType::Local, src_host, src_port, dst_host, dst_port, shutdown, thread: Some(th) });
+      Ok(fid)
+    }
+    "R" => {
+      // Remote forward listener
+      let listener = sess.sess.tcpip_forward(&src_host, src_port).map_err(|e| format!("tcpip_forward: {e}"))?;
+      let listener = std::sync::Arc::new(std::sync::Mutex::new(listener));
+      let shut = shutdown.clone();
+      let appcl = app.clone();
+      let fidcl = fid.clone();
+      let th = std::thread::spawn(move || {
+        let _ = appcl.emit(crate::events::SSH_TUNNEL_STATE, &serde_json::json!({"forwardId": fidcl, "status":"active"}));
+        loop {
+          if shut.load(std::sync::atomic::Ordering::Relaxed) { break; }
+          let mut l = listener.lock().unwrap();
+          match l.accept() {
+            Ok(mut remote) => {
+              drop(l);
+              // Connect to local destination and pump
+              if let Ok(mut local) = TcpStream::connect(format!("{}:{}", dst_host, dst_port)) {
+                local.set_nonblocking(true).ok();
+                let mut r1 = remote.try_clone().ok();
+                let t1 = std::thread::spawn(move || {
+                  let mut buf = [0u8; 8192];
+                  loop {
+                    match remote.read(&mut buf) {
+                      Ok(0) => break,
+                      Ok(n) => { if let Some(ref mut loc) = r1 { let _ = loc.write_all(&buf[..n]); } },
+                      Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { std::thread::sleep(std::time::Duration::from_millis(5)); },
+                      Err(_) => break,
+                    }
+                  }
+                });
+                let t2 = std::thread::spawn(move || {
+                  let mut buf = [0u8; 8192];
+                  loop {
+                    match local.read(&mut buf) {
+                      Ok(0) => break,
+                      Ok(n) => { let _ = remote.write_all(&buf[..n]); },
+                      Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { std::thread::sleep(std::time::Duration::from_millis(5)); },
+                      Err(_) => break,
+                    }
+                  }
+                });
+                let _ = t1.join(); let _ = t2.join();
+              }
+            },
+            Err(e) => { let _ = e; std::thread::sleep(std::time::Duration::from_millis(20)); }
+          }
+        }
+      });
+      inner.forwards.insert(fid.clone(), crate::state::app_state::SshForward { id: fid.clone(), session_id: session_id.clone(), ftype: crate::state::app_state::ForwardType::Remote, src_host, src_port, dst_host, dst_port, shutdown, thread: Some(th) });
+      Ok(fid)
+    }
+    _ => Err("unsupported forward type".into())
+  }
 }
 
+#[derive(Deserialize)]
+pub struct PortForward { pub id: Option<String>, #[serde(rename="type")] pub r#type: String, pub src_host: String, pub src_port: u16, pub dst_host: String, pub dst_port: u16 }
+
 #[tauri::command]
-pub async fn ssh_close_tunnel(_id: String) -> Result<(), String> {
+pub async fn ssh_close_forward(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, forward_id: String) -> Result<(), String> {
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  if let Some(mut f) = inner.forwards.remove(&forward_id) {
+    f.shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Some(th) = f.thread.take() { let _ = th.join(); }
+    let _ = app.emit(crate::events::SSH_TUNNEL_STATE, &serde_json::json!({"forwardId": forward_id, "status":"closed"}));
+  }
   Ok(())
 }
 

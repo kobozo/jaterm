@@ -22,11 +22,12 @@ pub struct Inner {
     pub sessions: HashMap<String, PtySession>,
     pub ssh: HashMap<String, SshSession>,
     pub ssh_channels: HashMap<String, SshChannel>,
+    pub forwards: HashMap<String, SshForward>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(Inner { sessions: HashMap::new(), ssh: HashMap::new(), ssh_channels: HashMap::new() })))
+        Self(Arc::new(Mutex::new(Inner { sessions: HashMap::new(), ssh: HashMap::new(), ssh_channels: HashMap::new(), forwards: HashMap::new() })))
     }
 }
 
@@ -62,4 +63,18 @@ pub struct SshChannel {
     pub id: String,
     pub session_id: String,
     pub chan: Arc<StdMutex<Channel>>,
+}
+
+pub enum ForwardType { Local, Remote }
+
+pub struct SshForward {
+    pub id: String,
+    pub session_id: String,
+    pub ftype: ForwardType,
+    pub src_host: String,
+    pub src_port: u16,
+    pub dst_host: String,
+    pub dst_port: u16,
+    pub shutdown: Arc<std::sync::atomic::AtomicBool>,
+    pub thread: Option<std::thread::JoinHandle<()>>,
 }

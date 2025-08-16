@@ -4,6 +4,7 @@ import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import RemoteTerminalPane from '@/components/RemoteTerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
 import GitTools from '@/components/GitTools';
+import PortsPanel from '@/components/PortsPanel';
 import Welcome from '@/components/Welcome';
 import type { LayoutShape } from '@/store/sessions';
 import ComposeDrawer from '@/components/ComposeDrawer';
@@ -34,7 +35,8 @@ export default function App() {
     activePane: string | null;
     status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean; helperOk?: boolean; helperVersion?: string; helperChecked?: boolean; helperPath?: string | null };
     title?: string;
-    view?: 'terminal' | 'git';
+    view?: 'terminal' | 'git' | 'ports';
+    forwards?: { id: string; type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number; status?: 'starting'|'active'|'error'|'closed' }[];
   };
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
@@ -412,6 +414,24 @@ export default function App() {
     }, 0);
   }, [activeTab]);
 
+  // Listen for tunnel state updates
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { onTunnelState } = await import('@/types/ipc');
+        const un = await onTunnelState((e) => {
+          const { forwardId, status } = e as any;
+          setTabs((prev) => prev.map((tb) => {
+            const t = tb;
+            const f = (t.forwards || []).map((x) => x.id === forwardId ? { ...x, status } : x);
+            return { ...t, forwards: f };
+          }));
+        });
+        return () => { try { (un as any)(); } catch {} };
+      } catch {}
+    })();
+  }, []);
+
   // Ensure local helper when a local tab becomes active and has a cwd, if not checked yet
   React.useEffect(() => {
     const t = tabs.find((x) => x.id === activeTab);
@@ -588,6 +608,15 @@ export default function App() {
               >
                 ⎇
               </button>
+              {t.kind === 'ssh' && (
+                <button
+                  style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'ports' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
+                  onClick={() => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'ports' } : tb)))}
+                  title="Ports"
+                >
+                  ≣
+                </button>
+              )}
             </div>
             {/* Content: render both views and toggle visibility to preserve terminal DOM */}
             <div style={{ flex: 1, minWidth: 0, height: '100%', position: 'relative' }}>
@@ -605,6 +634,25 @@ export default function App() {
               </div>
               {/* Terminal/Welcome view */}
               <div style={{ display: (t.view === 'git') ? 'none' : 'block', height: '100%' }}>
+                {t.view === 'ports' ? (
+                  <PortsPanel
+                    forwards={t.forwards || []}
+                    onAdd={async (fwd) => {
+                      if (t.kind !== 'ssh' || !t.sshSessionId) return;
+                      const { sshOpenForward } = await import('@/types/ipc');
+                      try {
+                        const res: any = await sshOpenForward({ sessionId: t.sshSessionId, forward: { id: '', type: fwd.type, srcHost: fwd.srcHost, srcPort: fwd.srcPort, dstHost: fwd.dstHost, dstPort: fwd.dstPort } as any });
+                        const fid = typeof res === 'string' ? res : (res?.forwardId || res);
+                        setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: [ ...(tb.forwards || []), { ...fwd, id: fid, status: 'starting' } ] } : tb)));
+                      } catch (e) { alert('open forward failed: ' + (e as any)); }
+                    }}
+                    onStop={async (id) => {
+                      const { sshCloseForward } = await import('@/types/ipc');
+                      try { await sshCloseForward(id); } catch {}
+                      setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: (tb.forwards || []).map((x) => x.id === id ? { ...x, status: 'closed' } : x) } : tb)));
+                    }}
+                  />
+                ) : (
                 {t.kind === 'ssh' ? (
                   t.layout ? (
                     <SplitTree

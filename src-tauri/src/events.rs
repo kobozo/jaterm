@@ -10,3 +10,5 @@ pub const SSH_OUTPUT: &str = "SSH_OUTPUT";
 pub const SSH_EXIT: &str = "SSH_EXIT";
 pub const SSH_UPLOAD_PROGRESS: &str = "SSH_UPLOAD_PROGRESS";
 pub const SSH_OPENED: &str = "SSH_OPENED";
+#[allow(dead_code)]
+pub const SSH_TUNNEL_STATE: &str = "SSH_TUNNEL_STATE";
