@@ -9,9 +9,10 @@ type Props = {
   helperPath?: string | null;
   title?: string | null;
   onStatus?: (st: { branch: string; ahead: number; behind: number; staged: number; unstaged: number }) => void;
+  isActive?: boolean;
 };
 
-export default function GitTools({ cwd, kind, sessionId, helperPath, title, onStatus }: Props) {
+export default function GitTools({ cwd, kind, sessionId, helperPath, title, onStatus, isActive = true }: Props) {
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<any | null>(null);
@@ -150,18 +151,20 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
 
   // Auto refresh when inputs change (cwd, session/helper, title)
   React.useEffect(() => {
-    if (!cwd || !helperReady) return;
+    if (!cwd || !helperReady || !isActive) return;
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, kind, sessionId, helperPath, title]);
+  }, [cwd, kind, sessionId, helperPath, title, isActive]);
 
   // Periodic refresh while mounted
   React.useEffect(() => {
-    if (!cwd || !helperReady) return;
+    if (!cwd || !helperReady || !isActive) return;
+    // Only poll when inside a repo per current view status
+    if (!status || status.branch === '-') return;
     const id = window.setInterval(() => { void refresh(); }, 5000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, kind, sessionId, helperPath]);
+  }, [cwd, kind, sessionId, helperPath, isActive, status?.branch]);
 
   // Build a simple always-expanded tree for a given staged state
   type TreeNode = { name: string; children?: TreeNode[]; file?: GitChange; fullPath: string };
@@ -239,7 +242,8 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
         const code = stagedFlag ? (f.x || ' ') : (f.y || ' ');
         const isDeleted = (stagedFlag ? f.x : f.y) === 'D';
         return (
-          <li key={(stagedFlag ? 'st-' : 'ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', cursor: 'pointer', background: isSel ? '#2b2b2b' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }} onClick={async () => {
+          <li key={(stagedFlag ? 'st-' : 'ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', cursor: 'pointer', background: isSel ? '#2b2b2b' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }} onClick={async (e) => {
+            e.stopPropagation();
             setSelected({ path: f.path, staged: stagedFlag });
             const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
             const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, stagedFlag);

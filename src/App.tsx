@@ -428,12 +428,15 @@ export default function App() {
     }
   }, [tabs, activeTab]);
 
-  // Auto-refresh Git status periodically for the active tab
+  // Auto-refresh Git status periodically for the active tab (only when inside a Git repo)
   React.useEffect(() => {
     const t = tabs.find((x) => x.id === activeTab);
     if (!t) return;
     const cwd = (t.status?.fullPath ?? t.cwd) as string | undefined;
     if (!cwd) return;
+    // Only poll when we know we're inside a repo
+    const inRepo = !!t.status && t.status.branch && t.status.branch !== '-';
+    if (!inRepo) return;
     const kind = t.kind === 'ssh' ? 'ssh' : 'local';
     const sessionId = (t as any)?.sshSessionId as string | undefined;
     const helperPath = t.status?.helperPath ?? null;
@@ -596,6 +599,7 @@ export default function App() {
                   sessionId={(t as any).sshSessionId}
                   helperPath={t.status.helperPath}
                   title={t.title ?? null}
+                  isActive={t.view === 'git'}
                   onStatus={(st) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)))}
                 />
               </div>
