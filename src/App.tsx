@@ -414,6 +414,26 @@ export default function App() {
     }
   }, [tabs, activeTab]);
 
+  // Auto-refresh Git status periodically for the active tab
+  React.useEffect(() => {
+    const t = tabs.find((x) => x.id === activeTab);
+    if (!t) return;
+    const cwd = (t.status?.fullPath ?? t.cwd) as string | undefined;
+    if (!cwd) return;
+    const kind = t.kind === 'ssh' ? 'ssh' : 'local';
+    const sessionId = (t as any)?.sshSessionId as string | undefined;
+    const helperPath = t.status?.helperPath ?? null;
+    const refresh = async () => {
+      try {
+        const st = await gitStatusViaHelper({ kind: kind as any, sessionId, helperPath }, cwd);
+        setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)));
+      } catch {}
+    };
+    const iv = window.setInterval(refresh, 5000);
+    return () => window.clearInterval(iv);
+    // Recreate interval when tab, path, helper, or ssh session changes
+  }, [tabs, activeTab]);
+
   // Persist workspace on changes (local tabs only)
   React.useEffect(() => {
     const ws = {
