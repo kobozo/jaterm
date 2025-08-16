@@ -8,7 +8,6 @@ import type { LayoutShape } from '@/store/sessions';
 import ComposeDrawer from '@/components/ComposeDrawer';
 import TabsBar from '@/components/TabsBar';
 import SplitTree, { LayoutNode, LayoutSplit, LayoutLeaf } from '@/components/SplitTree';
-import { ToastProvider } from '@/store/toasts';
 import Toaster from '@/components/Toaster';
 import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
@@ -35,9 +34,7 @@ export default function App() {
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
   const [composeOpen, setComposeOpen] = useState(false);
-  const { show, update, dismiss } = ((): any => {
-    try { return (require('@/store/toasts') as any); } catch { return {}; }
-  })();
+  const { show, update, dismiss } = useToasts();
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
@@ -388,7 +385,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [tabs, activeTab]);
   return (
-    <ToastProvider>
     <div className="app-root">
       <TabsBar
         tabs={tabs.map((t) => {
@@ -516,6 +512,5 @@ export default function App() {
       </div>
       <Toaster />
     </div>
-    </ToastProvider>
   );
 }
