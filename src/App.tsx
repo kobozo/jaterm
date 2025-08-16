@@ -189,6 +189,7 @@ export default function App() {
     let abs = dir;
     const tcur = tabs.find((x) => x.id === tabId);
     const isSsh = tcur?.kind === 'ssh';
+    let sshHome: string | undefined = undefined;
     if (!isSsh) {
       try {
         const mod = await import('@/types/ipc');
@@ -198,24 +199,33 @@ export default function App() {
       // Normalize SSH path with remote home if looks home-relative like "/foo" or starts with "~/"
       try {
         const mod = await import('@/types/ipc');
-        const home = tcur?.sshSessionId ? await (mod as any).sshHomeDir(tcur.sshSessionId) : undefined;
-        if (home) {
+        sshHome = tcur?.sshSessionId ? await (mod as any).sshHomeDir(tcur.sshSessionId) : undefined;
+        if (sshHome) {
           if (abs.startsWith('~/')) {
-            abs = home.replace(/\/$/, '') + abs.slice(1);
+            abs = sshHome.replace(/\/$/, '') + abs.slice(1);
           } else {
             const isKnownRoot = /^\/(home|usr|var|etc|opt|bin|sbin|lib|tmp|mnt|media|root)\//.test(abs);
-            if (!isKnownRoot && !abs.startsWith(home.replace(/\/$/, '') + '/')) {
-              abs = home.replace(/\/$/, '') + '/' + abs.replace(/^\//, '');
+            if (!isKnownRoot && !abs.startsWith(sshHome.replace(/\/$/, '') + '/')) {
+              abs = sshHome.replace(/\/$/, '') + '/' + abs.replace(/^\//, '');
             }
           }
         }
       } catch {}
     }
-    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, cwd: abs, fullPath: abs, seenOsc7: true } } : t)));
+    // Store cwd and ensure helperPath for SSH if we derived a home
+    setTabs((prev) => prev.map((t) => {
+      if (t.id !== tabId) return t;
+      const nextStatus: any = { ...t.status, cwd: abs, fullPath: abs, seenOsc7: true };
+      if (isSsh && sshHome && !nextStatus.helperPath) {
+        nextStatus.helperPath = sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent';
+      }
+      return { ...t, status: nextStatus };
+    }));
     try {
       const t = tabs.find((x) => x.id === tabId);
-      console.info('[git] updateTabCwd git-status cwd=', abs, { tabId, kind: t?.kind, helperPath: t?.status?.helperPath, sessionId: (t as any)?.sshSessionId });
-      const st = await gitStatusViaHelper({ kind: t?.kind === 'ssh' ? 'ssh' : 'local', sessionId: (t as any)?.sshSessionId, helperPath: t?.status?.helperPath ?? null }, abs);
+      const helperPath = (t?.status?.helperPath as string | null) ?? (sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : null);
+      console.info('[git] updateTabCwd git-status cwd=', abs, { tabId, kind: t?.kind, helperPath, sessionId: (t as any)?.sshSessionId });
+      const st = await gitStatusViaHelper({ kind: t?.kind === 'ssh' ? 'ssh' : 'local', sessionId: (t as any)?.sshSessionId, helperPath }, abs);
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true } } : t)));
     } catch {
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, fullPath: abs, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 } } : t)));
