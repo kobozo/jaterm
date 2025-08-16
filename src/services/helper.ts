@@ -62,12 +62,13 @@ EOF
     git status --porcelain 2>/dev/null | awk '
       {
         xy=substr($0,1,2);
+        if (xy=="!!") next; # ignore ignored files
         x=substr(xy,1,1); y=substr(xy,2,1);
         p=substr($0,4);
         # handle rename format "R old -> new"
         arrow=index(p, " -> ");
         if (arrow>0) { p=substr(p, arrow+4); }
-        staged=(x!=" ")?"true":"false";
+        staged=((x!=" " && x!="?"))?"true":"false";
         # escape JSON
         gsub(/\\\\/, "\\\\\\\\", p); gsub(/\"/, "\\\"", p);
         if (NR>1) printf ",";
