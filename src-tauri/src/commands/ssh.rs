@@ -81,6 +81,8 @@ pub async fn ssh_home_dir(state: State<'_, crate::state::app_state::AppState>, s
 pub struct SftpEntry { pub name: String, pub path: String, pub is_dir: bool }
 
 use std::path::Path;
+use std::time::Duration;
+use std::io::Read as IoRead;
 
 #[tauri::command]
 pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<Vec<SftpEntry>, String> {
@@ -102,6 +104,87 @@ pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, 
   // Sort: directories first, then names
   out.sort_by(|a,b| b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
   Ok(out)
+}
+
+#[tauri::command]
+pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<(), String> {
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+  let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+  let mut cur = if path.starts_with('/') { String::from("/") } else { String::new() };
+  for part in parts {
+    if cur != "/" && !cur.is_empty() { cur.push('/'); }
+    cur.push_str(part);
+    let p = Path::new(&cur);
+    match sftp.mkdir(p, 0o755) {
+      Ok(_) => {}
+      Err(ref e) if e.code() == ssh2::ErrorCode::Session(-31) || e.code() == ssh2::ErrorCode::SFTP(ssh2::SftpError::FileAlreadyExists as i32) => {}
+      Err(_) => {}
+    }
+  }
+  Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_sftp_write(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String, data_b64: String) -> Result<(), String> {
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+  let bytes = base64::engine::general_purpose::STANDARD.decode(data_b64).map_err(|e| e.to_string())?;
+  let total = bytes.len();
+  let mut written = 0usize;
+  let mut file = sftp.create(Path::new(&remote_path)).map_err(|e| e.to_string())?;
+  while written < total {
+    let end = usize::min(written + 8192, total);
+    let chunk = &bytes[written..end];
+    file.write_all(chunk).map_err(|e| e.to_string())?;
+    written = end;
+    let _ = app.emit(crate::events::SSH_UPLOAD_PROGRESS, &serde_json::json!({ "path": remote_path, "written": written, "total": total }));
+    std::thread::sleep(Duration::from_millis(1));
+  }
+  Ok(())
+}
+
+#[derive(Serialize)]
+pub struct ExecResult { pub stdout: String, pub stderr: String, pub exit_code: i32 }
+
+#[tauri::command]
+pub async fn ssh_exec(state: State<'_, crate::state::app_state::AppState>, session_id: String, command: String) -> Result<ExecResult, String> {
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let mut chan = s.sess.channel_session().map_err(|e| e.to_string())?;
+  // Keep stderr separate
+  let _ = chan.handle_extended_data(ssh2::ExtendedData::Normal);
+  chan.exec(&command).map_err(|e| format!("exec: {e}"))?;
+  let mut out = Vec::new();
+  let mut err = Vec::new();
+  // Read until EOF
+  {
+    let mut stdout = chan.stream(0);
+    let mut buf = [0u8; 8192];
+    loop {
+      match stdout.read(&mut buf) {
+        Ok(0) => break,
+        Ok(n) => out.extend_from_slice(&buf[..n]),
+        Err(e) => return Err(e.to_string()),
+      }
+    }
+  }
+  {
+    let mut stderr = chan.stream(1);
+    let mut buf = [0u8; 4096];
+    loop {
+      match stderr.read(&mut buf) {
+        Ok(0) => break,
+        Ok(n) => err.extend_from_slice(&buf[..n]),
+        Err(e) => return Err(e.to_string()),
+      }
+    }
+  }
+  let _ = chan.wait_close();
+  let code = chan.exit_status().unwrap_or_default();
+  Ok(ExecResult { stdout: String::from_utf8_lossy(&out).to_string(), stderr: String::from_utf8_lossy(&err).to_string(), exit_code: code })
 }
 
 #[tauri::command]

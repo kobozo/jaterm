@@ -8,6 +8,8 @@ import type { LayoutShape } from '@/store/sessions';
 import ComposeDrawer from '@/components/ComposeDrawer';
 import TabsBar from '@/components/TabsBar';
 import SplitTree, { LayoutNode, LayoutSplit, LayoutLeaf } from '@/components/SplitTree';
+import { ToastProvider } from '@/store/toasts';
+import Toaster from '@/components/Toaster';
 import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
@@ -379,6 +381,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [tabs, activeTab]);
   return (
+    <ToastProvider>
     <div className="app-root">
       <TabsBar
         tabs={tabs.map((t) => {
@@ -504,6 +507,8 @@ export default function App() {
           }}
         />
       </div>
+      <Toaster />
     </div>
+    </ToastProvider>
   );
 }
