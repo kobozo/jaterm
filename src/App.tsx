@@ -644,9 +644,19 @@ export default function App() {
       <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
         <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} />
         <button onClick={() => setComposeOpen((v) => !v)}>Compose with AI</button>
-        {/* Helper status on all tabs for parity */}
-        <div style={{ fontSize: 12, color: active.status.helperOk ? '#8fe18f' : '#f0a1a1' }}>
-          Helper: {active.status.helperOk ? `Ready${active.status.helperVersion ? ' v' + active.status.helperVersion : ''}` : 'Checking / Not installed'}
+        {/* Helper status aligned right with colored indicator */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+          <span
+            title={active.status.helperOk ? 'Helper OK' : 'Helper not ready'}
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              background: active.status.helperOk ? '#8fe18f' : '#f0a1a1',
+              display: 'inline-block',
+            }}
+          />
+          <span>Helper: {active.status.helperVersion ? active.status.helperVersion : '—'}</span>
         </div>
         <ComposeDrawer
           open={composeOpen}
