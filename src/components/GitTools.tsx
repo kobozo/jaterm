@@ -20,6 +20,7 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   const [diffText, setDiffText] = React.useState<string>('');
   const [commitMsg, setCommitMsg] = React.useState<string>('');
   const [busy, setBusy] = React.useState<boolean>(false);
+  const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
 
   async function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -265,6 +266,25 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
                   Stage
                 </button>
               )}
+              {!stagedFlag && (
+                <button
+                  style={{ fontSize: 11, marginLeft: 8 }}
+                  title="Discard changes"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!cwd || !confirm('Discard changes to this file?')) return;
+                    setBusy(true);
+                    try {
+                      const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
+                      const { gitDiscardFile } = await import('@/services/git');
+                      await gitDiscardFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path);
+                      await refresh();
+                    } finally { setBusy(false); }
+                  }}
+                >
+                  Discard
+                </button>
+              )}
             </span>
           </li>
         );
@@ -302,7 +322,7 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
             onChange={(e) => setCommitMsg(e.target.value)}
             style={{ width: '100%', minHeight: 60, boxSizing: 'border-box', background: '#151515', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 8 }}
           />
-          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             {!commitMsg && status && (
               <span style={{ opacity: 0.8 }}>Ahead/Behind: {status.ahead} / {status.behind}</span>
             )}
@@ -331,6 +351,63 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
             >
               {commitMsg.trim() ? 'Commit' : 'Sync'}
             </button>
+            <span style={{ flex: 1 }} />
+            <button
+              disabled={disabled || busy}
+              title="Stage all"
+              onClick={async () => {
+                if (!cwd) return;
+                setBusy(true);
+                try {
+                  const abs = kind === 'ssh' ? cwd : await resolvePathAbsolute(cwd);
+                  const { gitStageAll } = await import('@/services/git');
+                  await gitStageAll({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
+                  await refresh();
+                } finally { setBusy(false); }
+              }}
+            >Stage All</button>
+            <button
+              disabled={disabled || busy}
+              title="Unstage all"
+              onClick={async () => {
+                if (!cwd) return;
+                setBusy(true);
+                try {
+                  const abs = kind === 'ssh' ? cwd : await resolvePathAbsolute(cwd);
+                  const { gitUnstageAll } = await import('@/services/git');
+                  await gitUnstageAll({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
+                  await refresh();
+                } finally { setBusy(false); }
+              }}
+            >Unstage All</button>
+            <button
+              disabled={disabled || busy}
+              title="Pull --rebase"
+              onClick={async () => {
+                if (!cwd) return;
+                setBusy(true);
+                try {
+                  const abs = kind === 'ssh' ? cwd : await resolvePathAbsolute(cwd);
+                  const { gitPull } = await import('@/services/git');
+                  await gitPull({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
+                  await refresh();
+                } finally { setBusy(false); }
+              }}
+            >Pull</button>
+            <button
+              disabled={disabled || busy}
+              title="Push"
+              onClick={async () => {
+                if (!cwd) return;
+                setBusy(true);
+                try {
+                  const abs = kind === 'ssh' ? cwd : await resolvePathAbsolute(cwd);
+                  const { gitPush } = await import('@/services/git');
+                  await gitPush({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
+                  await refresh();
+                } finally { setBusy(false); }
+              }}
+            >Push</button>
           </div>
         </div>
         <div style={{ fontWeight: 600, margin: '4px 0' }}>Staged</div>

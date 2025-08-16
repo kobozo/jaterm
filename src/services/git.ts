@@ -121,6 +121,66 @@ export async function gitUnstageFile(opts: { kind?: 'local' | 'ssh'; sessionId?:
   return { output: (res.stdout || '') + (res.stderr || '') };
 }
 
+export async function gitDiscardFile(opts: { kind?: 'local' | 'ssh'; sessionId?: string; helperPath?: string | null }, cwd: string, file: string): Promise<{ output: string }> {
+  if (opts.kind !== 'ssh') {
+    const res = await helperLocalExec('git-discard', [cwd, file]);
+    return { output: (res.stdout || '') + (res.stderr || '') };
+  }
+  if (!opts.sessionId || !opts.helperPath) return { output: 'helper not ready' };
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+  const cmd = `'${esc(opts.helperPath)}' git-discard '${esc(cwd)}' '${esc(file)}'`;
+  const res = await sshExec(opts.sessionId, cmd);
+  return { output: (res.stdout || '') + (res.stderr || '') };
+}
+
+export async function gitStageAll(opts: { kind?: 'local' | 'ssh'; sessionId?: string; helperPath?: string | null }, cwd: string): Promise<{ output: string }> {
+  if (opts.kind !== 'ssh') {
+    const res = await helperLocalExec('git-stage-all', [cwd]);
+    return { output: (res.stdout || '') + (res.stderr || '') };
+  }
+  if (!opts.sessionId || !opts.helperPath) return { output: 'helper not ready' };
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+  const cmd = `'${esc(opts.helperPath)}' git-stage-all '${esc(cwd)}'`;
+  const res = await sshExec(opts.sessionId, cmd);
+  return { output: (res.stdout || '') + (res.stderr || '') };
+}
+
+export async function gitUnstageAll(opts: { kind?: 'local' | 'ssh'; sessionId?: string; helperPath?: string | null }, cwd: string): Promise<{ output: string }> {
+  if (opts.kind !== 'ssh') {
+    const res = await helperLocalExec('git-unstage-all', [cwd]);
+    return { output: (res.stdout || '') + (res.stderr || '') };
+  }
+  if (!opts.sessionId || !opts.helperPath) return { output: 'helper not ready' };
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+  const cmd = `'${esc(opts.helperPath)}' git-unstage-all '${esc(cwd)}'`;
+  const res = await sshExec(opts.sessionId, cmd);
+  return { output: (res.stdout || '') + (res.stderr || '') };
+}
+
+export async function gitPull(opts: { kind?: 'local' | 'ssh'; sessionId?: string; helperPath?: string | null }, cwd: string): Promise<{ output: string }> {
+  if (opts.kind !== 'ssh') {
+    const res = await helperLocalExec('git-pull', [cwd]);
+    return { output: (res.stdout || '') + (res.stderr || '') };
+  }
+  if (!opts.sessionId || !opts.helperPath) return { output: 'helper not ready' };
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+  const cmd = `'${esc(opts.helperPath)}' git-pull '${esc(cwd)}'`;
+  const res = await sshExec(opts.sessionId, cmd);
+  return { output: (res.stdout || '') + (res.stderr || '') };
+}
+
+export async function gitPush(opts: { kind?: 'local' | 'ssh'; sessionId?: string; helperPath?: string | null }, cwd: string): Promise<{ output: string }> {
+  if (opts.kind !== 'ssh') {
+    const res = await helperLocalExec('git-push', [cwd]);
+    return { output: (res.stdout || '') + (res.stderr || '') };
+  }
+  if (!opts.sessionId || !opts.helperPath) return { output: 'helper not ready' };
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+  const cmd = `'${esc(opts.helperPath)}' git-push '${esc(cwd)}'`;
+  const res = await sshExec(opts.sessionId, cmd);
+  return { output: (res.stdout || '') + (res.stderr || '') };
+}
+
 function normalize(j: any): GitStatus {
   return {
     branch: typeof j?.branch === 'string' ? j.branch : '- ',

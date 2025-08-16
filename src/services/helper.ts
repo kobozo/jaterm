@@ -120,6 +120,52 @@ EOF
     cd "$DIR" 2>/dev/null || cd .
     git restore --staged -- "$FILE" 2>&1
     ;;
+  git-discard)
+    DIR="$2"; FILE="$3"
+    case "$DIR" in
+      ~*) DIR="$HOME${'${DIR#~}'}";;
+    esac
+    if [ -z "$DIR" ]; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    # Restore both index and worktree to HEAD; if untracked, remove file.
+    git restore --source=HEAD --staged --worktree -- "$FILE" 2>&1 || rm -f -- "$FILE" 2>&1
+    ;;
+  git-stage-all)
+    DIR="$2"
+    case "$DIR" in
+      ~*) DIR="$HOME${'${DIR#~}'}";;
+    esac
+    if [ -z "$DIR" ] ; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    git add -A 2>&1
+    ;;
+  git-unstage-all)
+    DIR="$2"
+    case "$DIR" in
+      ~*) DIR="$HOME${'${DIR#~}'}";;
+    esac
+    if [ -z "$DIR" ] ; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    git reset HEAD -- . 2>&1
+    ;;
+  git-pull)
+    DIR="$2"
+    case "$DIR" in
+      ~*) DIR="$HOME${'${DIR#~}'}";;
+    esac
+    if [ -z "$DIR" ] ; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    git pull --rebase 2>&1
+    ;;
+  git-push)
+    DIR="$2"
+    case "$DIR" in
+      ~*) DIR="$HOME${'${DIR#~}'}";;
+    esac
+    if [ -z "$DIR" ] ; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    git push 2>&1
+    ;;
   *)
     echo "jaterm-agent: unknown command: $1" 1>&2
     exit 1
