@@ -69,6 +69,24 @@ EOF
     cd "$DIR" 2>/dev/null || cd .
     if [ "$MODE" = "staged" ]; then git diff --cached -- "$FILE" 2>/dev/null; else git diff -- "$FILE" 2>/dev/null; fi
     ;;
+  git-commit)
+    DIR="$2"; shift 2; MSG="$*"
+    case "$DIR" in
+      ~*) DIR="$HOME${DIR#~}" ;;
+    esac
+    if [ -z "$DIR" ]; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    git commit -m "$MSG" 2>&1
+    ;;
+  git-sync)
+    DIR="$2"
+    case "$DIR" in
+      ~*) DIR="$HOME${DIR#~}" ;;
+    esac
+    if [ -z "$DIR" ]; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    git pull --rebase 2>&1 && git push 2>&1
+    ;;
   *)
     echo "jaterm-agent: unknown command: $1" 1>&2
     exit 1

@@ -18,6 +18,8 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   const [files, setFiles] = React.useState<GitChange[]>([]);
   const [selected, setSelected] = React.useState<{ path: string; staged: boolean } | null>(null);
   const [diffText, setDiffText] = React.useState<string>('');
+  const [commitMsg, setCommitMsg] = React.useState<string>('');
+  const [busy, setBusy] = React.useState<boolean>(false);
 
   async function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -140,7 +142,46 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   return (
     <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* Left: file tree grouped by Staged / Changes */}
-      <div style={{ width: 320, borderRight: '1px solid #333', padding: 8, boxSizing: 'border-box', overflow: 'auto' }}>
+      <div style={{ width: 360, borderRight: '1px solid #333', padding: 8, boxSizing: 'border-box', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Commit box */}
+        <div>
+          <textarea
+            placeholder="Commit message"
+            value={commitMsg}
+            onChange={(e) => setCommitMsg(e.target.value)}
+            style={{ width: '100%', minHeight: 60, boxSizing: 'border-box', background: '#151515', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 8 }}
+          />
+          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
+            {!commitMsg && status && (
+              <span style={{ opacity: 0.8 }}>Ahead/Behind: {status.ahead} / {status.behind}</span>
+            )}
+            <button
+              disabled={disabled || busy}
+              onClick={async () => {
+                if (!cwd) return;
+                setBusy(true);
+                try {
+                  const abs = kind === 'ssh' ? cwd : await resolvePathAbsolute(cwd);
+                  if (commitMsg.trim()) {
+                    const { gitCommit } = await import('@/services/git');
+                    const res = await gitCommit({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, commitMsg.trim());
+                    console.info('[git] commit', res.output);
+                    setCommitMsg('');
+                  } else {
+                    const { gitSync } = await import('@/services/git');
+                    const res = await gitSync({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
+                    console.info('[git] sync', res.output);
+                  }
+                  await refresh();
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {commitMsg.trim() ? 'Commit' : 'Sync'}
+            </button>
+          </div>
+        </div>
         <div style={{ fontWeight: 600, margin: '4px 0' }}>Staged</div>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {files.filter(f => f.staged).map((f) => (
