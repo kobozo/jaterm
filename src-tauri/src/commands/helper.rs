@@ -88,6 +88,24 @@ EOF
     cd "$DIR" 2>/dev/null || cd .
     git pull --rebase 2>&1 && git push 2>&1
     ;;
+  git-stage)
+    DIR="$2"; FILE="$3"
+    case "$DIR" in
+      ~*) DIR="$HOME${DIR#~}" ;;
+    esac
+    if [ -z "$DIR" ]; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    git add -- "$FILE" 2>&1
+    ;;
+  git-unstage)
+    DIR="$2"; FILE="$3"
+    case "$DIR" in
+      ~*) DIR="$HOME${DIR#~}" ;;
+    esac
+    if [ -z "$DIR" ]; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    git restore --staged -- "$FILE" 2>&1
+    ;;
   *)
     echo "jaterm-agent: unknown command: $1" 1>&2
     exit 1

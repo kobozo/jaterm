@@ -215,24 +215,76 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
         const code = stagedFlag ? (f.x || ' ') : (f.y || ' ');
         const isDeleted = (stagedFlag ? f.x : f.y) === 'D';
         return (
-          <li key={(stagedFlag ? 'st-' : 'ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', cursor: 'pointer', background: isSel ? '#2b2b2b' : 'transparent' }} onClick={async () => {
+          <li key={(stagedFlag ? 'st-' : 'ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', cursor: 'pointer', background: isSel ? '#2b2b2b' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }} onClick={async () => {
             setSelected({ path: f.path, staged: stagedFlag });
             const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
             const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, stagedFlag);
             setDiffText(dt);
           }}>
             {badge(code)}
-            <span style={{ textDecoration: isDeleted ? 'line-through' as const : 'none' }}>{n.name}</span>
+            <span style={{ flex: 1, textDecoration: isDeleted ? 'line-through' as const : 'none' }}>{n.name}</span>
+            <span>
+              {stagedFlag ? (
+                <button
+                  style={{ fontSize: 11, marginLeft: 8 }}
+                  title="Unstage"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!cwd) return;
+                    setBusy(true);
+                    try {
+                      const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
+                      const { gitUnstageFile } = await import('@/services/git');
+                      await gitUnstageFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path);
+                      await refresh();
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Unstage
+                </button>
+              ) : (
+                <button
+                  style={{ fontSize: 11, marginLeft: 8 }}
+                  title="Stage"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!cwd) return;
+                    setBusy(true);
+                    try {
+                      const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
+                      const { gitStageFile } = await import('@/services/git');
+                      await gitStageFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path);
+                      await refresh();
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Stage
+                </button>
+              )}
+            </span>
           </li>
         );
       }
       // directory node
       return (
-        <li key={(stagedFlag ? 'dir-st-' : 'dir-ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', color: '#bbb' }}>
+        <li key={(stagedFlag ? 'dir-st-' : 'dir-ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', color: '#bbb', cursor: 'pointer' }} onClick={() => {
+          setCollapsed((prev) => {
+            const next = new Set(prev);
+            if (next.has(n.fullPath)) next.delete(n.fullPath); else next.add(n.fullPath);
+            return next;
+          });
+        }}>
+          <span style={{ marginRight: 6 }}>{collapsed.has(n.fullPath) ? '▸' : '▾'}</span>
           {n.name}
-          <ul style={{ margin: 0, padding: 0 }}>
-            {renderTree(n.children || [], depth + 1, stagedFlag)}
-          </ul>
+          {!collapsed.has(n.fullPath) && (
+            <ul style={{ margin: 0, padding: 0 }}>
+              {renderTree(n.children || [], depth + 1, stagedFlag)}
+            </ul>
+          )}
         </li>
       );
     });
