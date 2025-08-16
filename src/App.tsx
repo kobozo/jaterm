@@ -14,6 +14,8 @@ import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
 import { appQuit, gitStatus, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite } from '@/types/ipc';
+import { useToasts } from '@/store/toasts';
+import { ensureHelper } from '@/services/helper';
 
 export default function App() {
   // imported above
@@ -33,6 +35,9 @@ export default function App() {
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
   const [composeOpen, setComposeOpen] = useState(false);
+  const { show, update, dismiss } = ((): any => {
+    try { return (require('@/store/toasts') as any); } catch { return {}; }
+  })();
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
@@ -270,6 +275,8 @@ export default function App() {
   async function openSshFor(tabId: string, opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string }) {
     try {
       const sessionId = await sshConnect({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: opts.auth.password, key_path: opts.auth.keyPath, passphrase: opts.auth.passphrase, agent: opts.auth.agent } as any, timeout_ms: 15000 });
+      // Ensure helper in background (non-blocking)
+      try { (ensureHelper as any)?.(sessionId, { show, update, dismiss }); } catch {}
       const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, kind: 'ssh', sshSessionId: sessionId, profileId: opts.profileId, cwd: opts.cwd ?? null, panes: [chanId], activePane: chanId, status: { ...t.status } } : t)));
       setActiveTab(tabId);

@@ -5,6 +5,7 @@ import { addRecent, getRecents, removeRecent, clearRecents } from '@/store/recen
 import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
 import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, type LocalProfile, type SshProfileStored } from '@/store/persist';
 import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec } from '@/types/ipc';
+import { ensureHelper } from '@/services/helper';
 import { useToasts } from '@/store/toasts';
 
 import type { RecentSession } from '@/store/sessions';
@@ -290,33 +291,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     await sshSftpMkdirs(sessionId, helperDir);
                     // Minimal placeholder helper script
                     const content = '#!/bin/sh\n\ncase "$1" in\n  health)\n    echo "{\\"ok\\":true,\\"version\\":\\"0.1.0\\"}"\n    exit 0\n    ;;\n  *)\n    echo "jaterm-agent: unknown command: $1" 1>&2\n    exit 1\n    ;;\nesac\n';
-                    const b64 = btoa(content);
-                    const toastId = show({ title: 'Installing helper', message: helperPath, progress: { current: 0, total: content.length }, kind: 'info' });
-                    const unlisten = await onSshUploadProgress((p) => {
-                      update(toastId, { progress: { current: p.written, total: p.total } });
-                      if (p.written >= p.total) {
-                        update(toastId, { title: 'Helper uploaded', kind: 'success' });
-                        setTimeout(() => dismiss(toastId), 1200);
-                      }
-                    });
-                    try {
-                      await sshSftpWrite(sessionId, helperPath, b64);
-                      // chmod +x
-                      await sshExec(sessionId, `chmod +x '${helperPath.replace(/'/g, "'\\''")}'`);
-                      // Health check
-                      const res = await sshExec(sessionId, `'${helperPath.replace(/'/g, "'\\''")}' health`);
-                      if (res.exit_code === 0) {
-                        const ok = (() => { try { return JSON.parse(res.stdout).ok; } catch { return false; } })();
-                        if (!ok) throw new Error('Helper health returned invalid response');
-                        const tid = show({ title: 'Helper ready', message: res.stdout, kind: 'success' });
-                        setTimeout(() => dismiss(tid), 1800);
-                      } else {
-                        throw new Error('Helper health failed: ' + res.stderr);
-                      }
-                    } finally {
-                      unlisten();
-                      try { await sshDisconnect(sessionId); } catch {}
-                    }
+                    await ensureHelper(sessionId, { show, update, dismiss });
+                    try { await sshDisconnect(sessionId); } catch {}
                   } catch (e) {
                     const tid = show({ title: 'Install helper failed', message: String(e), kind: 'error' });
                     setTimeout(() => dismiss(tid), 2500);
