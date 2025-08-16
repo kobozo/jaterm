@@ -8,4 +8,5 @@ pub const WATCH_EVENT: &str = "WATCH_EVENT";
 // SSH channel events
 pub const SSH_OUTPUT: &str = "SSH_OUTPUT";
 pub const SSH_EXIT: &str = "SSH_EXIT";
+pub const SSH_UPLOAD_PROGRESS: &str = "SSH_UPLOAD_PROGRESS";
 pub const SSH_OPENED: &str = "SSH_OPENED";

@@ -175,6 +175,25 @@ export function sshSftpList(sessionId: string, path: string): Promise<SftpEntry[
   return invoke('ssh_sftp_list', { sessionId, path } as any);
 }
 
+export function sshSftpMkdirs(sessionId: string, path: string): Promise<void> {
+  return invoke('ssh_sftp_mkdirs', { sessionId, path } as any);
+}
+
+export function sshSftpWrite(sessionId: string, remotePath: string, dataBase64: string): Promise<void> {
+  // Tauri maps snake_case param `data_b64` to camelCase `dataB64` in JS
+  return invoke('ssh_sftp_write', { sessionId, remotePath, dataB64: dataBase64 } as any);
+}
+
+export type SshUploadProgress = { path: string; written: number; total: number };
+export function onSshUploadProgress(handler: (e: SshUploadProgress) => void): Promise<UnlistenFn> {
+  return listen<SshUploadProgress>('SSH_UPLOAD_PROGRESS', (ev) => handler(ev.payload));
+}
+
+export type ExecResult = { stdout: string; stderr: string; exit_code: number };
+export function sshExec(sessionId: string, command: string): Promise<ExecResult> {
+  return invoke('ssh_exec', { sessionId, command } as any);
+}
+
 // App controls
 export function appQuit(): Promise<void> {
   return invoke('app_quit');

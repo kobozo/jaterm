@@ -4,7 +4,9 @@ import { homeDir } from '@tauri-apps/api/path';
 import { addRecent, getRecents, removeRecent, clearRecents } from '@/store/recents';
 import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
 import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, type LocalProfile, type SshProfileStored } from '@/store/persist';
-import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList } from '@/types/ipc';
+import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec } from '@/types/ipc';
+import { ensureHelper } from '@/services/helper';
+import { useToasts } from '@/store/toasts';
 
 import type { RecentSession } from '@/store/sessions';
 
@@ -15,6 +17,7 @@ type Props = {
 };
 
 export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Props) {
+  const { show, update, dismiss } = useToasts();
   const [recents, setRecents] = useState<{ path: string; lastOpenedAt: number }[]>([]);
   const [recentSessions, setRecentSessions] = useState<{ cwd: string; closedAt: number; panes?: number }[]>([]);
   const [recentSsh, setRecentSsh] = useState<{ profileId: string; path: string; closedAt: number }[]>([]);
@@ -164,7 +167,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
           <ul>
             {recentSessions.map((s) => (
               <li key={`${s.cwd}-${s.closedAt}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <a href="#" onClick={(e) => { e.preventDefault(); (onOpenSession ? onOpenSession(s) : onOpenFolder(s.cwd)); }} title={new Date(s.closedAt).toLocaleString()}>
+                <a href="#" onClick={(e) => { e.preventDefault(); (onOpenSession ? onOpenSession(s) : onOpenFolder(s.cwd)); }} title={s.cwd + ' — ' + new Date(s.closedAt).toLocaleString()}>
                   {s.cwd} {typeof s.panes === 'number' ? `(panes: ${s.panes})` : ''}
                 </a>
                 <button onClick={async () => { await removeRecentSession(s.cwd); setRecentSessions(await getRecentSessions()); }} title="Remove">×</button>
@@ -183,18 +186,23 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
           <ul>
             {recentSsh.map((s) => (
               <li key={`${s.profileId}-${s.path}-${s.closedAt}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <a href="#" onClick={(e) => { e.preventDefault();
+                <a href="#" title={s.path + ' — ' + new Date(s.closedAt).toLocaleString()} onClick={(e) => { e.preventDefault();
                   // Look up profile
                   (async () => {
                     const all = await getSshProfiles();
-                    const p = all.find((x) => x.id === s.profileId);
-                    if (!p) { alert('Profile not found'); return; }
-                    onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: s.path });
+                    const p = s.profileId ? all.find((x) => x.id === s.profileId) : undefined;
+                    if (p) {
+                      onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: s.path, profileId: p.id });
+                    } else if (s.host && s.user) {
+                      onOpenSsh?.({ host: s.host, port: s.port ?? 22, user: s.user, auth: { agent: true } as any, cwd: s.path });
+                    } else {
+                      alert('Cannot open SSH recent: profile missing and no host/user stored');
+                    }
                   })();
-                }} title={new Date(s.closedAt).toLocaleString()}>
+                }}>
                   {s.path}
                 </a>
-                <button onClick={async () => { await removeRecentSshSession(s.profileId, s.path); setRecentSsh(await getRecentSshSessions()); }} title="Remove">×</button>
+                <button onClick={async () => { await removeRecentSshSession((s.profileId || ''), s.path); setRecentSsh(await getRecentSshSessions()); }} title="Remove">×</button>
               </li>
             ))}
           </ul>
@@ -222,7 +230,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             <ul>
               {sshProfiles.map((p) => (
                 <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>{p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}</span>
+                  <span title={(p.name || `${p.user}@${p.host}`) + (p.path ? `: ${p.path}` : '')}>{p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}</span>
                   <button onClick={async () => {
                     if (!onOpenSsh) return;
                     onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id });
@@ -277,7 +285,24 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   } catch (e) { alert('SSH browse failed: ' + (e as any)); }
                 }}>Browse…</button>
               </div>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+                <button onClick={async () => {
+                  // Background install of helper with progress toast
+                  try {
+                    const sessionId = await sshConnect({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
+                    const home = await sshHomeDir(sessionId);
+                    const helperDir = home.replace(/\/+$/, '') + '/.jaterm-helper';
+                    const helperPath = helperDir + '/jaterm-agent';
+                    await sshSftpMkdirs(sessionId, helperDir);
+                    // Minimal placeholder helper script
+                    const content = '#!/bin/sh\n\ncase "$1" in\n  health)\n    echo "{\\"ok\\":true,\\"version\\":\\"0.1.0\\"}"\n    exit 0\n    ;;\n  *)\n    echo "jaterm-agent: unknown command: $1" 1>&2\n    exit 1\n    ;;\nesac\n';
+                    await ensureHelper(sessionId, { show, update, dismiss });
+                    try { await sshDisconnect(sessionId); } catch {}
+                  } catch (e) {
+                    const tid = show({ title: 'Install helper failed', message: String(e), kind: 'error' });
+                    setTimeout(() => dismiss(tid), 2500);
+                  }
+                }}>Install Helper</button>
                 <button onClick={() => setSpOpen(false)}>Cancel</button>
                 <button onClick={async () => {
                   if (!spForm.id) spForm.id = crypto.randomUUID();

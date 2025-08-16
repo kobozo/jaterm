@@ -36,6 +36,9 @@ fn main() {
       commands::ssh::ssh_close_tunnel,
       commands::ssh::ssh_home_dir,
       commands::ssh::ssh_sftp_list,
+      commands::ssh::ssh_sftp_mkdirs,
+      commands::ssh::ssh_sftp_write,
+      commands::ssh::ssh_exec,
       commands::git::git_status,
       commands::watcher::watch_subscribe
     ])

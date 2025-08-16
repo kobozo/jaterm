@@ -8,10 +8,13 @@ import type { LayoutShape } from '@/store/sessions';
 import ComposeDrawer from '@/components/ComposeDrawer';
 import TabsBar from '@/components/TabsBar';
 import SplitTree, { LayoutNode, LayoutSplit, LayoutLeaf } from '@/components/SplitTree';
+import Toaster from '@/components/Toaster';
 import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
 import { appQuit, gitStatus, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite } from '@/types/ipc';
+import { useToasts } from '@/store/toasts';
+import { ensureHelper } from '@/services/helper';
 
 export default function App() {
   // imported above
@@ -22,15 +25,18 @@ export default function App() {
     id: string;
     kind?: 'local' | 'ssh';
     sshSessionId?: string;
+    profileId?: string;
+    openPath?: string | null;
     cwd: string | null;
     panes: string[];
     activePane: string | null;
-    status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean };
+    status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean; helperOk?: boolean; helperVersion?: string };
     title?: string;
   };
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
   const [composeOpen, setComposeOpen] = useState(false);
+  const { show, update, dismiss } = useToasts();
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
@@ -141,6 +147,11 @@ export default function App() {
       await new Promise((r) => setTimeout(r, 120));
       try { await ptyKill({ ptyId: id }); } catch {}
     }
+    // Precompute whether we should record an SSH recent after state update
+    const shouldRecordSshRecent = !!(t && t.kind === 'ssh' && (t as any).profileId);
+    const sshProfileId = (t as any)?.profileId as string | undefined;
+    const sshOpenPath = (t as any)?.openPath as string | undefined;
+    const sshPathAtClosePre = (t?.status?.fullPath ?? t?.cwd) as string | undefined;
     setTabs((prev) => prev.map((t) => {
       if (t.id !== activeTab) return t;
       const nextPanes = t.panes.filter((p) => p !== id);
@@ -151,6 +162,24 @@ export default function App() {
       }
       return updated;
     }));
+    // If this was an SSH tab and we just closed its last pane, record the SSH recent with the last detected path (if changed from openPath)
+    let wasLastPaneFlag = false;
+    try {
+      const current = tabs.find((x) => x.id === activeTab);
+      const wasLastPane = current ? current.panes.length === 1 : false;
+      wasLastPaneFlag = wasLastPane;
+      const latestTab = tabs.find((x) => x.id === activeTab);
+      const sshPathAtClose = (latestTab?.status?.fullPath ?? latestTab?.cwd ?? sshPathAtClosePre) as string | undefined;
+      const pathChanged = sshOpenPath ? (sshPathAtClose && sshPathAtClose !== sshOpenPath) : !!sshPathAtClose;
+      if (shouldRecordSshRecent && wasLastPane && sshProfileId && sshPathAtClose && pathChanged) {
+        const { addRecentSshSession } = await import('@/store/sessions');
+        await addRecentSshSession({ profileId: sshProfileId, path: sshPathAtClose, closedAt: Date.now(), panes: 1, title: t?.title ?? undefined, layoutShape: undefined });
+      }
+    } catch {}
+    // Always auto-close the SSH tab if no panes remain (parity with local)
+    if (t?.kind === 'ssh' && wasLastPaneFlag) {
+      setTimeout(() => closeTab(activeTab), 0);
+    }
   }
 
   async function updateTabCwd(tabId: string, dir: string) {
@@ -187,6 +216,16 @@ export default function App() {
     const toRecord = tabs.find((t) => t.id === id);
     if (toRecord && toRecord.kind !== 'ssh' && (toRecord.status.cwd || toRecord.cwd)) {
       addRecentSession({ cwd: (toRecord.status.cwd ?? toRecord.cwd) as string, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
+    }
+    // For SSH, record only if final path differs from initial openPath (if provided)
+    if (toRecord && toRecord.kind === 'ssh' && toRecord.profileId) {
+      const openPath = toRecord.openPath ?? undefined;
+      const finalPath = (toRecord.status.fullPath ?? toRecord.cwd) as string | undefined;
+      const pathChanged = openPath ? (finalPath && finalPath != openPath) : !!finalPath;
+      if (finalPath && pathChanged) {
+        const { addRecentSshSession } = await import('@/store/sessions');
+        await addRecentSshSession({ profileId: toRecord.profileId, path: finalPath, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
+      }
     }
     if (toRecord?.activePane) {
       if (toRecord.kind === 'ssh') {
@@ -268,8 +307,14 @@ export default function App() {
   async function openSshFor(tabId: string, opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string }) {
     try {
       const sessionId = await sshConnect({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: opts.auth.password, key_path: opts.auth.keyPath, passphrase: opts.auth.passphrase, agent: opts.auth.agent } as any, timeout_ms: 15000 });
+      // Ensure helper in background (non-blocking) and record status in tab
+      try {
+        (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then((res: any) => {
+          setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version } } : t)));
+        });
+      } catch {}
       const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, kind: 'ssh', sshSessionId: sessionId, profileId: opts.profileId, cwd: opts.cwd ?? null, panes: [chanId], activePane: chanId, status: { ...t.status } } : t)));
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, kind: 'ssh', sshSessionId: sessionId, profileId: opts.profileId, sshHost: opts.host, sshUser: opts.user, sshPort: opts.port ?? 22, openPath: opts.cwd ?? null, cwd: opts.cwd ?? null, panes: [chanId], activePane: chanId, status: { ...t.status } } : t)));
       setActiveTab(tabId);
     } catch (e) {
       alert('SSH connection failed: ' + (e as any));
@@ -404,7 +449,7 @@ export default function App() {
                     key={pid}
                     id={pid}
                     desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                    onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
+                    onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, cwd: dir, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
                     onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                     onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                     onClose={closePane}
@@ -419,7 +464,7 @@ export default function App() {
                     key={pid}
                     id={pid}
                     desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                    onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
+                    onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, cwd: dir, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
                     onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                     onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                     onClose={closePane}
@@ -492,6 +537,11 @@ export default function App() {
         {active.kind !== 'ssh' && (
           <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} staged={active.status.staged} unstaged={active.status.unstaged} />
         )}
+        {active.kind === 'ssh' && (
+          <div style={{ fontSize: 12, color: active.status.helperOk ? '#8fe18f' : '#f0a1a1' }}>
+            Helper: {active.status.helperOk ? `Ready${active.status.helperVersion ? ' v' + active.status.helperVersion : ''}` : 'Checking / Not installed'}
+          </div>
+        )}
         <ComposeDrawer
           open={composeOpen}
           onClose={() => setComposeOpen(false)}
@@ -504,6 +554,7 @@ export default function App() {
           }}
         />
       </div>
+      <Toaster />
     </div>
   );
 }

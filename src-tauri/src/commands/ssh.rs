@@ -81,12 +81,21 @@ pub async fn ssh_home_dir(state: State<'_, crate::state::app_state::AppState>, s
 pub struct SftpEntry { pub name: String, pub path: String, pub is_dir: bool }
 
 use std::path::Path;
+use std::time::Duration;
 
 #[tauri::command]
 pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<Vec<SftpEntry>, String> {
   let mut inner = state.0.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
-  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+  let sftp = loop {
+    match s.sess.sftp() {
+      Ok(h) => break h,
+      Err(e) => {
+        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
+        else { return Err(e.to_string()); }
+      }
+    }
+  };
   let entries = sftp.readdir(Path::new(&path)).map_err(|e| e.to_string())?;
   let mut out = Vec::new();
   for (p, st) in entries {
@@ -102,6 +111,133 @@ pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, 
   // Sort: directories first, then names
   out.sort_by(|a,b| b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
   Ok(out)
+}
+
+#[tauri::command]
+pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<(), String> {
+  eprintln!("[ssh] mkdirs session={} path={}", session_id, path);
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = loop {
+    match s.sess.sftp() {
+      Ok(h) => break h,
+      Err(e) => {
+        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
+        else { return Err(e.to_string()); }
+      }
+    }
+  };
+  let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
+  let mut cur = if path.starts_with('/') { String::from("/") } else { String::new() };
+  for part in parts {
+    if cur != "/" && !cur.is_empty() { cur.push('/'); }
+    cur.push_str(part);
+    let p = Path::new(&cur);
+    // If exists and is dir, continue
+    if let Ok(st) = loop { match sftp.stat(p) { Ok(st) => break Ok(st), Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { break Err(e);} } } } {
+      if st.is_dir() { continue; }
+    }
+    // Try to create; if it fails, check again if it now exists (race) else error
+    if let Err(e) = loop { match sftp.mkdir(p, 0o755) { Ok(_) => break Ok(()), Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { break Err(e);} } } } {
+      eprintln!("[ssh] mkdir failed: {}", e);
+      if let Ok(st) = loop { match sftp.stat(p) { Ok(st) => break Ok(st), Err(e2) => { if matches!(e2.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { break Err(e2);} } } } {
+        if st.is_dir() { continue; }
+      }
+      return Err(e.to_string());
+    }
+  }
+  Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_sftp_write(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String, data_b64: String) -> Result<(), String> {
+  eprintln!("[ssh] sftp_write session={} path={} size={}B", session_id, remote_path, data_b64.len());
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  let bytes = base64::engine::general_purpose::STANDARD.decode(data_b64).map_err(|e| e.to_string())?;
+  let total = bytes.len();
+  let mut written = 0usize;
+  let mut file = loop { match sftp.create(Path::new(&remote_path)) { Ok(f) => break f, Err(e) => { eprintln!("[ssh] sftp create failed: {}", e); if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  while written < total {
+    let end = usize::min(written + 8192, total);
+    let chunk = &bytes[written..end];
+    loop {
+      match file.write_all(chunk) {
+        Ok(_) => break,
+        Err(e) => {
+          if e.kind() == std::io::ErrorKind::WouldBlock { std::thread::sleep(Duration::from_millis(10)); continue; }
+          else { return Err(e.to_string()); }
+        }
+      }
+    }
+    written = end;
+    let _ = app.emit(crate::events::SSH_UPLOAD_PROGRESS, &serde_json::json!({ "path": remote_path, "written": written, "total": total }));
+    std::thread::sleep(Duration::from_millis(1));
+  }
+  Ok(())
+}
+
+#[derive(Serialize)]
+pub struct ExecResult { pub stdout: String, pub stderr: String, pub exit_code: i32 }
+
+#[tauri::command]
+pub async fn ssh_exec(state: State<'_, crate::state::app_state::AppState>, session_id: String, command: String) -> Result<ExecResult, String> {
+  eprintln!("[ssh] exec session={} cmd={}", session_id, command);
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let mut chan = loop { match s.sess.channel_session() { Ok(c) => break c, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  // Keep stderr separate
+  let _ = chan.handle_extended_data(ssh2::ExtendedData::Normal);
+  // Try exec with retry on WouldBlock
+  {
+    let mut attempts = 0;
+    loop {
+      match chan.exec(&command) {
+        Ok(_) => break,
+        Err(e) => {
+          if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) && attempts < 50 {
+            std::thread::sleep(Duration::from_millis(10));
+            attempts += 1;
+            continue;
+          }
+          return Err(format!("exec: {e}"));
+        }
+      }
+    }
+  }
+  let mut out = Vec::new();
+  let mut err = Vec::new();
+  let mut stdout = chan.stream(0);
+  let mut stderr = chan.stream(1);
+  let mut buf_out = [0u8; 8192];
+  let mut buf_err = [0u8; 4096];
+  loop {
+    let mut progressed = false;
+    match stdout.read(&mut buf_out) {
+      Ok(0) => {}
+      Ok(n) => { out.extend_from_slice(&buf_out[..n]); progressed = true; }
+      Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+      Err(e) => return Err(e.to_string()),
+    }
+    match stderr.read(&mut buf_err) {
+      Ok(0) => {}
+      Ok(n) => { err.extend_from_slice(&buf_err[..n]); progressed = true; }
+      Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+      Err(e) => return Err(e.to_string()),
+    }
+    if chan.eof() { break; }
+    if !progressed { std::thread::sleep(Duration::from_millis(10)); }
+  }
+  // Try to get exit status with a short retry loop
+  let mut code = 0i32;
+  for _ in 0..50 {
+    match chan.exit_status() {
+      Ok(c) => { code = c; break; }
+      Err(_) => std::thread::sleep(Duration::from_millis(10)),
+    }
+  }
+  Ok(ExecResult { stdout: String::from_utf8_lossy(&out).to_string(), stderr: String::from_utf8_lossy(&err).to_string(), exit_code: code })
 }
 
 #[tauri::command]
@@ -140,18 +276,15 @@ pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state
     .map_err(|e| format!("request_pty: {e}"))?;
   // Merge STDERR into STDOUT so we don't miss prompts/messages
   let _ = chan.handle_extended_data(ssh2::ExtendedData::Merge);
-  chan.shell().map_err(|e| format!("shell: {e}"))?;
+  // Start the shell without echoing pre-commands. If a cwd is provided, exec a login shell after changing dir.
   if let Some(dir) = cwd {
-    let cmd = format!("cd '{}'\n", dir.replace("'", "'\\''"));
-    chan.write_all(cmd.as_bytes()).map_err(|e| format!("cd: {e}"))?;
-    let _ = chan.flush();
+    let esc = dir.replace("'", "'\\''");
+    // Use bash -lc to change directory and exec user's login shell without printing pre-commands
+    let cmd = format!("bash -lc 'cd \"{}\"; exec $SHELL -l'", esc);
+    chan.exec(&cmd).map_err(|e| format!("exec(shell): {e}"))?;
+  } else {
+    chan.shell().map_err(|e| format!("shell: {e}"))?;
   }
-  // Nudge the remote shell to emit a prompt in case it's waiting
-  let _ = chan.write_all(b"\n");
-  let _ = chan.flush();
-  // Proactively emit OSC7 with current PWD to sync cwd in UI
-  let _ = chan.write_all(b"printf '\x1b]7;file://%s%s\x07' \"$(hostname)\" \"$PWD\"\n");
-  let _ = chan.flush();
   // Channel is ready; start a command-processing thread that also reads output
   let id = format!("chan_{}", nanoid::nanoid!(8));
   {
