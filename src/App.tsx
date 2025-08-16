@@ -551,7 +551,14 @@ export default function App() {
             <div style={{ flex: 1, minWidth: 0, height: '100%', position: 'relative' }}>
               {/* Git view */}
               <div style={{ display: (t.view === 'git') ? 'block' : 'none', height: '100%' }}>
-                <GitTools cwd={t.status.fullPath ?? t.cwd ?? undefined} kind={t.kind} sessionId={(t as any).sshSessionId} helperPath={t.status.helperPath} title={t.title ?? null} />
+                <GitTools
+                  cwd={t.status.fullPath ?? t.cwd ?? undefined}
+                  kind={t.kind}
+                  sessionId={(t as any).sshSessionId}
+                  helperPath={t.status.helperPath}
+                  title={t.title ?? null}
+                  onStatus={(st) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)))}
+                />
               </div>
               {/* Terminal/Welcome view */}
               <div style={{ display: (t.view === 'git') ? 'none' : 'block', height: '100%' }}>
@@ -655,9 +662,7 @@ export default function App() {
         <button onClick={() => setComposeOpen((v) => !v)}>Compose (Cmd/Ctrl+E)</button>
         <button onClick={() => openPathSystem(undefined)}>Open Config Folder</button>
         <button onClick={async () => openPathSystem((await import('@/types/ipc')).getConfigDir ? await (await import('@/types/ipc')).getConfigDir() : undefined)}>View state.json</button>
-        {active.kind !== 'ssh' && (
-          <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} staged={active.status.staged} unstaged={active.status.unstaged} />
-        )}
+        <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} />
         {/* Helper status on all tabs for parity */}
         <div style={{ fontSize: 12, color: active.status.helperOk ? '#8fe18f' : '#f0a1a1' }}>
           Helper: {active.status.helperOk ? `Ready${active.status.helperVersion ? ' v' + active.status.helperVersion : ''}` : 'Checking / Not installed'}

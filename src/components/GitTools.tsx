@@ -8,9 +8,10 @@ type Props = {
   sessionId?: string | null;
   helperPath?: string | null;
   title?: string | null;
+  onStatus?: (st: { branch: string; ahead: number; behind: number; staged: number; unstaged: number }) => void;
 };
 
-export default function GitTools({ cwd, kind, sessionId, helperPath, title }: Props) {
+export default function GitTools({ cwd, kind, sessionId, helperPath, title, onStatus }: Props) {
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<any | null>(null);
@@ -94,6 +95,7 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title }: Pr
       console.info('[git] GitTools refresh cwd=', abs, { kind, sessionId, helperPath });
       const st = await gitStatusViaHelper({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
       setStatus(st);
+      try { onStatus?.(st); } catch {}
     } catch (e: any) {
       setErr(String(e));
     } finally {
