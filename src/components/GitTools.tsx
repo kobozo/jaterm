@@ -46,7 +46,6 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   async function refresh() {
     setLoading(true);
     setErr(null);
-    setStatus(null);
     try {
       if (!cwd) throw new Error('No working directory');
       // Only resolve locally for local sessions; SSH paths are remote and should not be resolved locally
