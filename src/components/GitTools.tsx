@@ -43,8 +43,26 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
     throw lastErr || new Error('sshHomeDir failed');
   }
 
+  function statusEqual(a: any, b: any) {
+    if (!a || !b) return false;
+    return a.branch === b.branch && a.ahead === b.ahead && a.behind === b.behind && a.staged === b.staged && a.unstaged === b.unstaged;
+  }
+
+  function filesEqual(a: GitChange[], b: GitChange[]) {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.length !== b.length) return false;
+    const sa = [...a].sort((x,y)=> (x.staged===y.staged?0:(x.staged?1:-1)) || x.path.localeCompare(y.path) || x.x.localeCompare(y.x) || x.y.localeCompare(y.y));
+    const sb = [...b].sort((x,y)=> (x.staged===y.staged?0:(x.staged?1:-1)) || x.path.localeCompare(y.path) || x.x.localeCompare(y.x) || x.y.localeCompare(y.y));
+    for (let i=0;i<sa.length;i++) {
+      const x = sa[i], y = sb[i];
+      if (x.path!==y.path || x.x!==y.x || x.y!==y.y || x.staged!==y.staged) return false;
+    }
+    return true;
+  }
+
   async function refresh() {
-    setLoading(true);
+    // Keep previous UI; only update when data changes
     setErr(null);
     try {
       if (!cwd) throw new Error('No working directory');
@@ -99,16 +117,22 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
       }
       console.info('[git] GitTools refresh cwd=', abs, { kind, sessionId, helperPath });
       const st = await gitStatusViaHelper({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
-      setStatus(st);
-      try { onStatus?.(st); } catch {}
+      const prevStatus = status;
+      const statusChanged = !prevStatus || !statusEqual(prevStatus, st);
+      if (statusChanged) {
+        setStatus(st);
+        try { onStatus?.(st); } catch {}
+      }
       const ch = await gitListChanges({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
-      setFiles(ch);
-      // Keep selection if still present
-      if (selected) {
+      const prevFiles = files;
+      const filesChanged = !filesEqual(prevFiles, ch);
+      if (filesChanged) setFiles(ch);
+      // Update diff only when selection still present AND there were changes in status/files
+      if (selected && (filesChanged || statusChanged)) {
         const exists = ch.find((c) => c.path === selected.path && c.staged === selected.staged);
         if (exists) {
           const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, selected.path, selected.staged);
-          setDiffText(dt);
+          if (dt !== diffText) setDiffText(dt);
         } else {
           setSelected(null);
           setDiffText('');
@@ -122,7 +146,7 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   }
 
   const helperReady = kind !== 'ssh' || (!!sessionId && !!helperPath);
-  const disabled = loading || !helperReady;
+  const disabled = !helperReady || busy;
 
   // Auto refresh when inputs change (cwd, session/helper, title)
   React.useEffect(() => {
