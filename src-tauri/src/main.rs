@@ -39,6 +39,8 @@ fn main() {
       commands::ssh::ssh_sftp_mkdirs,
       commands::ssh::ssh_sftp_write,
       commands::ssh::ssh_exec,
+      commands::helper::helper_local_ensure,
+      commands::helper::helper_local_exec,
       commands::git::git_status,
       commands::watcher::watch_subscribe
     ])

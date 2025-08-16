@@ -3,6 +3,7 @@ import SplitView from '@/components/SplitView';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import RemoteTerminalPane from '@/components/RemoteTerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
+import GitTools from '@/components/GitTools';
 import Welcome from '@/components/Welcome';
 import type { LayoutShape } from '@/store/sessions';
 import ComposeDrawer from '@/components/ComposeDrawer';
@@ -12,9 +13,10 @@ import Toaster from '@/components/Toaster';
 import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
-import { appQuit, gitStatus, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite } from '@/types/ipc';
+import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite } from '@/types/ipc';
 import { useToasts } from '@/store/toasts';
-import { ensureHelper } from '@/services/helper';
+import { ensureHelper, ensureLocalHelper } from '@/services/helper';
+import { gitStatusViaHelper } from '@/services/git';
 
 export default function App() {
   // imported above
@@ -30,8 +32,9 @@ export default function App() {
     cwd: string | null;
     panes: string[];
     activePane: string | null;
-    status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean; helperOk?: boolean; helperVersion?: string };
+    status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean; helperOk?: boolean; helperVersion?: string; helperChecked?: boolean; helperPath?: string | null };
     title?: string;
+    view?: 'terminal' | 'git';
   };
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
@@ -49,6 +52,12 @@ export default function App() {
       const sid = String(id);
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, cwd: abs, panes: [sid], activePane: sid, status: { ...t.status, fullPath: abs } } : t)));
       setActiveTab(tabId);
+      // Ensure local helper in background and record status
+      try {
+        (ensureLocalHelper as any)?.()?.then((res: any) => {
+          setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path, helperChecked: true } } : t)));
+        });
+      } catch {}
       // Auto-install zsh OSC7 helper on mac if missing (once)
       try {
         const ua = navigator.userAgent.toLowerCase();
@@ -162,19 +171,12 @@ export default function App() {
       }
       return updated;
     }));
-    // If this was an SSH tab and we just closed its last pane, record the SSH recent with the last detected path (if changed from openPath)
+    // If this was an SSH tab and we just closed its last pane, close the tab; saving happens in closeTab
     let wasLastPaneFlag = false;
     try {
       const current = tabs.find((x) => x.id === activeTab);
       const wasLastPane = current ? current.panes.length === 1 : false;
       wasLastPaneFlag = wasLastPane;
-      const latestTab = tabs.find((x) => x.id === activeTab);
-      const sshPathAtClose = (latestTab?.status?.fullPath ?? latestTab?.cwd ?? sshPathAtClosePre) as string | undefined;
-      const pathChanged = sshOpenPath ? (sshPathAtClose && sshPathAtClose !== sshOpenPath) : !!sshPathAtClose;
-      if (shouldRecordSshRecent && wasLastPane && sshProfileId && sshPathAtClose && pathChanged) {
-        const { addRecentSshSession } = await import('@/store/sessions');
-        await addRecentSshSession({ profileId: sshProfileId, path: sshPathAtClose, closedAt: Date.now(), panes: 1, title: t?.title ?? undefined, layoutShape: undefined });
-      }
     } catch {}
     // Always auto-close the SSH tab if no panes remain (parity with local)
     if (t?.kind === 'ssh' && wasLastPaneFlag) {
@@ -183,16 +185,38 @@ export default function App() {
   }
 
   async function updateTabCwd(tabId: string, dir: string) {
-    // Resolve to absolute so we persist correct paths
+    // Resolve to absolute for local sessions only; SSH paths are remote and should not be resolved locally
     let abs = dir;
-    try {
-      const mod = await import('@/types/ipc');
-      abs = await (mod as any).resolvePathAbsolute(dir);
-    } catch {}
+    const tcur = tabs.find((x) => x.id === tabId);
+    const isSsh = tcur?.kind === 'ssh';
+    if (!isSsh) {
+      try {
+        const mod = await import('@/types/ipc');
+        abs = await (mod as any).resolvePathAbsolute(dir);
+      } catch {}
+    } else {
+      // Normalize SSH path with remote home if looks home-relative like "/foo" or starts with "~/"
+      try {
+        const mod = await import('@/types/ipc');
+        const home = tcur?.sshSessionId ? await (mod as any).sshHomeDir(tcur.sshSessionId) : undefined;
+        if (home) {
+          if (abs.startsWith('~/')) {
+            abs = home.replace(/\/$/, '') + abs.slice(1);
+          } else {
+            const isKnownRoot = /^\/(home|usr|var|etc|opt|bin|sbin|lib|tmp|mnt|media|root)\//.test(abs);
+            if (!isKnownRoot && !abs.startsWith(home.replace(/\/$/, '') + '/')) {
+              abs = home.replace(/\/$/, '') + '/' + abs.replace(/^\//, '');
+            }
+          }
+        }
+      } catch {}
+    }
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, cwd: abs, fullPath: abs, seenOsc7: true } } : t)));
     try {
-      const st = await gitStatus(abs);
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true } } : t)));
+      const t = tabs.find((x) => x.id === tabId);
+      console.info('[git] updateTabCwd git-status cwd=', abs, { tabId, kind: t?.kind, helperPath: t?.status?.helperPath, sessionId: (t as any)?.sshSessionId });
+      const st = await gitStatusViaHelper({ kind: t?.kind === 'ssh' ? 'ssh' : 'local', sessionId: (t as any)?.sshSessionId, helperPath: t?.status?.helperPath ?? null }, abs);
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true } } : t)));
     } catch {
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, fullPath: abs, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 } } : t)));
     }
@@ -217,16 +241,7 @@ export default function App() {
     if (toRecord && toRecord.kind !== 'ssh' && (toRecord.status.cwd || toRecord.cwd)) {
       addRecentSession({ cwd: (toRecord.status.cwd ?? toRecord.cwd) as string, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
     }
-    // For SSH, record only if final path differs from initial openPath (if provided)
-    if (toRecord && toRecord.kind === 'ssh' && toRecord.profileId) {
-      const openPath = toRecord.openPath ?? undefined;
-      const finalPath = (toRecord.status.fullPath ?? toRecord.cwd) as string | undefined;
-      const pathChanged = openPath ? (finalPath && finalPath != openPath) : !!finalPath;
-      if (finalPath && pathChanged) {
-        const { addRecentSshSession } = await import('@/store/sessions');
-        await addRecentSshSession({ profileId: toRecord.profileId, path: finalPath, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
-      }
-    }
+    // SSH recents recorded below in a unified normalized form
     if (toRecord?.activePane) {
       if (toRecord.kind === 'ssh') {
         try { await Promise.all(toRecord.panes.map((pid) => sshCloseShell(pid))); } catch {}
@@ -249,10 +264,55 @@ export default function App() {
       }
       return next;
     });
-    // Record SSH recent if opened from a profile
+    // Record SSH recent if opened from a profile (use final path normalization, prefer title-derived path if deeper)
     if (toRecord?.kind === 'ssh' && toRecord.profileId) {
-      const path = (toRecord.status.fullPath ?? toRecord.cwd) as string | undefined;
+      // Prefer parsing the tab title for the final cwd if present
+      let path = (toRecord.status.fullPath ?? toRecord.cwd) as string | undefined;
+      const rawTitle = toRecord.title as string | undefined;
+      let titleCandidate: string | undefined;
+      if (rawTitle) {
+        const mTilde = rawTitle.match(/~\/[\S]+/);
+        if (mTilde && mTilde[0]) titleCandidate = mTilde[0];
+        if (!titleCandidate) {
+          const mAbs = rawTitle.match(/\/[A-Za-z0-9_\-\.\/]+/g);
+          if (mAbs && mAbs.length) titleCandidate = mAbs[mAbs.length - 1];
+        }
+      }
       if (path) {
+        try {
+          const mod = await import('@/types/ipc');
+          // Try to resolve remote home; fallback to derive from helperPath
+          let home: string | undefined = undefined;
+          if (toRecord.sshSessionId) {
+            try { home = await (mod as any).sshHomeDir(toRecord.sshSessionId); } catch {}
+          }
+          if (!home && toRecord.status?.helperPath) {
+            const hp = toRecord.status.helperPath as string;
+            const idx = hp.indexOf('/.jaterm-helper/');
+            if (idx > 0) home = hp.slice(0, idx);
+          }
+          if (home) {
+            if (titleCandidate) {
+              if (titleCandidate.startsWith('~/')) {
+                titleCandidate = home.replace(/\/$/, '') + titleCandidate.slice(1);
+              } else {
+                const isRoot = /^\/(home|usr|var|etc|opt|bin|sbin|lib|tmp|mnt|media|root)\//.test(titleCandidate);
+                if (!isRoot && titleCandidate.startsWith('/')) {
+                  titleCandidate = home.replace(/\/$/, '') + '/' + titleCandidate.replace(/^\//, '');
+                }
+              }
+            }
+            const isKnownRoot = /^\/(home|usr|var|etc|opt|bin|sbin|lib|tmp|mnt|media|root)\//.test(path);
+            if (!isKnownRoot && !path.startsWith(home.replace(/\/$/, '') + '/')) {
+              path = home.replace(/\/$/, '') + '/' + path.replace(/^\//, '');
+            }
+          }
+        } catch {}
+        // If title-derived candidate looks deeper, prefer it
+        if (titleCandidate && (!path || titleCandidate.length > path.length)) {
+          path = titleCandidate;
+        }
+        console.info('[ssh][recents] save final path=', path);
         const { addRecentSshSession } = await import('@/store/sessions');
         await addRecentSshSession({ profileId: toRecord.profileId, path, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
       }
@@ -299,6 +359,12 @@ export default function App() {
       }
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, cwd: abs, status: { ...t.status, fullPath: abs }, title: session.title ?? t.title, panes: paneIds, activePane: paneIds[0], layout } : t)));
       setActiveTab(tabId);
+      // Ensure local helper for restored sessions
+      try {
+        (ensureLocalHelper as any)?.()?.then((res: any) => {
+          setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path, helperChecked: true } } : t)));
+        });
+      } catch {}
     } catch (e) {
       console.error('open session failed', e);
     }
@@ -310,7 +376,7 @@ export default function App() {
       // Ensure helper in background (non-blocking) and record status in tab
       try {
         (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then((res: any) => {
-          setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version } } : t)));
+          setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path } } : t)));
         });
       } catch {}
       const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
@@ -331,6 +397,22 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('jaterm:tab-shown'));
     }, 0);
   }, [activeTab]);
+
+  // Ensure local helper when a local tab becomes active and has a cwd, if not checked yet
+  React.useEffect(() => {
+    const t = tabs.find((x) => x.id === activeTab);
+    if (!t) return;
+    const hasCwd = !!(t.status?.fullPath || t.cwd);
+    const isLocal = t.kind !== 'ssh';
+    const checked = (t.status as any)?.helperChecked === true || typeof t.status?.helperOk !== 'undefined' || typeof t.status?.helperVersion !== 'undefined';
+    if (isLocal && hasCwd && !checked) {
+      (ensureLocalHelper as any)?.()?.then((res: any) => {
+        setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path, helperChecked: true } } : tb)));
+      }).catch(() => {
+        setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, helperOk: false, helperChecked: true } } : tb)));
+      });
+    }
+  }, [tabs, activeTab]);
 
   // Persist workspace on changes (local tabs only)
   React.useEffect(() => {
@@ -439,77 +521,116 @@ export default function App() {
       {/* Render all tabs' content; hide inactive with display:none to preserve xterm buffers */}
       {tabs.map((t) => (
         <div key={t.id} style={{ display: t.id === activeTab ? 'block' : 'none', height: '100%' }}>
-          {t.kind === 'ssh' ? (
-            t.layout ? (
-              <SplitTree
-                node={t.layout as any}
-                onChange={(n) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, layout: n } : tb)))}
-                renderLeaf={(pid) => (
-                  <RemoteTerminalPane
-                    key={pid}
-                    id={pid}
-                    desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                    onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, cwd: dir, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
+          <div style={{ display: 'flex', height: '100%', width: '100%' }}>
+            {/* Sidebar */}
+            <div style={{ width: 44, borderRight: '1px solid #333', display: 'flex', flexDirection: 'column', gap: 6, padding: 6, boxSizing: 'border-box' }}>
+              <button
+                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: (t.view ?? 'terminal') === 'terminal' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
+                onClick={() => {
+                  setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'terminal' } : tb)));
+                  setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('jaterm:panes-resized'));
+                    window.dispatchEvent(new CustomEvent('jaterm:tab-shown'));
+                  }, 0);
+                }}
+                title="Terminal"
+              >
+                ⌘
+              </button>
+              <button
+                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'git' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
+                onClick={() => {
+                  setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'git' } : tb)));
+                }}
+                title="Git Tools"
+              >
+                ⎇
+              </button>
+            </div>
+            {/* Content: render both views and toggle visibility to preserve terminal DOM */}
+            <div style={{ flex: 1, minWidth: 0, height: '100%', position: 'relative' }}>
+              {/* Git view */}
+              <div style={{ display: (t.view === 'git') ? 'block' : 'none', height: '100%' }}>
+                <GitTools cwd={t.status.fullPath ?? t.cwd ?? undefined} kind={t.kind} sessionId={(t as any).sshSessionId} helperPath={t.status.helperPath} title={t.title ?? null} />
+              </div>
+              {/* Terminal/Welcome view */}
+              <div style={{ display: (t.view === 'git') ? 'none' : 'block', height: '100%' }}>
+                {t.kind === 'ssh' ? (
+                  t.layout ? (
+                    <SplitTree
+                      node={t.layout as any}
+                      onChange={(n) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, layout: n } : tb)))}
+                      renderLeaf={(pid) => (
+                        <RemoteTerminalPane
+                          key={pid}
+                          id={pid}
+                          desiredCwd={undefined}
+                          sessionId={(t as any).sshSessionId}
+                          onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
                     onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                     onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                     onClose={closePane}
                     onSplit={(pane, dir) => splitPane(pane, dir)}
                   />
+                      )}
+                    />
+                  ) : (
+                    <SplitView>
+                      {t.panes.map((pid) => (
+                        <RemoteTerminalPane
+                          key={pid}
+                          id={pid}
+                          desiredCwd={undefined}
+                          sessionId={(t as any).sshSessionId}
+                          onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
+                    onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
+                    onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
+                    onClose={closePane}
+                    onSplit={(pane, dir) => splitPane(pane, dir)}
+                  />
+                      ))}
+                    </SplitView>
+                  )
+                ) : t.cwd ? (
+                  t.layout ? (
+                    <SplitTree
+                      node={t.layout as any}
+                      onChange={(n) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, layout: n } : tb)))}
+                      renderLeaf={(pid) => (
+                        <TerminalPane
+                          key={pid}
+                          id={pid}
+                          desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
+                          onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
+                          onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
+                          onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
+                          onClose={closePane}
+                          onSplit={(pane, dir) => splitPane(pane, dir)}
+                        />
+                      )}
+                    />
+                  ) : (
+                    <SplitView>
+                      {t.panes.map((pid) => (
+                        <TerminalPane
+                          key={pid}
+                          id={pid}
+                          desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
+                          onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
+                          onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
+                          onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
+                          onClose={closePane}
+                          onSplit={(pane, dir) => splitPane(pane, dir)}
+                        />
+                      ))}
+                    </SplitView>
+                  )
+                ) : (
+                  <Welcome onOpenFolder={(p) => openFolderFor(t.id, p)} onOpenSession={(s) => openSessionFor(t.id, s)} onOpenSsh={(o) => openSshFor(t.id, o)} />
                 )}
-              />
-            ) : (
-              <SplitView>
-                {t.panes.map((pid) => (
-                  <RemoteTerminalPane
-                    key={pid}
-                    id={pid}
-                    desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                    onCwd={(_pid, dir) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, cwd: dir, status: { ...tt.status, cwd: dir, fullPath: dir } } : tt)))}
-                    onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
-                    onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
-                    onClose={closePane}
-                    onSplit={(pane, dir) => splitPane(pane, dir)}
-                  />
-                ))}
-              </SplitView>
-            )
-          ) : t.cwd ? (
-            t.layout ? (
-              <SplitTree
-                node={t.layout as any}
-                onChange={(n) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, layout: n } : tb)))}
-                renderLeaf={(pid) => (
-                  <TerminalPane
-                    key={pid}
-                    id={pid}
-                    desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                    onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
-                    onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
-                    onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
-                    onClose={closePane}
-                    onSplit={(pane, dir) => splitPane(pane, dir)}
-                  />
-                )}
-              />
-            ) : (
-              <SplitView>
-                {t.panes.map((pid) => (
-                  <TerminalPane
-                    key={pid}
-                    id={pid}
-                    desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                    onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
-                    onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
-                    onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
-                    onClose={closePane}
-                    onSplit={(pane, dir) => splitPane(pane, dir)}
-                  />
-                ))}
-              </SplitView>
-            )
-          ) : (
-            <Welcome onOpenFolder={(p) => openFolderFor(t.id, p)} onOpenSession={(s) => openSessionFor(t.id, s)} onOpenSsh={(o) => openSshFor(t.id, o)} />
-          )}
+              </div>
+            </div>
+          </div>
         </div>
       ))}
       {/* Single status bar for active tab */}
@@ -537,11 +658,10 @@ export default function App() {
         {active.kind !== 'ssh' && (
           <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} staged={active.status.staged} unstaged={active.status.unstaged} />
         )}
-        {active.kind === 'ssh' && (
-          <div style={{ fontSize: 12, color: active.status.helperOk ? '#8fe18f' : '#f0a1a1' }}>
-            Helper: {active.status.helperOk ? `Ready${active.status.helperVersion ? ' v' + active.status.helperVersion : ''}` : 'Checking / Not installed'}
-          </div>
-        )}
+        {/* Helper status on all tabs for parity */}
+        <div style={{ fontSize: 12, color: active.status.helperOk ? '#8fe18f' : '#f0a1a1' }}>
+          Helper: {active.status.helperOk ? `Ready${active.status.helperVersion ? ' v' + active.status.helperVersion : ''}` : 'Checking / Not installed'}
+        </div>
         <ComposeDrawer
           open={composeOpen}
           onClose={() => setComposeOpen(false)}

@@ -1,8 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
-import { homeDir } from '@tauri-apps/api/path';
-import { onSshExit, onSshOutput, sshResize, sshWrite } from '@/types/ipc';
+import { onSshExit, onSshOutput, sshResize, sshWrite, sshHomeDir } from '@/types/ipc';
 import { useTerminal } from './TerminalPane/useTerminal';
 
 type Props = {
@@ -13,9 +12,10 @@ type Props = {
   onClose?: (id: string) => void;
   onTitle?: (id: string, title: string) => void;
   onSplit?: (id: string, dir: 'row' | 'column') => void;
+  sessionId?: string;
 };
 
-export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit }: Props) {
+export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
@@ -108,15 +108,52 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     elem?.addEventListener('mousedown', handleFocus);
     const resizeSub = term.onResize(({ cols, rows }) => { if (id) sshResize({ channelId: id, cols, rows }).catch(() => {}); });
     const titleSub = term.onTitleChange?.((title: string) => {
+      console.info('[ssh][title] raw=', title);
       onTitle?.(id, title);
       try {
-        const looksPath = title.startsWith('/') || /^[A-Za-z]:\\/.test(title) || title.startsWith('~');
-        if (looksPath) {
-          if (title.startsWith('~')) {
-            const rest = title.slice(1);
-            homeDir().then((hd) => { const abs = hd.replace(/\/$/, '') + rest; onCwd?.(id, abs); }).catch(() => {});
+        let candidate: string | null = null;
+        // 1) Look for explicit home-relative path like ~/foo/bar
+        const tilde = title.match(/~\/[\S]+/);
+        if (tilde && tilde[0]) {
+          candidate = tilde[0];
+        } else if (title.startsWith('/') || /^[A-Za-z]:\\/.test(title) || title.startsWith('~')) {
+          // 2) Whole title is a path-like
+          candidate = title;
+        } else {
+          // 3) Extract last absolute path-like segment
+          const matches = title.match(/\/[A-Za-z0-9_\-\.\/]+/g);
+          if (matches && matches.length) candidate = matches[matches.length - 1];
+        }
+        if (candidate) {
+          console.info('[ssh][title] candidate=', candidate);
+          if (candidate.startsWith('~')) {
+            const rest = candidate.slice(1);
+            if (sessionId) {
+              sshHomeDir(sessionId).then((hd) => {
+                const abs = hd.replace(/\/$/, '') + rest;
+                console.info('[ssh][title] cwd=', abs);
+                onCwd?.(id, abs);
+              }).catch(() => {});
+            }
+          } else if (candidate.startsWith('/') && sessionId) {
+            // Heuristic: some prompts render home-relative as "/foo" (missing home prefix). Prefix with $HOME unless it's a known root path.
+            const KNOWN_ROOTS = ['/home/', '/usr/', '/var/', '/etc/', '/opt/', '/bin/', '/sbin/', '/lib', '/tmp/', '/mnt/', '/media/', '/root/'];
+            const looksRooted = KNOWN_ROOTS.some((p) => candidate.startsWith(p));
+            sshHomeDir(sessionId).then((hd) => {
+              const home = hd.replace(/\/$/, '') + '/';
+              let abs = candidate;
+              if (!candidate.startsWith(home) && !looksRooted) {
+                abs = home + candidate.replace(/^\//, '');
+              }
+              console.info('[ssh][title] cwd=', abs);
+              onCwd?.(id, abs);
+            }).catch(() => {
+              console.info('[ssh][title] cwd=', candidate);
+              onCwd?.(id, candidate);
+            });
           } else {
-            onCwd?.(id, title);
+            console.info('[ssh][title] cwd=', candidate);
+            onCwd?.(id, candidate);
           }
         }
       } catch {}

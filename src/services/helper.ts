@@ -1,6 +1,6 @@
-import { onSshUploadProgress, sshExec, sshHomeDir, sshSftpMkdirs, sshSftpWrite } from '@/types/ipc';
+import { onSshUploadProgress, sshExec, sshHomeDir, sshSftpMkdirs, sshSftpWrite, helperLocalEnsure } from '@/types/ipc';
 
-export const HELPER_VERSION = '0.1.0';
+export const HELPER_VERSION = '0.1.1';
 export const HELPER_NAME = 'jaterm-agent';
 export const HELPER_REL_DIR = '.jaterm-helper';
 
@@ -11,6 +11,41 @@ case "$1" in
   health)
     echo '{"ok":true,"version":"${HELPER_VERSION}"}'
     exit 0
+    ;;
+  git-status)
+    # Usage: jaterm-agent git-status [path]
+    DIR="$2"
+    # Expand leading ~ to $HOME even when quoted
+    case "$DIR" in
+      ~*) DIR="$HOME${'${DIR#~}'}";;
+    esac
+    if [ -z "$DIR" ]; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      echo '{"branch":"-","ahead":0,"behind":0,"staged":0,"unstaged":0}'
+      exit 0
+    fi
+    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo DETACHED)
+    AHEAD=0; BEHIND=0
+    if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+      # behind ahead order from --left-right --count
+      set -- $(git rev-list --left-right --count @{upstream}...HEAD 2>/dev/null || echo "0 0")
+      BEHIND=$1; AHEAD=$2
+    fi
+    STAGED=0; UNSTAGED=0
+    git status --porcelain 2>/dev/null | while IFS= read -r L; do
+      XY=$(printf "%s" "$L" | cut -c1-2)
+      if [ "$XY" = "??" ]; then UNSTAGED=$((UNSTAGED+1)); continue; fi
+      X=$(printf "%s" "$XY" | cut -c1)
+      Y=$(printf "%s" "$XY" | cut -c2)
+      if [ "$X" != " " ]; then STAGED=$((STAGED+1)); fi
+      if [ "$Y" != " " ]; then UNSTAGED=$((UNSTAGED+1)); fi
+    done
+    # Busybox sh vs bash subshell var scope: recompute counts via awk to be safe
+    read STAGED UNSTAGED <<EOF
+$(git status --porcelain 2>/dev/null | awk 'BEGIN{s=0;u=0} {xy=substr($0,1,2); if (xy=="??") u++; else {x=substr(xy,1,1); y=substr(xy,2,1); if (x!=" ") s++; if (y!=" ") u++;}} END{print s, u}')
+EOF
+    printf '{"branch":"%s","ahead":%s,"behind":%s,"staged":%s,"unstaged":%s}\n' "$BRANCH" "$AHEAD" "$BEHIND" "$STAGED" "$UNSTAGED"
     ;;
   *)
     echo "jaterm-agent: unknown command: $1" 1>&2
@@ -84,6 +119,17 @@ export async function ensureHelper(
       const id = opts.show({ title: 'Helper install failed', message: String(e), kind: 'error' });
       setTimeout(() => opts.dismiss(id), 3000);
     } catch {}
+    return { ok: false };
+  }
+}
+
+// Ensure local helper for local sessions; mirrors SSH ensure but simpler
+export async function ensureLocalHelper(): Promise<HelperStatus> {
+  try {
+    const res = await helperLocalEnsure();
+    return { ok: !!res?.ok, version: res?.version, path: res?.path };
+  } catch (e) {
+    console.error('[helper] local ensure error', e);
     return { ok: false };
   }
 }

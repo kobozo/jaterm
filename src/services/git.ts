@@ -1,14 +1,45 @@
-// Frontend Git helpers that call into Rust
-export type GitStatus = {
-  branch: string;
-  ahead: number;
-  behind: number;
-  staged: number;
-  unstaged: number;
-};
+import { helperLocalExec, sshExec } from '@/types/ipc';
 
-export async function fetchStatus(path: string): Promise<GitStatus> {
-  const { invoke } = await import('./api/tauri');
-  return invoke<GitStatus>('git_status', { path });
+export type GitStatus = { branch: string; ahead: number; behind: number; staged: number; unstaged: number };
+
+export async function gitStatusViaHelper(opts: { kind?: 'local' | 'ssh'; sessionId?: string; helperPath?: string | null }, cwd: string): Promise<GitStatus> {
+  // Local: use helperLocalExec
+  if (opts.kind !== 'ssh') {
+    try {
+      console.info('[git] helper local git-status cwd=', cwd);
+      const res = await helperLocalExec('git-status', [cwd]);
+      if (res.exit_code === 0 && res.stdout) {
+        const j = JSON.parse(res.stdout);
+        return normalize(j);
+      }
+    } catch {}
+    // Fallback: conservative defaults
+    return { branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 };
+  }
+  // SSH: require helperPath + sessionId
+  if (!opts.sessionId || !opts.helperPath) {
+    console.info('[git] helper ssh not ready; sessionId or helperPath missing', { cwd, sessionId: opts.sessionId, helperPath: opts.helperPath });
+    return { branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 };
+  }
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+  try {
+    console.info('[git] helper ssh git-status cwd=', cwd);
+    const cmd = `'${esc(opts.helperPath)}' git-status '${esc(cwd)}'`;
+    const res = await sshExec(opts.sessionId, cmd);
+    if (res.exit_code === 0 && res.stdout) {
+      const j = JSON.parse(res.stdout);
+      return normalize(j);
+    }
+  } catch {}
+  return { branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 };
 }
 
+function normalize(j: any): GitStatus {
+  return {
+    branch: typeof j?.branch === 'string' ? j.branch : '- ',
+    ahead: Number(j?.ahead) || 0,
+    behind: Number(j?.behind) || 0,
+    staged: Number(j?.staged) || 0,
+    unstaged: Number(j?.unstaged) || 0,
+  };
+}

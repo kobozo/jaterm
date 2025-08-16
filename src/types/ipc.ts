@@ -232,3 +232,13 @@ export function installFishOsc7(): Promise<boolean> {
 export function openPathSystem(path?: string): Promise<void> {
   return invoke('open_path_system', { path } as any);
 }
+
+// Local helper (for parity with SSH helper)
+export type HelperStatus = { ok: boolean; version?: string; path?: string };
+export function helperLocalEnsure(): Promise<HelperStatus> {
+  return invoke('helper_local_ensure');
+}
+export type HelperExecResult = { stdout: string; stderr: string; exit_code: number };
+export function helperLocalExec(command: string, args?: string[]): Promise<HelperExecResult> {
+  return invoke('helper_local_exec', { command, args } as any);
+}
