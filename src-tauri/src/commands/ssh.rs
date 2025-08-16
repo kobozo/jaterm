@@ -82,7 +82,6 @@ pub struct SftpEntry { pub name: String, pub path: String, pub is_dir: bool }
 
 use std::path::Path;
 use std::time::Duration;
-use std::io::Read as IoRead;
 
 #[tauri::command]
 pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<Vec<SftpEntry>, String> {
@@ -111,16 +110,22 @@ pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>
   let mut inner = state.0.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
-  let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+  let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
   let mut cur = if path.starts_with('/') { String::from("/") } else { String::new() };
   for part in parts {
     if cur != "/" && !cur.is_empty() { cur.push('/'); }
     cur.push_str(part);
     let p = Path::new(&cur);
-    match sftp.mkdir(p, 0o755) {
-      Ok(_) => {}
-      Err(ref e) if e.code() == ssh2::ErrorCode::Session(-31) || e.code() == ssh2::ErrorCode::SFTP(ssh2::SftpError::FileAlreadyExists as i32) => {}
-      Err(_) => {}
+    // If exists and is dir, continue
+    if let Ok(st) = sftp.stat(p) {
+      if st.is_dir() { continue; }
+    }
+    // Try to create; if it fails, check again if it now exists (race) else error
+    if let Err(e) = sftp.mkdir(p, 0o755) {
+      if let Ok(st) = sftp.stat(p) {
+        if st.is_dir() { continue; }
+      }
+      return Err(e.to_string());
     }
   }
   Ok(())
