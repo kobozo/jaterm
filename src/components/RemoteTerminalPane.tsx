@@ -72,7 +72,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     term.loadAddon(fit);
     const raf = requestAnimationFrame(() => {
       fit.fit();
-      if (id) sshResize({ channelId: id, cols: term.cols, rows: term.rows });
+      if (id) sshResize({ channelId: id, cols: term.cols, rows: term.rows }).catch(() => {});
     });
     const onWinResize = () => {
       fit.fit();
@@ -106,7 +106,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     const handleFocus = () => onFocusPane?.(id);
     elem?.addEventListener('focusin', handleFocus);
     elem?.addEventListener('mousedown', handleFocus);
-    const resizeSub = term.onResize(({ cols, rows }) => { if (id) sshResize({ channelId: id, cols, rows }); });
+    const resizeSub = term.onResize(({ cols, rows }) => { if (id) sshResize({ channelId: id, cols, rows }).catch(() => {}); });
     const titleSub = term.onTitleChange?.((title: string) => {
       onTitle?.(id, title);
       try {

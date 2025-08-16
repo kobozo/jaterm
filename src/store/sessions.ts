@@ -6,7 +6,17 @@ export type LayoutShape = LayoutShapeLeaf | LayoutShapeSplit;
 
 export type RecentSession = { cwd: string; closedAt: number; panes?: number; title?: string; layoutShape?: LayoutShape };
 
-export type RecentSshSession = { profileId: string; path: string; closedAt: number; panes?: number; title?: string; layoutShape?: LayoutShape };
+export type RecentSshSession = {
+  profileId?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  path: string;
+  closedAt: number;
+  panes?: number;
+  title?: string;
+  layoutShape?: LayoutShape;
+};
 
 export async function getRecentSessions(limit = 10): Promise<RecentSession[]> {
   const s = await loadAppState();
@@ -41,7 +51,7 @@ export async function getRecentSshSessions(limit = 10): Promise<RecentSshSession
   const s = await loadAppState();
   const list = (s.recentSshSessions || []) as RecentSshSession[];
   return list
-    .filter((r) => typeof r.profileId === 'string' && typeof r.path === 'string' && typeof r.closedAt === 'number')
+    .filter((r) => typeof r.path === 'string' && typeof r.closedAt === 'number')
     .sort((a, b) => b.closedAt - a.closedAt)
     .slice(0, limit);
 }
@@ -49,15 +59,15 @@ export async function getRecentSshSessions(limit = 10): Promise<RecentSshSession
 export async function addRecentSshSession(sess: RecentSshSession) {
   const s = await loadAppState();
   const list = (s.recentSshSessions || []) as RecentSshSession[];
-  const filtered = list.filter((r) => !(r.profileId === sess.profileId && r.path === sess.path));
+  const filtered = list.filter((r) => !((r.profileId || '') === (sess.profileId || '') && r.path === sess.path));
   filtered.unshift(sess);
   await saveAppState({ recentSshSessions: filtered.slice(0, 50) });
 }
 
-export async function removeRecentSshSession(profileId: string, path: string) {
+export async function removeRecentSshSession(profileIdOrKey: string, path: string) {
   const s = await loadAppState();
   const list = (s.recentSshSessions || []) as RecentSshSession[];
-  const next = list.filter((r) => !(r.profileId === profileId && r.path === path));
+  const next = list.filter((r) => !(((r.profileId || '') === profileIdOrKey) && r.path === path));
   await saveAppState({ recentSshSessions: next });
 }
 

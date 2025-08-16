@@ -167,7 +167,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
           <ul>
             {recentSessions.map((s) => (
               <li key={`${s.cwd}-${s.closedAt}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <a href="#" onClick={(e) => { e.preventDefault(); (onOpenSession ? onOpenSession(s) : onOpenFolder(s.cwd)); }} title={new Date(s.closedAt).toLocaleString()}>
+                <a href="#" onClick={(e) => { e.preventDefault(); (onOpenSession ? onOpenSession(s) : onOpenFolder(s.cwd)); }} title={s.cwd + ' — ' + new Date(s.closedAt).toLocaleString()}>
                   {s.cwd} {typeof s.panes === 'number' ? `(panes: ${s.panes})` : ''}
                 </a>
                 <button onClick={async () => { await removeRecentSession(s.cwd); setRecentSessions(await getRecentSessions()); }} title="Remove">×</button>
@@ -186,18 +186,23 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
           <ul>
             {recentSsh.map((s) => (
               <li key={`${s.profileId}-${s.path}-${s.closedAt}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <a href="#" onClick={(e) => { e.preventDefault();
+                <a href="#" title={s.path + ' — ' + new Date(s.closedAt).toLocaleString()} onClick={(e) => { e.preventDefault();
                   // Look up profile
                   (async () => {
                     const all = await getSshProfiles();
-                    const p = all.find((x) => x.id === s.profileId);
-                    if (!p) { alert('Profile not found'); return; }
-                    onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: s.path });
+                    const p = s.profileId ? all.find((x) => x.id === s.profileId) : undefined;
+                    if (p) {
+                      onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: s.path, profileId: p.id });
+                    } else if (s.host && s.user) {
+                      onOpenSsh?.({ host: s.host, port: s.port ?? 22, user: s.user, auth: { agent: true } as any, cwd: s.path });
+                    } else {
+                      alert('Cannot open SSH recent: profile missing and no host/user stored');
+                    }
                   })();
-                }} title={new Date(s.closedAt).toLocaleString()}>
+                }}>
                   {s.path}
                 </a>
-                <button onClick={async () => { await removeRecentSshSession(s.profileId, s.path); setRecentSsh(await getRecentSshSessions()); }} title="Remove">×</button>
+                <button onClick={async () => { await removeRecentSshSession((s.profileId || ''), s.path); setRecentSsh(await getRecentSshSessions()); }} title="Remove">×</button>
               </li>
             ))}
           </ul>
@@ -225,7 +230,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             <ul>
               {sshProfiles.map((p) => (
                 <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>{p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}</span>
+                  <span title={(p.name || `${p.user}@${p.host}`) + (p.path ? `: ${p.path}` : '')}>{p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}</span>
                   <button onClick={async () => {
                     if (!onOpenSsh) return;
                     onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id });

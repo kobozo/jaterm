@@ -14,10 +14,17 @@ export default function Toaster() {
           {t.message && <div style={{ marginTop: 6, fontSize: 12 }}>{t.message}</div>}
           {t.progress && (
             <div style={{ marginTop: 8 }}>
-              <div style={{ height: 6, background: '#333', borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{ width: `${Math.floor((t.progress.current / Math.max(1, t.progress.total)) * 100)}%`, height: '100%', background: '#4aa3ff' }} />
-              </div>
-              <div style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>{t.progress.current} / {t.progress.total}</div>
+              {(() => {
+                const pct = Math.max(0, Math.min(100, Math.floor((t.progress.current / Math.max(1, t.progress.total)) * 100)));
+                return (
+                  <>
+                    <div style={{ height: 6, background: '#333', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: '#4aa3ff' }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>{pct}%</div>
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -25,4 +32,3 @@ export default function Toaster() {
     </div>
   );
 }
-

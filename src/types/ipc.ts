@@ -180,7 +180,8 @@ export function sshSftpMkdirs(sessionId: string, path: string): Promise<void> {
 }
 
 export function sshSftpWrite(sessionId: string, remotePath: string, dataBase64: string): Promise<void> {
-  return invoke('ssh_sftp_write', { sessionId, remotePath, data_b64: dataBase64 } as any);
+  // Tauri maps snake_case param `data_b64` to camelCase `dataB64` in JS
+  return invoke('ssh_sftp_write', { sessionId, remotePath, dataB64: dataBase64 } as any);
 }
 
 export type SshUploadProgress = { path: string; written: number; total: number };
