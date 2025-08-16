@@ -106,6 +106,21 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   const helperReady = kind !== 'ssh' || (!!sessionId && !!helperPath);
   const disabled = loading || !helperReady;
 
+  // Auto refresh when inputs change (cwd, session/helper, title)
+  React.useEffect(() => {
+    if (!cwd || !helperReady) return;
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cwd, kind, sessionId, helperPath, title]);
+
+  // Periodic refresh while mounted
+  React.useEffect(() => {
+    if (!cwd || !helperReady) return;
+    const id = window.setInterval(() => { void refresh(); }, 5000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cwd, kind, sessionId, helperPath]);
+
   return (
     <div style={{ padding: 16, height: '100%', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
