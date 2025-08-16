@@ -492,6 +492,11 @@ export default function App() {
         e.preventDefault();
         newTab();
       }
+      // Compose with AI: Meta/Ctrl+K
+      if (meta && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setComposeOpen(true);
+      }
       // Next/Prev tab: Ctrl+Tab / Ctrl+Shift+Tab (Meta-less to avoid browser conflict in app window)
       if (e.ctrlKey && !e.metaKey && e.key === 'Tab') {
         e.preventDefault();
@@ -578,6 +583,7 @@ export default function App() {
                     onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                     onClose={closePane}
                     onSplit={(pane, dir) => splitPane(pane, dir)}
+                    onCompose={() => setComposeOpen(true)}
                   />
                       )}
                     />
@@ -594,6 +600,7 @@ export default function App() {
                     onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                     onClose={closePane}
                     onSplit={(pane, dir) => splitPane(pane, dir)}
+                    onCompose={() => setComposeOpen(true)}
                   />
                       ))}
                     </SplitView>
@@ -613,6 +620,7 @@ export default function App() {
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
+                          onCompose={() => setComposeOpen(true)}
                         />
                       )}
                     />
@@ -643,7 +651,8 @@ export default function App() {
       {/* Single status bar for active tab */}
       <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
         <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} />
-        <button onClick={() => setComposeOpen((v) => !v)}>Compose with AI</button>
+        <span style={{ width: 1, height: 14, background: '#444', display: 'inline-block' }} />
+        
         {/* Helper status aligned right with colored indicator */}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
           <span

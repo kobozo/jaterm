@@ -13,6 +13,7 @@ export default function GitStatusBar({ cwd, branch = '-', ahead = 0, behind = 0 
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
       <span>{cwd ?? ''}</span>
+      <span style={{ width: 1, height: 14, background: '#444', display: 'inline-block' }} />
       <span>Branch: {branch}</span>
       <span>Ahead/Behind: {ahead}/{behind}</span>
     </div>

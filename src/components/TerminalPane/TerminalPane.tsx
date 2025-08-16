@@ -5,9 +5,9 @@ import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
 import { homeDir } from '@tauri-apps/api/path';
 import { FitAddon } from '@xterm/addon-fit';
 
-type Props = { id: string; desiredCwd?: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void; onSplit?: (id: string, dir: 'row' | 'column') => void };
+type Props = { id: string; desiredCwd?: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void; onSplit?: (id: string, dir: 'row' | 'column') => void; onCompose?: () => void };
 
-export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit }: Props) {
+export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, onCompose }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
@@ -252,6 +252,8 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
         <div style={{ position: 'fixed', left: menu.x, top: menu.y, background: '#222', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 4, zIndex: 20, minWidth: 180 }}>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'row'); setMenu(null); }}>Split Horizontally</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'column'); setMenu(null); }}>Split Vertically</div>
+          <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onCompose?.(); setMenu(null); }}>Compose with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { copySelection(); setMenu(null); }}>Copy Selection</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { pasteClipboard(); setMenu(null); }}>Paste</div>
