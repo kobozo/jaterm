@@ -184,9 +184,36 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   function renderTree(nodes: TreeNode[], depth: number, stagedFlag: boolean) {
     return nodes.map((n) => {
       const pad = { padding: '4px 6px', paddingLeft: 6 + depth * 14 } as React.CSSProperties;
+      const badge = (code: string) => {
+        // Normalize code and color mapping
+        let c = code || ' ';
+        if (c === '?') c = 'U';
+        let bg = '#666';
+        if (c === 'M') bg = '#e0b05a'; // modified
+        else if (c === 'A') bg = '#6cc86c'; // added
+        else if (c === 'D') bg = '#e08a8a'; // deleted
+        else if (c === 'R') bg = '#6cb0e0'; // renamed
+        else if (c === 'C') bg = '#b08ae0'; // copied
+        else if (c === 'U') bg = '#6ac7c7'; // untracked
+        return (
+          <span style={{
+            display: 'inline-block',
+            minWidth: 18,
+            textAlign: 'center',
+            borderRadius: 4,
+            padding: '0 4px',
+            marginRight: 6,
+            fontSize: 12,
+            background: bg,
+            color: '#111'
+          }}>{c.trim() || '\u00A0'}</span>
+        );
+      };
       if (n.file) {
         const f = n.file as GitChange;
         const isSel = selected?.path === f.path && selected?.staged === stagedFlag;
+        const code = stagedFlag ? (f.x || ' ') : (f.y || ' ');
+        const isDeleted = (stagedFlag ? f.x : f.y) === 'D';
         return (
           <li key={(stagedFlag ? 'st-' : 'ch-') + n.fullPath} style={{ ...pad, listStyle: 'none', cursor: 'pointer', background: isSel ? '#2b2b2b' : 'transparent' }} onClick={async () => {
             setSelected({ path: f.path, staged: stagedFlag });
@@ -194,8 +221,8 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
             const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, stagedFlag);
             setDiffText(dt);
           }}>
-            <span style={{ opacity: 0.8, marginRight: 6 }}>{stagedFlag ? f.x : f.y}</span>
-            <span>{n.name}</span>
+            {badge(code)}
+            <span style={{ textDecoration: isDeleted ? 'line-through' as const : 'none' }}>{n.name}</span>
           </li>
         );
       }
