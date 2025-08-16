@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { addRecent, getRecents, removeRecent, clearRecents } from '@/store/recents';
-import { getRecentSessions, removeRecentSession, clearRecentSessions } from '@/store/sessions';
+import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
 import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, type LocalProfile, type SshProfileStored } from '@/store/persist';
 import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList } from '@/types/ipc';
 
@@ -11,12 +11,13 @@ import type { RecentSession } from '@/store/sessions';
 type Props = {
   onOpenFolder: (path: string) => void;
   onOpenSession?: (session: RecentSession) => void;
-  onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string }) => void;
+  onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string }) => void;
 };
 
 export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Props) {
   const [recents, setRecents] = useState<{ path: string; lastOpenedAt: number }[]>([]);
   const [recentSessions, setRecentSessions] = useState<{ cwd: string; closedAt: number; panes?: number }[]>([]);
+  const [recentSsh, setRecentSsh] = useState<{ profileId: string; path: string; closedAt: number }[]>([]);
   const [sshOpen, setSshOpen] = useState(false);
   const [sshForm, setSshForm] = useState<{ host: string; port?: number; user: string; authType: 'password' | 'key' | 'agent'; password?: string; keyPath?: string; passphrase?: string; cwd?: string }>({ host: '', user: '', authType: 'agent' });
   const [localProfiles, setLocalProfiles] = useState<LocalProfile[]>([]);
@@ -30,6 +31,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     (async () => {
       setRecents(await getRecents());
       setRecentSessions(await getRecentSessions());
+      setRecentSsh(await getRecentSshSessions());
       setLocalProfiles(await getLocalProfiles());
       setSshProfiles(await getSshProfiles());
     })();
@@ -172,6 +174,33 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
         </div>
       )}
 
+      {recentSsh.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Recent SSH sessions</span>
+            <button onClick={async () => { await clearRecentSshSessions(); setRecentSsh(await getRecentSshSessions()); }} title="Clear recent SSH sessions">Clear</button>
+          </h3>
+          <ul>
+            {recentSsh.map((s) => (
+              <li key={`${s.profileId}-${s.path}-${s.closedAt}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <a href="#" onClick={(e) => { e.preventDefault();
+                  // Look up profile
+                  (async () => {
+                    const all = await getSshProfiles();
+                    const p = all.find((x) => x.id === s.profileId);
+                    if (!p) { alert('Profile not found'); return; }
+                    onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: s.path });
+                  })();
+                }} title={new Date(s.closedAt).toLocaleString()}>
+                  {s.path}
+                </a>
+                <button onClick={async () => { await removeRecentSshSession(s.profileId, s.path); setRecentSsh(await getRecentSshSessions()); }} title="Remove">×</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div style={{ marginTop: 24 }}>
         <h2>Profiles</h2>
         <div style={{ display: 'flex', gap: 24 }}>
@@ -196,7 +225,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   <span>{p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}</span>
                   <button onClick={async () => {
                     if (!onOpenSsh) return;
-                    onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path });
+                    onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id });
                   }}>Open</button>
                   <button onClick={async () => { await deleteSshProfile(p.id); setSshProfiles(await getSshProfiles()); }} title="Remove">×</button>
                 </li>

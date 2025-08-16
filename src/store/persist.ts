@@ -3,6 +3,7 @@ import { loadState, saveState } from '@/types/ipc';
 export type AppPersistState = {
   recents?: { path: string; lastOpenedAt: number }[];
   recentSessions?: { cwd: string; closedAt: number; panes?: number }[];
+  recentSshSessions?: { profileId: string; path: string; closedAt: number; panes?: number; title?: string; layoutShape?: any }[];
   lastOpenedPath?: string | null;
   workspace?: {
     activeTabIndex?: number;

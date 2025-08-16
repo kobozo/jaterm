@@ -210,6 +210,14 @@ export default function App() {
       }
       return next;
     });
+    // Record SSH recent if opened from a profile
+    if (toRecord?.kind === 'ssh' && toRecord.profileId) {
+      const path = (toRecord.status.fullPath ?? toRecord.cwd) as string | undefined;
+      if (path) {
+        const { addRecentSshSession } = await import('@/store/sessions');
+        await addRecentSshSession({ profileId: toRecord.profileId, path, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
+      }
+    }
   }
 
   function shapeAssignPanes(shape: LayoutShape, panes: string[]): { node: LayoutNode; rest: string[] } {
@@ -257,11 +265,11 @@ export default function App() {
     }
   }
 
-  async function openSshFor(tabId: string, opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string }) {
+  async function openSshFor(tabId: string, opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string }) {
     try {
       const sessionId = await sshConnect({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: opts.auth.password, key_path: opts.auth.keyPath, passphrase: opts.auth.passphrase, agent: opts.auth.agent } as any, timeout_ms: 15000 });
       const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, kind: 'ssh', sshSessionId: sessionId, cwd: opts.cwd ?? '/', panes: [chanId], activePane: chanId, status: { ...t.status } } : t)));
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, kind: 'ssh', sshSessionId: sessionId, profileId: opts.profileId, cwd: opts.cwd ?? null, panes: [chanId], activePane: chanId, status: { ...t.status } } : t)));
       setActiveTab(tabId);
     } catch (e) {
       alert('SSH connection failed: ' + (e as any));

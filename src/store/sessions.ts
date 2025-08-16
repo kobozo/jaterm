@@ -6,6 +6,8 @@ export type LayoutShape = LayoutShapeLeaf | LayoutShapeSplit;
 
 export type RecentSession = { cwd: string; closedAt: number; panes?: number; title?: string; layoutShape?: LayoutShape };
 
+export type RecentSshSession = { profileId: string; path: string; closedAt: number; panes?: number; title?: string; layoutShape?: LayoutShape };
+
 export async function getRecentSessions(limit = 10): Promise<RecentSession[]> {
   const s = await loadAppState();
   const list = (s.recentSessions || []) as RecentSession[];
@@ -32,4 +34,33 @@ export async function removeRecentSession(cwd: string) {
 
 export async function clearRecentSessions() {
   await saveAppState({ recentSessions: [] });
+}
+
+// SSH recents (profile-linked)
+export async function getRecentSshSessions(limit = 10): Promise<RecentSshSession[]> {
+  const s = await loadAppState();
+  const list = (s.recentSshSessions || []) as RecentSshSession[];
+  return list
+    .filter((r) => typeof r.profileId === 'string' && typeof r.path === 'string' && typeof r.closedAt === 'number')
+    .sort((a, b) => b.closedAt - a.closedAt)
+    .slice(0, limit);
+}
+
+export async function addRecentSshSession(sess: RecentSshSession) {
+  const s = await loadAppState();
+  const list = (s.recentSshSessions || []) as RecentSshSession[];
+  const filtered = list.filter((r) => !(r.profileId === sess.profileId && r.path === sess.path));
+  filtered.unshift(sess);
+  await saveAppState({ recentSshSessions: filtered.slice(0, 50) });
+}
+
+export async function removeRecentSshSession(profileId: string, path: string) {
+  const s = await loadAppState();
+  const list = (s.recentSshSessions || []) as RecentSshSession[];
+  const next = list.filter((r) => !(r.profileId === profileId && r.path === path));
+  await saveAppState({ recentSshSessions: next });
+}
+
+export async function clearRecentSshSessions() {
+  await saveAppState({ recentSshSessions: [] });
 }
