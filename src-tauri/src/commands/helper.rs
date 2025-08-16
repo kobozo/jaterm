@@ -4,7 +4,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-const HELPER_VERSION: &str = "0.1.2";
+const HELPER_VERSION: &str = "0.1.3";
 const HELPER_NAME: &str = "jaterm-agent";
 const HELPER_REL_DIR: &str = ".jaterm-helper";
 
@@ -12,7 +12,7 @@ const HELPER_CONTENT: &str = r#"#!/bin/sh
 
 case "$1" in
   health)
-    echo '{"ok":true,"version":"0.1.2"}'
+    echo '{"ok":true,"version":"0.1.3"}'
     exit 0
     ;;
   git-status)
