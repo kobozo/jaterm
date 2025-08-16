@@ -1,6 +1,6 @@
 import React from 'react';
 import { resolvePathAbsolute, sshHomeDir } from '@/types/ipc';
-import { gitStatusViaHelper } from '@/services/git';
+import { gitStatusViaHelper, gitListChanges, gitDiffFile, GitChange } from '@/services/git';
 
 type Props = {
   cwd?: string | null;
@@ -15,6 +15,9 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<any | null>(null);
+  const [files, setFiles] = React.useState<GitChange[]>([]);
+  const [selected, setSelected] = React.useState<{ path: string; staged: boolean } | null>(null);
+  const [diffText, setDiffText] = React.useState<string>('');
 
   async function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -96,6 +99,19 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
       const st = await gitStatusViaHelper({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
       setStatus(st);
       try { onStatus?.(st); } catch {}
+      const ch = await gitListChanges({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
+      setFiles(ch);
+      // Keep selection if still present
+      if (selected) {
+        const exists = ch.find((c) => c.path === selected.path && c.staged === selected.staged);
+        if (exists) {
+          const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, selected.path, selected.staged);
+          setDiffText(dt);
+        } else {
+          setSelected(null);
+          setDiffText('');
+        }
+      }
     } catch (e: any) {
       setErr(String(e));
     } finally {
@@ -122,31 +138,54 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   }, [cwd, kind, sessionId, helperPath]);
 
   return (
-    <div style={{ padding: 16, height: '100%', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h3 style={{ margin: 0 }}>Git Tools</h3>
-        <button onClick={refresh} disabled={disabled} title={!helperReady ? 'SSH helper not ready yet' : 'Refresh Git status'}>
-          {loading ? 'Loading…' : 'Refresh'}
-        </button>
+    <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
+      {/* Left: file tree grouped by Staged / Changes */}
+      <div style={{ width: 320, borderRight: '1px solid #333', padding: 8, boxSizing: 'border-box', overflow: 'auto' }}>
+        <div style={{ fontWeight: 600, margin: '4px 0' }}>Staged</div>
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+          {files.filter(f => f.staged).map((f) => (
+            <li key={`st-${f.path}`} style={{ padding: '4px 6px', cursor: 'pointer', background: selected?.path===f.path && selected?.staged ? '#2b2b2b' : 'transparent' }} onClick={async () => {
+              setSelected({ path: f.path, staged: true });
+              const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
+              const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, true);
+              setDiffText(dt);
+            }}>
+              <span style={{ opacity: 0.8, marginRight: 6 }}>{f.x}</span>
+              <span>{f.path}</span>
+            </li>
+          ))}
+        </ul>
+        <div style={{ fontWeight: 600, margin: '8px 0 4px' }}>Changes</div>
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+          {files.filter(f => !f.staged).map((f) => (
+            <li key={`ch-${f.path}`} style={{ padding: '4px 6px', cursor: 'pointer', background: selected?.path===f.path && !selected?.staged ? '#2b2b2b' : 'transparent' }} onClick={async () => {
+              setSelected({ path: f.path, staged: false });
+              const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
+              const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, false);
+              setDiffText(dt);
+            }}>
+              <span style={{ opacity: 0.8, marginRight: 6 }}>{f.y}</span>
+              <span>{f.path}</span>
+            </li>
+          ))}
+        </ul>
       </div>
-      {!cwd && <p style={{ opacity: 0.8 }}>No working directory.</p>}
-      {kind === 'ssh' && !helperReady && (
-        <p style={{ opacity: 0.8 }}>SSH helper not ready yet. It installs automatically after connect.</p>
-      )}
-      {err && (
-        <div style={{ marginTop: 12, color: '#f0a1a1' }}>Error: {err}</div>
-      )}
-      {status && (
-        <div style={{ marginTop: 12, lineHeight: 1.6 }}>
-          <div><strong>Branch:</strong> {status.branch}</div>
-          <div><strong>Ahead/Behind:</strong> {status.ahead} / {status.behind}</div>
-          <div><strong>Staged:</strong> {status.staged}</div>
-          <div><strong>Unstaged:</strong> {status.unstaged}</div>
-        </div>
-      )}
-      {!status && !err && !disabled && (
-        <p style={{ marginTop: 12, opacity: 0.8 }}>Click Refresh to fetch Git status.</p>
-      )}
+      {/* Right: diff viewer (simple pre styled) */}
+      <div style={{ flex: 1, minWidth: 0, padding: 8, boxSizing: 'border-box', overflow: 'auto' }}>
+        {selected ? (
+          <div>
+            <div style={{ marginBottom: 8, opacity: 0.8 }}>{selected.staged ? 'Staged' : 'Working tree'} · {selected.path}</div>
+            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#1e1e1e', color: '#ddd', padding: 12, borderRadius: 6 }}>
+              {diffText.split('\n').map((line, idx) => {
+                const color = line.startsWith('+') ? '#8fe18f' : line.startsWith('-') ? '#f0a1a1' : line.startsWith('@@') ? '#8fbbe1' : '#ddd';
+                return <div key={idx} style={{ color }}>{line}</div>;
+              })}
+            </pre>
+          </div>
+        ) : (
+          <div style={{ opacity: 0.8 }}>Select a file to view diff.</div>
+        )}
+      </div>
     </div>
   );
 }

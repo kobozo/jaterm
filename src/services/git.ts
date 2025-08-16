@@ -34,6 +34,45 @@ export async function gitStatusViaHelper(opts: { kind?: 'local' | 'ssh'; session
   return { branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 };
 }
 
+export type GitChange = { path: string; x: string; y: string; staged: boolean };
+
+export async function gitListChanges(opts: { kind?: 'local' | 'ssh'; sessionId?: string; helperPath?: string | null }, cwd: string): Promise<GitChange[]> {
+  if (opts.kind !== 'ssh') {
+    try {
+      const res = await helperLocalExec('git-changes', [cwd]);
+      if (res.exit_code === 0 && res.stdout) return JSON.parse(res.stdout);
+    } catch {}
+    return [];
+  }
+  if (!opts.sessionId || !opts.helperPath) return [];
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+  try {
+    const cmd = `'${esc(opts.helperPath)}' git-changes '${esc(cwd)}'`;
+    const res = await sshExec(opts.sessionId, cmd);
+    if (res.exit_code === 0 && res.stdout) return JSON.parse(res.stdout);
+  } catch {}
+  return [];
+}
+
+export async function gitDiffFile(opts: { kind?: 'local' | 'ssh'; sessionId?: string; helperPath?: string | null }, cwd: string, file: string, staged?: boolean): Promise<string> {
+  const mode = staged ? 'staged' : 'work';
+  if (opts.kind !== 'ssh') {
+    try {
+      const res = await helperLocalExec('git-diff', [cwd, file, mode]);
+      if (res.exit_code === 0) return res.stdout;
+    } catch {}
+    return '';
+  }
+  if (!opts.sessionId || !opts.helperPath) return '';
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
+  try {
+    const cmd = `'${esc(opts.helperPath)}' git-diff '${esc(cwd)}' '${esc(file)}' '${esc(mode)}'`;
+    const res = await sshExec(opts.sessionId, cmd);
+    if (res.exit_code === 0) return res.stdout;
+  } catch {}
+  return '';
+}
+
 function normalize(j: any): GitStatus {
   return {
     branch: typeof j?.branch === 'string' ? j.branch : '- ',

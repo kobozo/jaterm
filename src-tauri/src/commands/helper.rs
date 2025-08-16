@@ -37,6 +37,38 @@ $(git status --porcelain 2>/dev/null | awk 'BEGIN{s=0;u=0} {xy=substr($0,1,2); i
 EOF
     printf '{"branch":"%s","ahead":%s,"behind":%s,"staged":%s,"unstaged":%s}\n' "$BRANCH" "$AHEAD" "$BEHIND" "$STAGED" "$UNSTAGED"
     ;;
+  git-changes)
+    DIR="$2"
+    case "$DIR" in
+      ~*) DIR="$HOME${DIR#~}" ;;
+    esac
+    if [ -z "$DIR" ]; then DIR="."; fi
+    cd "$DIR" 2>/dev/null || cd .
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      echo '[]'
+      exit 0
+    fi
+    git status --porcelain 2>/dev/null | awk '
+      {
+        xy=substr($0,1,2);
+        x=substr(xy,1,1); y=substr(xy,2,1);
+        p=substr($0,4);
+        arrow=index(p, " -> "); if (arrow>0) { p=substr(p, arrow+4); }
+        staged=(x!=" ")?"true":"false";
+        gsub(/\\\\/, "\\\\\\\\", p); gsub(/\"/, "\\\"", p);
+        if (NR>1) printf ",";
+        printf "{\"path\":\"%s\",\"x\":\"%s\",\"y\":\"%s\",\"staged\":%s}", p, x, y, staged;
+      }
+    END { }' | awk 'BEGIN{printf "["}{print}END{printf "]"}'
+    ;;
+  git-diff)
+    DIR="$2"; FILE="$3"; MODE="$4"
+    case "$DIR" in
+      ~*) DIR="$HOME${DIR#~}" ;;
+    esac
+    cd "$DIR" 2>/dev/null || cd .
+    if [ "$MODE" = "staged" ]; then git diff --cached -- "$FILE" 2>/dev/null; else git diff -- "$FILE" 2>/dev/null; fi
+    ;;
   *)
     echo "jaterm-agent: unknown command: $1" 1>&2
     exit 1
