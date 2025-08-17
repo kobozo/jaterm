@@ -57,6 +57,12 @@ pub struct SshSession {
     pub id: String,
     pub tcp: TcpStream,
     pub sess: SshSessionInner,
+    // Serialize all libssh2 calls across channels for this session
+    pub lock: std::sync::Arc<StdMutex<()>>,
+    // Basic connection identity for re-using via system ssh
+    pub host: String,
+    pub port: u16,
+    pub user: String,
 }
 
 pub struct SshChannel {
@@ -67,6 +73,11 @@ pub struct SshChannel {
 
 pub enum ForwardType { Local, Remote }
 
+pub enum ForwardBackend {
+    LocalThread { shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>, thread: Option<std::thread::JoinHandle<()>> },
+    SshProcess { child: Option<std::process::Child> },
+}
+
 pub struct SshForward {
     pub id: String,
     pub session_id: String,
@@ -75,6 +86,5 @@ pub struct SshForward {
     pub src_port: u16,
     pub dst_host: String,
     pub dst_port: u16,
-    pub shutdown: Arc<std::sync::atomic::AtomicBool>,
-    pub thread: Option<std::thread::JoinHandle<()>>,
+    pub backend: ForwardBackend,
 }

@@ -16,7 +16,24 @@ export default function PortsPanel({ forwards, onAdd, onStop }: { forwards: Forw
         <span>→</span>
         <input style={{ width: 140 }} placeholder="dst host" value={form.dstHost} onChange={(e) => setForm({ ...form, dstHost: e.target.value })} />
         <input style={{ width: 80 }} placeholder="dst port" type="number" value={form.dstPort} onChange={(e) => setForm({ ...form, dstPort: Number(e.target.value) || 0 })} />
-        <button onClick={() => onAdd(form)}>Add</button>
+        <button onClick={() => {
+          const f = { ...form };
+          // Normalize common mistakes: numeric host means user put a port into host
+          const isNumHost = /^\d+$/.test(f.dstHost.trim());
+          if (isNumHost) {
+            if (!f.dstPort || f.dstPort === 0) {
+              f.dstPort = Number(f.dstHost.trim()) || f.dstPort;
+              f.dstHost = '127.0.0.1';
+            } else {
+              alert('Destination host looks like a port. Please place the port into the port field.');
+              return;
+            }
+          }
+          if (!f.srcHost) f.srcHost = '127.0.0.1';
+          if (!f.dstHost) f.dstHost = '127.0.0.1';
+          if (!f.srcPort || !f.dstPort) { alert('Please provide valid source/destination ports'); return; }
+          onAdd(f);
+        }}>Add</button>
       </div>
       <div style={{ flex: 1, overflow: 'auto', borderTop: '1px solid #333', paddingTop: 8 }}>
         {forwards.length === 0 && <div style={{ opacity: 0.7 }}>No forwards yet.</div>}
@@ -35,4 +52,3 @@ export default function PortsPanel({ forwards, onAdd, onStop }: { forwards: Forw
     </div>
   );
 }
-

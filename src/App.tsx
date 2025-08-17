@@ -432,6 +432,7 @@ export default function App() {
     })();
   }, []);
 
+
   // Ensure local helper when a local tab becomes active and has a cwd, if not checked yet
   React.useEffect(() => {
     const t = tabs.find((x) => x.id === activeTab);
@@ -632,27 +633,28 @@ export default function App() {
                   onStatus={(st) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)))}
                 />
               </div>
-              {/* Terminal/Welcome view */}
-              <div style={{ display: (t.view === 'git') ? 'none' : 'block', height: '100%' }}>
-                {t.view === 'ports' ? (
-                  <PortsPanel
-                    forwards={t.forwards || []}
-                    onAdd={async (fwd) => {
-                      if (t.kind !== 'ssh' || !t.sshSessionId) return;
-                      const { sshOpenForward } = await import('@/types/ipc');
-                      try {
-                        const res: any = await sshOpenForward({ sessionId: t.sshSessionId, forward: { id: '', type: fwd.type, srcHost: fwd.srcHost, srcPort: fwd.srcPort, dstHost: fwd.dstHost, dstPort: fwd.dstPort } as any });
-                        const fid = typeof res === 'string' ? res : (res?.forwardId || res);
-                        setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: [ ...(tb.forwards || []), { ...fwd, id: fid, status: 'starting' } ] } : tb)));
-                      } catch (e) { alert('open forward failed: ' + (e as any)); }
-                    }}
-                    onStop={async (id) => {
-                      const { sshCloseForward } = await import('@/types/ipc');
-                      try { await sshCloseForward(id); } catch {}
-                      setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: (tb.forwards || []).map((x) => x.id === id ? { ...x, status: 'closed' } : x) } : tb)));
-                    }}
-                  />
-                ) : (
+              {/* Ports view (kept mounted) */}
+              <div style={{ display: (t.view === 'ports') ? 'block' : 'none', height: '100%' }}>
+                <PortsPanel
+                  forwards={t.forwards || []}
+                  onAdd={async (fwd) => {
+                    if (t.kind !== 'ssh' || !t.sshSessionId) return;
+                    const { sshOpenForward } = await import('@/types/ipc');
+                    try {
+                      const res: any = await sshOpenForward({ sessionId: t.sshSessionId, forward: { id: '', type: fwd.type, srcHost: fwd.srcHost, srcPort: fwd.srcPort, dstHost: fwd.dstHost, dstPort: fwd.dstPort } as any });
+                      const fid = typeof res === 'string' ? res : (res?.forwardId || res);
+                      setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: [ ...(tb.forwards || []), { ...fwd, id: fid, status: 'starting' } ] } : tb)));
+                    } catch (e) { alert('open forward failed: ' + (e as any)); }
+                  }}
+                  onStop={async (id) => {
+                    const { sshCloseForward } = await import('@/types/ipc');
+                    try { await sshCloseForward(id); } catch {}
+                    setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: (tb.forwards || []).map((x) => x.id === id ? { ...x, status: 'closed' } : x) } : tb)));
+                  }}
+                />
+              </div>
+              {/* Terminal/Welcome view (kept mounted) */}
+              <div style={{ display: (t.view === 'git' || t.view === 'ports') ? 'none' : 'block', height: '100%' }}>
                 {t.kind === 'ssh' ? (
                   t.layout ? (
                     <SplitTree
@@ -665,12 +667,12 @@ export default function App() {
                           desiredCwd={undefined}
                           sessionId={(t as any).sshSessionId}
                           onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
-                    onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
-                    onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
-                    onClose={closePane}
-                    onSplit={(pane, dir) => splitPane(pane, dir)}
-                    onCompose={() => setComposeOpen(true)}
-                  />
+                          onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
+                          onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
+                          onClose={closePane}
+                          onSplit={(pane, dir) => splitPane(pane, dir)}
+                          onCompose={() => setComposeOpen(true)}
+                        />
                       )}
                     />
                   ) : (
@@ -682,12 +684,12 @@ export default function App() {
                           desiredCwd={undefined}
                           sessionId={(t as any).sshSessionId}
                           onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
-                    onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
-                    onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
-                    onClose={closePane}
-                    onSplit={(pane, dir) => splitPane(pane, dir)}
-                    onCompose={() => setComposeOpen(true)}
-                  />
+                          onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
+                          onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
+                          onClose={closePane}
+                          onSplit={(pane, dir) => splitPane(pane, dir)}
+                          onCompose={() => setComposeOpen(true)}
+                        />
                       ))}
                     </SplitView>
                   )
