@@ -46,7 +46,7 @@ EOF
         p=substr($0,4);
         arrow=index(p, " -> "); if (arrow>0) { p=substr(p, arrow+4); }
         staged=((x!=" " && x!="?"))?"true":"false";
-        gsub(/\\\\/, "\\\\\\\\", p); gsub(/"/, "\\\"", p);
+        gsub(/\\/, "\\\\", p); gsub(/"/, "\\\"", p);
         if (NR>1) printf ",";
         printf "{\"path\":\"%s\",\"x\":\"%s\",\"y\":\"%s\",\"staged\":%s}", p, x, y, staged;
       }
