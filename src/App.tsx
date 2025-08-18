@@ -48,94 +48,8 @@ export default function App() {
   
   // Terminal event detectors for each pane
   const terminalEventDetectors = React.useRef<Map<string, TerminalEventDetector>>(new Map());
-  
-  // Register a terminal event detector for a pane
-  const registerTerminalEventDetector = React.useCallback((paneId: string, tabId: string) => {
-    if (terminalEventDetectors.current.has(paneId)) return;
-    
-    const detector = new TerminalEventDetector();
-    terminalEventDetectors.current.set(paneId, detector);
-    
-    // Listen for events
-    detector.on((event) => {
-      const tab = tabs.find(t => t.id === tabId);
-      if (!tab) return;
-      
-      console.log(`Terminal event in pane ${paneId}:`, event);
-      
-      switch (event.type) {
-        case 'git-command':
-          // Git command executed, update status
-          updateGitStatus(tabId);
-          break;
-          
-        case 'process-start':
-          // Process started, check ports for SSH tabs
-          if (tab.kind === 'ssh' && tab.sshSessionId) {
-            detectPorts(tab.sshSessionId);
-          }
-          break;
-          
-        case 'command':
-          // Any command executed
-          if (event.command.includes('git')) {
-            updateGitStatus(tabId);
-          }
-          // Check if it's a process that might open ports
-          if (tab.kind === 'ssh' && tab.sshSessionId) {
-            if (event.command.match(/npm|yarn|pnpm|python|node|cargo|rails|django/)) {
-              // Delay a bit to let the process start
-              setTimeout(() => detectPorts(tab.sshSessionId!), 2000);
-            }
-          }
-          break;
-          
-        case 'directory-change':
-          // Directory changed, update git status
-          updateGitStatus(tabId);
-          break;
-          
-        case 'prompt':
-          // New prompt appeared, good time to check git status if in repo
-          const inRepo = !!tab.status && tab.status.branch && tab.status.branch !== '-';
-          if (inRepo) {
-            updateGitStatus(tabId);
-          }
-          break;
-      }
-    });
-    
-    return detector;
-  }, [tabs, updateGitStatus, detectPorts]);
-  
-  // Unregister a terminal event detector
-  const unregisterTerminalEventDetector = React.useCallback((paneId: string) => {
-    const detector = terminalEventDetectors.current.get(paneId);
-    if (detector) {
-      detector.reset();
-      terminalEventDetectors.current.delete(paneId);
-    }
-  }, []);
-  
-  // Handle terminal data from panes
-  const handleTerminalData = React.useCallback((paneId: string, event: { type: 'input' | 'output'; data: string }) => {
-    // Find which tab this pane belongs to
-    const tab = tabs.find(t => t.panes.includes(paneId));
-    if (!tab) return;
-    
-    // Get or create detector for this pane
-    let detector = terminalEventDetectors.current.get(paneId);
-    if (!detector) {
-      detector = registerTerminalEventDetector(paneId, tab.id);
-    }
-    
-    // Feed data to detector
-    if (event.type === 'input') {
-      detector.processInput(event.data);
-    } else {
-      detector.processData(event.data);
-    }
-  }, [tabs, registerTerminalEventDetector]);
+  const debouncedUpdateGitRef = React.useRef<((tabId: string) => void) | null>(null);
+  const debouncedDetectPortsRef = React.useRef<((sessionId: string) => void) | null>(null);
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
@@ -725,6 +639,102 @@ export default function App() {
     
     return () => window.clearInterval(iv);
   }, [tabs, activeTab, updateGitStatus]);
+  
+  // Store references to debounced functions
+  React.useEffect(() => {
+    debouncedUpdateGitRef.current = updateGitStatus;
+    debouncedDetectPortsRef.current = detectPorts;
+  }, [updateGitStatus, detectPorts]);
+  
+  // Register a terminal event detector for a pane
+  const registerTerminalEventDetector = React.useCallback((paneId: string, tabId: string) => {
+    if (terminalEventDetectors.current.has(paneId)) return terminalEventDetectors.current.get(paneId)!;
+    
+    const detector = new TerminalEventDetector();
+    terminalEventDetectors.current.set(paneId, detector);
+    
+    // Listen for events
+    detector.on((event) => {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return;
+      
+      console.log(`Terminal event in pane ${paneId}:`, event);
+      
+      switch (event.type) {
+        case 'git-command':
+          // Git command executed, update status
+          debouncedUpdateGitRef.current?.(tabId);
+          break;
+          
+        case 'process-start':
+          // Process started, check ports for SSH tabs
+          if (tab.kind === 'ssh' && tab.sshSessionId) {
+            debouncedDetectPortsRef.current?.(tab.sshSessionId);
+          }
+          break;
+          
+        case 'command':
+          // Any command executed
+          if (event.command.includes('git')) {
+            debouncedUpdateGitRef.current?.(tabId);
+          }
+          // Check if it's a process that might open ports
+          if (tab.kind === 'ssh' && tab.sshSessionId) {
+            if (event.command.match(/npm|yarn|pnpm|python|node|cargo|rails|django/)) {
+              // Delay a bit to let the process start
+              setTimeout(() => {
+                if (tab.sshSessionId) debouncedDetectPortsRef.current?.(tab.sshSessionId);
+              }, 2000);
+            }
+          }
+          break;
+          
+        case 'directory-change':
+          // Directory changed, update git status
+          debouncedUpdateGitRef.current?.(tabId);
+          break;
+          
+        case 'prompt':
+          // New prompt appeared, good time to check git status if in repo
+          const inRepo = !!tab.status && tab.status.branch && tab.status.branch !== '-';
+          if (inRepo) {
+            debouncedUpdateGitRef.current?.(tabId);
+          }
+          break;
+      }
+    });
+    
+    return detector;
+  }, [tabs]);
+  
+  // Unregister a terminal event detector
+  const unregisterTerminalEventDetector = React.useCallback((paneId: string) => {
+    const detector = terminalEventDetectors.current.get(paneId);
+    if (detector) {
+      detector.reset();
+      terminalEventDetectors.current.delete(paneId);
+    }
+  }, []);
+  
+  // Handle terminal data from panes
+  const handleTerminalData = React.useCallback((paneId: string, event: { type: 'input' | 'output'; data: string }) => {
+    // Find which tab this pane belongs to
+    const tab = tabs.find(t => t.panes.includes(paneId));
+    if (!tab) return;
+    
+    // Get or create detector for this pane
+    let detector = terminalEventDetectors.current.get(paneId);
+    if (!detector) {
+      detector = registerTerminalEventDetector(paneId, tab.id);
+    }
+    
+    // Feed data to detector
+    if (event.type === 'input') {
+      detector.processInput(event.data);
+    } else {
+      detector.processData(event.data);
+    }
+  }, [tabs, registerTerminalEventDetector]);
 
   // Persist workspace on changes (local tabs only)
   React.useEffect(() => {
