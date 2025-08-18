@@ -4,7 +4,7 @@ import { homeDir } from '@tauri-apps/api/path';
 import { addRecent, getRecents, removeRecent, clearRecents } from '@/store/recents';
 import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
 import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, type LocalProfile, type SshProfileStored } from '@/store/persist';
-import { getThemeList } from '@/config/themes';
+import { getThemeList, themes } from '@/config/themes';
 import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec } from '@/types/ipc';
 import { ensureHelper } from '@/services/helper';
 import { useToasts } from '@/store/toasts';
@@ -641,15 +641,18 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                         borderRadius: 4, 
                         fontFamily: spForm.fontFamily || "'Cascadia Code', monospace",
                         fontSize: (spForm.fontSize || 14) + 'px',
-                        background: '#1e1e1e',
-                        color: '#cccccc',
+                        background: themes[spForm.theme || 'default']?.colors.background || '#1e1e1e',
+                        color: themes[spForm.theme || 'default']?.colors.foreground || '#cccccc',
                         border: '1px solid #444'
                       }}
                     >
                       <div>$ npm run dev</div>
-                      <div style={{ color: '#0dbc79' }}>✓ Server running at http://localhost:3000</div>
-                      <div style={{ color: '#e5e510' }}>⚠ Warning: Some dependencies need update</div>
-                      <div style={{ color: '#cd3131' }}>✗ Error: Module not found</div>
+                      <div style={{ color: themes[spForm.theme || 'default']?.colors.green || '#0dbc79' }}>✓ Server running at http://localhost:3000</div>
+                      <div style={{ color: themes[spForm.theme || 'default']?.colors.yellow || '#e5e510' }}>⚠ Warning: Some dependencies need update</div>
+                      <div style={{ color: themes[spForm.theme || 'default']?.colors.red || '#cd3131' }}>✗ Error: Module not found</div>
+                      <div style={{ color: themes[spForm.theme || 'default']?.colors.blue || '#2472c8' }}>→ Building application...</div>
+                      <div style={{ color: themes[spForm.theme || 'default']?.colors.magenta || '#bc3fbc' }}>◆ Debug: Variable = {'{value}'}</div>
+                      <div style={{ color: themes[spForm.theme || 'default']?.colors.cyan || '#11a8cd' }}>ℹ Info: Cache cleared successfully</div>
                     </div>
                   </div>
                 </div>
