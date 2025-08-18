@@ -258,7 +258,11 @@ export default function App() {
     if (toRecord?.activePane) {
       if (toRecord.kind === 'ssh') {
         try { await Promise.all(toRecord.panes.map((pid) => sshCloseShell(pid))); } catch {}
-        if (toRecord.sshSessionId) { try { await sshDisconnect(toRecord.sshSessionId); } catch {} }
+        if (toRecord.sshSessionId) { 
+          // Clean up notified ports for this session
+          notifiedPortsRef.current.delete(toRecord.sshSessionId);
+          try { await sshDisconnect(toRecord.sshSessionId); } catch {} 
+        }
       } else {
         emitCwdViaOsc7(toRecord.activePane);
         await new Promise((r) => setTimeout(r, 120));
@@ -434,6 +438,9 @@ export default function App() {
     })();
   }, []);
 
+  // Track notified ports per session to avoid duplicate notifications
+  const notifiedPortsRef = React.useRef<Map<string, Set<number>>>(new Map());
+  
   // Listen for detected ports on SSH connection
   React.useEffect(() => {
     (async () => {
@@ -443,18 +450,24 @@ export default function App() {
           const { sessionId, ports } = event.payload as any;
           console.log(`Detected ${ports.length} open ports on session ${sessionId}`);
           
-          // Find the tab for this session
-          const currentTab = tabs.find(t => t.kind === 'ssh' && t.sshSessionId === sessionId);
-          const previousPorts = currentTab?.detectedPorts || [];
+          // Get or create the set of already notified ports for this session
+          if (!notifiedPortsRef.current.has(sessionId)) {
+            notifiedPortsRef.current.set(sessionId, new Set());
+          }
+          const notifiedPorts = notifiedPortsRef.current.get(sessionId)!;
           
-          // Check for newly detected ports
-          const newPorts = ports.filter((port: number) => !previousPorts.includes(port));
+          // Find ports that are newly detected (not previously notified)
+          const newPorts = ports.filter((port: number) => !notifiedPorts.has(port));
           
-          // Check for closed ports  
-          const closedPorts = previousPorts.filter((port: number) => !ports.includes(port));
+          // Find ports that were previously notified but are now closed
+          const closedPorts = Array.from(notifiedPorts).filter(port => !ports.includes(port));
+          
+          // Update the notified ports set
+          newPorts.forEach((port: number) => notifiedPorts.add(port));
+          closedPorts.forEach((port: number) => notifiedPorts.delete(port));
           
           // Show notification for closed ports
-          if (closedPorts.length > 0 && currentTab) {
+          if (closedPorts.length > 0) {
             closedPorts.forEach((port: number) => {
               show({
                 title: `Port ${port} closed`,
@@ -465,7 +478,7 @@ export default function App() {
           }
           
           // Show notification for each new port
-          if (newPorts.length > 0 && currentTab) {
+          if (newPorts.length > 0) {
             newPorts.forEach((port: number) => {
               const portName = [
                 { port: 3000, name: 'Node.js / React' },
@@ -489,10 +502,16 @@ export default function App() {
                   {
                     label: 'Forward Port',
                     onClick: () => {
-                      // Switch to ports view
-                      setTabs(prev => prev.map(t => 
-                        t.id === currentTab.id ? { ...t, view: 'ports' } : t
-                      ));
+                      // Find the current tab for this session
+                      setTabs(prev => {
+                        const currentTab = prev.find(t => t.kind === 'ssh' && t.sshSessionId === sessionId);
+                        if (!currentTab) return prev;
+                        
+                        // Switch to ports view
+                        return prev.map(t => 
+                          t.id === currentTab.id ? { ...t, view: 'ports' } : t
+                        );
+                      });
                       
                       // Add the forward
                       const forward = {
@@ -516,6 +535,7 @@ export default function App() {
             });
           }
           
+          // Update the tab's detected ports
           setTabs((prev) => prev.map((tb) => {
             if (tb.kind === 'ssh' && tb.sshSessionId === sessionId) {
               return { ...tb, detectedPorts: ports };
@@ -526,7 +546,7 @@ export default function App() {
         return () => { unlisten(); };
       } catch {}
     })();
-  }, [tabs, show]);
+  }, [show]);
 
   // Periodic port detection for active SSH tabs
   React.useEffect(() => {
