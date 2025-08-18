@@ -357,6 +357,62 @@ export const themes: Record<string, TerminalTheme> = {
       brightCyan: '#89ddff',
       brightWhite: '#ffffff'
     }
+  },
+  
+  'purple-night': {
+    name: 'Purple Night',
+    dark: true,
+    colors: {
+      background: '#1e1434',
+      foreground: '#e4d5ff',
+      cursor: '#ff79ff',
+      cursorAccent: '#1e1434',
+      selectionBackground: '#4a3a6e',
+      black: '#1e1434',
+      red: '#ff5792',
+      green: '#62d196',
+      yellow: '#ffd866',
+      blue: '#7c7cff',
+      magenta: '#c774e8',
+      cyan: '#82aaff',
+      white: '#e4d5ff',
+      brightBlack: '#6b5a8f',
+      brightRed: '#ff8fb3',
+      brightGreen: '#a1efd3',
+      brightYellow: '#ffe6b3',
+      brightBlue: '#a0a0ff',
+      brightMagenta: '#e7a3ff',
+      brightCyan: '#a3ccff',
+      brightWhite: '#ffffff'
+    }
+  },
+  
+  'forest': {
+    name: 'Forest',
+    dark: true,
+    colors: {
+      background: '#0f1610',
+      foreground: '#c5e4c5',
+      cursor: '#7fff7f',
+      cursorAccent: '#0f1610',
+      selectionBackground: '#2d4a2b',
+      black: '#0f1610',
+      red: '#ed6a5e',
+      green: '#5cad4a',
+      yellow: '#d4a959',
+      blue: '#4a90a4',
+      magenta: '#a874b8',
+      cyan: '#55dbbe',
+      white: '#c5e4c5',
+      brightBlack: '#445544',
+      brightRed: '#ff8a80',
+      brightGreen: '#8ed275',
+      brightYellow: '#ffc947',
+      brightBlue: '#6bb6d0',
+      brightMagenta: '#c79dd4',
+      brightCyan: '#86efcc',
+      brightWhite: '#e8f5e8'
+    }
   }
 };
 
@@ -398,5 +454,10 @@ export function applyThemeToTerminal(terminal: any, themeName: string) {
 export function getThemeList() {
   return Object.entries(themes)
     .map(([key, theme]) => ({ key, name: theme.name, dark: theme.dark }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => {
+      // Put Default first, then sort alphabetically
+      if (a.key === 'default') return -1;
+      if (b.key === 'default') return 1;
+      return a.name.localeCompare(b.name);
+    });
 }
