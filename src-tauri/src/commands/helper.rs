@@ -151,6 +151,24 @@ EOF
     cd "$DIR" 2>/dev/null || cd .
     git push 2>&1
     ;;
+  detect-ports)
+    # Detect listening ports (common dev ports)
+    # Use different methods based on what's available
+    if command -v ss >/dev/null 2>&1; then
+      # Linux with ss
+      ss -tlnp 2>/dev/null | awk '/LISTEN/ {split($4,a,":"); port=a[length(a)]; if (port ~ /^[0-9]+$/ && port > 1024 && port < 65536) print port}' | sort -nu | head -20
+    elif command -v netstat >/dev/null 2>&1; then
+      # macOS/BSD with netstat
+      netstat -an 2>/dev/null | awk '/LISTEN|\..*\./ {split($4,a,"."); port=a[length(a)]; if (port ~ /^[0-9]+$/ && port > 1024 && port < 65536) print port}' | sort -nu | head -20
+    elif command -v lsof >/dev/null 2>&1; then
+      # Fallback to lsof
+      lsof -iTCP -sTCP:LISTEN -P 2>/dev/null | awk 'NR>1 {split($9,a,":"); port=a[length(a)]; if (port ~ /^[0-9]+$/ && port > 1024 && port < 65536) print port}' | sort -nu | head -20
+    else
+      # No tools available, return empty
+      echo "[]"
+      exit 0
+    fi | awk 'BEGIN{printf "["} {if(NR>1) printf ","; printf "%s", $1} END{printf "]"}'
+    ;;
   *)
     echo "jaterm-agent: unknown command: $1" 1>&2
     exit 1

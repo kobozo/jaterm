@@ -37,6 +37,7 @@ export default function App() {
     title?: string;
     view?: 'terminal' | 'git' | 'ports';
     forwards?: { id: string; type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number; status?: 'starting'|'active'|'error'|'closed' }[];
+    detectedPorts?: number[];
   };
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
@@ -432,6 +433,26 @@ export default function App() {
     })();
   }, []);
 
+  // Listen for detected ports on SSH connection
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        const unlisten = await listen('ssh_detected_ports', (event) => {
+          const { sessionId, ports } = event.payload as any;
+          console.log(`Detected ${ports.length} open ports on session ${sessionId}`);
+          setTabs((prev) => prev.map((tb) => {
+            if (tb.kind === 'ssh' && tb.sshSessionId === sessionId) {
+              return { ...tb, detectedPorts: ports };
+            }
+            return tb;
+          }));
+        });
+        return () => { unlisten(); };
+      } catch {}
+    })();
+  }, []);
+
 
   // Ensure local helper when a local tab becomes active and has a cwd, if not checked yet
   React.useEffect(() => {
@@ -637,6 +658,8 @@ export default function App() {
               <div style={{ display: (t.view === 'ports') ? 'block' : 'none', height: '100%' }}>
                 <PortsPanel
                   forwards={t.forwards || []}
+                  detectedPorts={t.detectedPorts || []}
+                  suggestedPorts={[3000, 3001, 5173, 5174, 8000, 8080, 8081]}
                   onAdd={async (fwd) => {
                     if (t.kind !== 'ssh' || !t.sshSessionId) return;
                     const { sshOpenForward } = await import('@/types/ipc');
@@ -646,10 +669,35 @@ export default function App() {
                       setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: [ ...(tb.forwards || []), { ...fwd, id: fid, status: 'starting' } ] } : tb)));
                     } catch (e) { alert('open forward failed: ' + (e as any)); }
                   }}
+                  onActivate={async (fwd) => {
+                    if (t.kind !== 'ssh' || !t.sshSessionId) return;
+                    const { sshOpenForward } = await import('@/types/ipc');
+                    try {
+                      const res: any = await sshOpenForward({ sessionId: t.sshSessionId, forward: { id: '', type: fwd.type, srcHost: fwd.srcHost, srcPort: fwd.srcPort, dstHost: fwd.dstHost, dstPort: fwd.dstPort } as any });
+                      const fid = typeof res === 'string' ? res : (res?.forwardId || res);
+                      setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: [ ...(tb.forwards || []), { ...fwd, id: fid, status: 'starting' } ] } : tb)));
+                    } catch (e) { alert('activate forward failed: ' + (e as any)); }
+                  }}
                   onStop={async (id) => {
                     const { sshCloseForward } = await import('@/types/ipc');
                     try { await sshCloseForward(id); } catch {}
                     setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: (tb.forwards || []).map((x) => x.id === id ? { ...x, status: 'closed' } : x) } : tb)));
+                  }}
+                  onDelete={(id) => {
+                    setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, forwards: (tb.forwards || []).filter((x) => x.id !== id) } : tb)));
+                  }}
+                  onEdit={async (id, newFwd) => {
+                    // Stop the old forward and create a new one
+                    const { sshCloseForward, sshOpenForward } = await import('@/types/ipc');
+                    try {
+                      await sshCloseForward(id);
+                      const res: any = await sshOpenForward({ sessionId: t.sshSessionId, forward: { id: '', type: newFwd.type, srcHost: newFwd.srcHost, srcPort: newFwd.srcPort, dstHost: newFwd.dstHost, dstPort: newFwd.dstPort } as any });
+                      const fid = typeof res === 'string' ? res : (res?.forwardId || res);
+                      setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { 
+                        ...tb, 
+                        forwards: tb.forwards?.map(f => f.id === id ? { ...newFwd, id: fid, status: 'starting' } : f) 
+                      } : tb)));
+                    } catch (e) { alert('edit forward failed: ' + (e as any)); }
                   }}
                 />
               </div>

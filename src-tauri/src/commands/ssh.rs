@@ -95,7 +95,47 @@ pub async fn ssh_connect(state: State<'_, crate::state::app_state::AppState>, pr
   
   // Ensure blocking mode is set initially
   sess.set_blocking(true);
-  let id = format!("ssh_{}", nanoid::nanoid!(8));
+  
+  // Detect open ports on the remote system (non-blocking)
+  let session_id_for_ports = format!("ssh_{}", nanoid::nanoid!(8));
+  let app_for_ports = app.clone();
+  let host_for_ports = profile.host.clone();
+  let port_for_ports = profile.port;
+  let user_for_ports = profile.user.clone();
+  let session_id_clone = session_id_for_ports.clone();
+  
+  std::thread::spawn(move || {
+    std::thread::sleep(std::time::Duration::from_millis(500)); // Small delay to let connection establish
+    
+    // Try to detect ports using the helper
+    let output = std::process::Command::new("ssh")
+      .arg("-p")
+      .arg(port_for_ports.to_string())
+      .arg("-o")
+      .arg("StrictHostKeyChecking=no")
+      .arg("-o")
+      .arg("UserKnownHostsFile=/dev/null")
+      .arg(format!("{}@{}", user_for_ports, host_for_ports))
+      .arg("~/.jaterm-helper/jaterm-agent detect-ports 2>/dev/null || echo '[]'")
+      .output();
+      
+    if let Ok(output) = output {
+      let stdout = String::from_utf8_lossy(&output.stdout);
+      if let Ok(ports) = serde_json::from_str::<Vec<u16>>(&stdout) {
+        eprintln!("[ssh] Detected {} open ports on remote", ports.len());
+        // Emit event with detected ports
+        let _ = app_for_ports.emit(
+          "ssh_detected_ports",
+          serde_json::json!({
+            "sessionId": session_id_clone,
+            "ports": ports
+          })
+        );
+      }
+    }
+  });
+  
+  let id = session_id_for_ports;
   {
     let mut inner = state.0.lock().map_err(|_| "lock state")?;
     inner.ssh.insert(
