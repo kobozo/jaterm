@@ -1,4 +1,4 @@
-use std::{fs, path::Path, fs::File, io::BufWriter};
+use std::{fs, path::Path, fs::File, io::BufWriter, env};
 use image::{ImageEncoder, GenericImageView}; // write_image + size helpers
 
 fn is_rgba8_png(path: &Path) -> bool {
@@ -67,7 +67,63 @@ fn ensure_icon() {
   }
 }
 
+fn generate_helper_module() {
+  // Tell cargo to re-run this script if the helper script changes
+  println!("cargo:rerun-if-changed=../src/shared/helper-script.sh");
+  println!("cargo:rerun-if-changed=../src/shared/helper-constants.ts");
+  
+  // Read the helper script
+  let helper_script_path = Path::new("../src/shared/helper-script.sh");
+  let helper_script = fs::read_to_string(helper_script_path)
+    .expect("Failed to read helper script");
+  
+  // Read the version from helper-constants.ts
+  let constants_path = Path::new("../src/shared/helper-constants.ts");
+  let constants = fs::read_to_string(constants_path)
+    .expect("Failed to read helper constants");
+  
+  // Extract version from TypeScript file
+  let version = constants
+    .lines()
+    .find(|line| line.contains("export const HELPER_VERSION"))
+    .and_then(|line| {
+      line.split('\'')
+        .nth(1)
+        .or_else(|| line.split('"').nth(1))
+    })
+    .expect("Failed to extract HELPER_VERSION");
+  
+  // Replace placeholder with actual version
+  let helper_content = helper_script.replace("HELPER_VERSION_PLACEHOLDER", version);
+  
+  // Write the processed content to OUT_DIR for inclusion
+  let out_dir = env::var("OUT_DIR").unwrap();
+  let dest_path = Path::new(&out_dir).join("helper_generated.rs");
+  
+  // Escape the helper content for Rust string literal
+  let escaped_content = helper_content
+    .replace('\\', "\\\\")
+    .replace('"', "\\\"")
+    .replace('\n', "\\n")
+    .replace('\r', "\\r")
+    .replace('\t', "\\t");
+  
+  let rust_code = format!(
+    r#"pub const HELPER_VERSION: &str = "{}";
+pub const HELPER_NAME: &str = "jaterm-agent";
+pub const HELPER_REL_DIR: &str = ".jaterm-helper";
+pub const HELPER_CONTENT: &str = "{}";
+"#,
+    version,
+    escaped_content
+  );
+  
+  fs::write(&dest_path, rust_code)
+    .expect("Failed to write generated helper script");
+}
+
 fn main() {
   ensure_icon();
+  generate_helper_module();
   tauri_build::build()
 }

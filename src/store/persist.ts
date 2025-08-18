@@ -60,7 +60,9 @@ export async function deleteLocalProfile(id: string): Promise<void> {
 export async function saveSshProfile(p: SshProfileStored): Promise<void> {
   const s = await loadAppState();
   const list = s.profiles?.ssh ?? [];
-  const next = [p, ...list.filter((x) => x.id !== p.id)];
+  // Normalize hostnames to lowercase for consistency
+  const normalized: SshProfileStored = { ...p, host: (p.host || '').toLowerCase() };
+  const next = [normalized, ...list.filter((x) => x.id !== p.id)];
   await saveAppState({ profiles: { ...(s.profiles ?? {}), ssh: next } });
 }
 export async function deleteSshProfile(id: string): Promise<void> {

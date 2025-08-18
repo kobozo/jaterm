@@ -77,11 +77,17 @@ export type JsSshAuth = { password?: string; key_path?: string; passphrase?: str
 export type JsSshProfile = { host: string; port?: number; user: string; auth?: JsSshAuth; timeout_ms?: number };
 
 export async function sshConnect(profile: JsSshProfile): Promise<string> {
-  return invoke('ssh_connect', { profile } as any);
+  // Normalize hostnames to lowercase
+  const normalized = { ...profile, host: profile.host?.toLowerCase?.() ?? profile.host };
+  return invoke('ssh_connect', { profile: normalized } as any);
 }
 
 export function sshDisconnect(sessionId: string) {
   return invoke('ssh_disconnect', { session_id: sessionId } as any);
+}
+
+export function sshDetectPorts(sessionId: string): Promise<number[]> {
+  return invoke('ssh_detect_ports', { sessionId } as any);
 }
 
 export async function sshOpenShell(args: { sessionId: string; cwd?: string; cols?: number; rows?: number }): Promise<string> {

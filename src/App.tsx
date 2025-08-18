@@ -454,6 +454,25 @@ export default function App() {
     })();
   }, []);
 
+  // Periodic port detection for active SSH tabs
+  React.useEffect(() => {
+    const interval = setInterval(async () => {
+      const currentTab = tabs.find(t => t.id === activeTab);
+      if (currentTab?.kind === 'ssh' && currentTab.sshSessionId) {
+        try {
+          const { sshDetectPorts } = await import('@/types/ipc');
+          const ports = await sshDetectPorts(currentTab.sshSessionId);
+          console.log(`Periodic port detection found ${ports.length} ports`);
+          // The event handler will update the state
+        } catch (e) {
+          console.error('Port detection failed:', e);
+        }
+      }
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [tabs, activeTab]);
+
 
   // Ensure local helper when a local tab becomes active and has a cwd, if not checked yet
   React.useEffect(() => {
@@ -661,6 +680,16 @@ export default function App() {
                   forwards={t.forwards || []}
                   detectedPorts={t.detectedPorts || []}
                   suggestedPorts={[3000, 3001, 4000, 4200, 5173, 5174, 8000, 8080, 8081, 8888, 9000]}
+                  onRefreshPorts={async () => {
+                    if (t.kind !== 'ssh' || !t.sshSessionId) return;
+                    try {
+                      const { sshDetectPorts } = await import('@/types/ipc');
+                      const ports = await sshDetectPorts(t.sshSessionId);
+                      console.log(`Manual refresh found ${ports.length} ports`);
+                    } catch (e) {
+                      console.error('Port refresh failed:', e);
+                    }
+                  }}
                   onAdd={async (fwd) => {
                     if (t.kind !== 'ssh' || !t.sshSessionId) return;
                     const { sshOpenForward } = await import('@/types/ipc');

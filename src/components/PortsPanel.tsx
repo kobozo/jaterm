@@ -18,6 +18,7 @@ interface PortsPanelProps {
   onDelete?: (id: string) => void;
   onEdit?: (id: string, f: Forward) => void;
   onActivate?: (f: Forward) => void;
+  onRefreshPorts?: () => void;
   detectedPorts?: number[]; // Ports detected as open on remote
   suggestedPorts?: number[]; // Common dev ports to suggest
 }
@@ -48,6 +49,7 @@ export default function PortsPanel({
   onDelete, 
   onEdit,
   onActivate,
+  onRefreshPorts,
   detectedPorts = [],
   suggestedPorts = []
 }: PortsPanelProps) {
@@ -182,17 +184,26 @@ export default function PortsPanel({
         }}>Add</button>
       </div>
 
-      {/* Toggle suggestions */}
-      {suggestedForwards.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* Toggle suggestions and refresh */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+        {suggestedForwards.length > 0 && (
           <button 
             style={{ fontSize: 12, padding: '2px 8px' }}
             onClick={() => setShowSuggestions(!showSuggestions)}
           >
             {showSuggestions ? '▼' : '▶'} Suggestions ({suggestedForwards.length})
           </button>
-        </div>
-      )}
+        )}
+        {onRefreshPorts && (
+          <button 
+            style={{ fontSize: 12, padding: '2px 8px' }}
+            onClick={onRefreshPorts}
+            title="Refresh port detection"
+          >
+            🔄 Refresh Ports
+          </button>
+        )}
+      </div>
 
       {/* Forwards list */}
       <div style={{ flex: 1, overflow: 'auto', borderTop: '1px solid #333', paddingTop: 8 }}>

@@ -33,7 +33,9 @@ fn default_port() -> u16 { 22 }
 
 #[tauri::command]
 pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, profile: SshProfile) -> Result<String, String> {
-  let addr = format!("{}:{}", profile.host, profile.port);
+  // Normalize hostnames to lowercase for consistency (DNS is case-insensitive)
+  let host_lc = profile.host.to_ascii_lowercase();
+  let addr = format!("{}:{}", host_lc, profile.port);
   let tcp = TcpStream::connect(&addr).map_err(|e| format!("tcp connect: {e}"))?;
   // Explicitly set NO timeout on the TCP socket - crucial for SSH channel operations
   tcp.set_read_timeout(None).ok();
@@ -47,8 +49,8 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
       let kh_path = std::path::PathBuf::from(home).join(".ssh/known_hosts");
       let _ = kh.read_file(&kh_path, ssh2::KnownHostFileKind::OpenSSH);
       if let Some((key, _)) = sess.host_key() {
-        let hostport = format!("{}:{}", profile.host, profile.port);
-        match kh.check(&profile.host, key) {
+        let hostport = format!("{}:{}", host_lc, profile.port);
+        match kh.check(&host_lc, key) {
           ssh2::CheckResult::Match => {}
           ssh2::CheckResult::NotFound => {
             eprintln!("[ssh] known_hosts: host not found for {} (continuing)", hostport);
@@ -99,7 +101,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
   // Start watchdog for git status and port detection (non-blocking)
   let session_id_for_watchdog = format!("ssh_{}", nanoid::nanoid!(8));
   let app_for_watchdog = app.clone();
-  let host_for_watchdog = profile.host.clone();
+  let host_for_watchdog = host_lc.clone();
   let port_for_watchdog = profile.port;
   let user_for_watchdog = profile.user.clone();
   let session_id_clone = session_id_for_watchdog.clone();
@@ -148,7 +150,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
         tcp,
         sess,
         lock: std::sync::Arc::new(std::sync::Mutex::new(())),
-        host: profile.host,
+        host: host_lc,
         port: profile.port,
         user: profile.user,
       },
@@ -341,6 +343,45 @@ pub async fn ssh_exec(state: State<'_, crate::state::app_state::AppState>, sessi
     }
   }
   Ok(ExecResult { stdout: String::from_utf8_lossy(&out).to_string(), stderr: String::from_utf8_lossy(&err).to_string(), exit_code: code })
+}
+
+#[tauri::command]
+pub async fn ssh_detect_ports(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String) -> Result<Vec<u16>, String> {
+  // Get SSH session info
+  let (host, port, user) = {
+    let inner = state.0.lock().map_err(|_| "lock")?;
+    let session = inner.ssh.get(&session_id).ok_or("ssh session not found")?;
+    (session.host.clone(), session.port, session.user.clone())
+  };
+  
+  // Run port detection command
+  let output = std::process::Command::new("ssh")
+    .arg("-p")
+    .arg(port.to_string())
+    .arg("-o")
+    .arg("StrictHostKeyChecking=no")
+    .arg("-o")
+    .arg("UserKnownHostsFile=/dev/null")
+    .arg(format!("{}@{}", user, host))
+    .arg("~/.jaterm-helper/jaterm-agent detect-ports 2>/dev/null || echo '[]'")
+    .output()
+    .map_err(|e| format!("Failed to run port detection: {}", e))?;
+    
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  let ports = serde_json::from_str::<Vec<u16>>(&stdout).unwrap_or_default();
+  
+  eprintln!("[ssh] Manual port detection found {} ports", ports.len());
+  
+  // Emit event with detected ports
+  let _ = app.emit(
+    "ssh_detected_ports",
+    serde_json::json!({
+      "sessionId": session_id,
+      "ports": ports
+    })
+  );
+  
+  Ok(ports)
 }
 
 #[tauri::command]

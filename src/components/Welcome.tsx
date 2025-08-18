@@ -290,12 +290,6 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   // Background install of helper with progress toast
                   try {
                     const sessionId = await sshConnect({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
-                    const home = await sshHomeDir(sessionId);
-                    const helperDir = home.replace(/\/+$/, '') + '/.jaterm-helper';
-                    const helperPath = helperDir + '/jaterm-agent';
-                    await sshSftpMkdirs(sessionId, helperDir);
-                    // Minimal placeholder helper script
-                    const content = '#!/bin/sh\n\ncase "$1" in\n  health)\n    echo "{\\"ok\\":true,\\"version\\":\\"0.1.0\\"}"\n    exit 0\n    ;;\n  *)\n    echo "jaterm-agent: unknown command: $1" 1>&2\n    exit 1\n    ;;\nesac\n';
                     await ensureHelper(sessionId, { show, update, dismiss });
                     try { await sshDisconnect(sessionId); } catch {}
                   } catch (e) {

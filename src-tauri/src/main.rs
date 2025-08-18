@@ -29,6 +29,7 @@ fn main() {
       commands::pty::pty_kill,
       commands::ssh::ssh_connect,
       commands::ssh::ssh_disconnect,
+      commands::ssh::ssh_detect_ports,
       commands::ssh::ssh_open_shell,
       commands::ssh::ssh_write,
       commands::ssh::ssh_resize,
