@@ -5,9 +5,9 @@ import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
 import { homeDir } from '@tauri-apps/api/path';
 import { FitAddon } from '@xterm/addon-fit';
 
-type Props = { id: string; desiredCwd?: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void; onSplit?: (id: string, dir: 'row' | 'column') => void; onCompose?: () => void };
+type Props = { id: string; desiredCwd?: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void; onSplit?: (id: string, dir: 'row' | 'column') => void; onCompose?: () => void; onTerminalEvent?: (id: string, event: any) => void };
 
-export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, onCompose }: Props) {
+export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, onCompose, onTerminalEvent }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
@@ -97,9 +97,13 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
   }, [attach, dispose, id, term]);
 
   useEffect(() => {
-    // Forward user input to backend
+    // Forward user input to backend and to event detector
     const sub = term.onData((data) => {
-      if (id) ptyWrite({ ptyId: id, data });
+      if (id) {
+        ptyWrite({ ptyId: id, data });
+        // Feed input to event detector
+        onTerminalEvent?.(id, { type: 'input', data });
+      }
     });
     // Intercept Shift+Enter and send LF (\n) instead of default CR
     const keySub = term.onKey(({ key, domEvent }) => {
@@ -159,6 +163,8 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
           });
         } catch {}
         term.write(bytes);
+        // Feed output to event detector
+        onTerminalEvent?.(id, { type: 'output', data: new TextDecoder('utf-8', { fatal: false }).decode(bytes) });
       } else if (e.data) {
         const data = e.data as string;
         const cwds = parseOsc7Cwds(data);
@@ -172,6 +178,8 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
           }
         });
         term.write(data);
+        // Feed output to event detector
+        onTerminalEvent?.(id, { type: 'output', data });
       }
     }).then((u) => (unlisten = u));
     onPtyExit((e) => {

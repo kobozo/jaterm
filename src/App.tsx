@@ -18,6 +18,7 @@ import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSyst
 import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
 import { gitStatusViaHelper } from '@/services/git';
+import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
 
 export default function App() {
   // imported above
@@ -44,6 +45,97 @@ export default function App() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
   const { show, update, dismiss } = useToasts();
+  
+  // Terminal event detectors for each pane
+  const terminalEventDetectors = React.useRef<Map<string, TerminalEventDetector>>(new Map());
+  
+  // Register a terminal event detector for a pane
+  const registerTerminalEventDetector = React.useCallback((paneId: string, tabId: string) => {
+    if (terminalEventDetectors.current.has(paneId)) return;
+    
+    const detector = new TerminalEventDetector();
+    terminalEventDetectors.current.set(paneId, detector);
+    
+    // Listen for events
+    detector.on((event) => {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return;
+      
+      console.log(`Terminal event in pane ${paneId}:`, event);
+      
+      switch (event.type) {
+        case 'git-command':
+          // Git command executed, update status
+          updateGitStatus(tabId);
+          break;
+          
+        case 'process-start':
+          // Process started, check ports for SSH tabs
+          if (tab.kind === 'ssh' && tab.sshSessionId) {
+            detectPorts(tab.sshSessionId);
+          }
+          break;
+          
+        case 'command':
+          // Any command executed
+          if (event.command.includes('git')) {
+            updateGitStatus(tabId);
+          }
+          // Check if it's a process that might open ports
+          if (tab.kind === 'ssh' && tab.sshSessionId) {
+            if (event.command.match(/npm|yarn|pnpm|python|node|cargo|rails|django/)) {
+              // Delay a bit to let the process start
+              setTimeout(() => detectPorts(tab.sshSessionId!), 2000);
+            }
+          }
+          break;
+          
+        case 'directory-change':
+          // Directory changed, update git status
+          updateGitStatus(tabId);
+          break;
+          
+        case 'prompt':
+          // New prompt appeared, good time to check git status if in repo
+          const inRepo = !!tab.status && tab.status.branch && tab.status.branch !== '-';
+          if (inRepo) {
+            updateGitStatus(tabId);
+          }
+          break;
+      }
+    });
+    
+    return detector;
+  }, [tabs, updateGitStatus, detectPorts]);
+  
+  // Unregister a terminal event detector
+  const unregisterTerminalEventDetector = React.useCallback((paneId: string) => {
+    const detector = terminalEventDetectors.current.get(paneId);
+    if (detector) {
+      detector.reset();
+      terminalEventDetectors.current.delete(paneId);
+    }
+  }, []);
+  
+  // Handle terminal data from panes
+  const handleTerminalData = React.useCallback((paneId: string, event: { type: 'input' | 'output'; data: string }) => {
+    // Find which tab this pane belongs to
+    const tab = tabs.find(t => t.panes.includes(paneId));
+    if (!tab) return;
+    
+    // Get or create detector for this pane
+    let detector = terminalEventDetectors.current.get(paneId);
+    if (!detector) {
+      detector = registerTerminalEventDetector(paneId, tab.id);
+    }
+    
+    // Feed data to detector
+    if (event.type === 'input') {
+      detector.processInput(event.data);
+    } else {
+      detector.processData(event.data);
+    }
+  }, [tabs, registerTerminalEventDetector]);
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
@@ -152,6 +244,9 @@ export default function App() {
   }
 
   async function closePane(id: string) {
+    // Clean up event detector
+    unregisterTerminalEventDetector(id);
+    
     const t = tabs.find((x) => x.id === activeTab);
     if (t?.kind === 'ssh') {
       try { await sshCloseShell(id); } catch {}
@@ -556,24 +651,29 @@ export default function App() {
     })();
   }, [show]);
 
-  // Periodic port detection for active SSH tabs
+  // Event-driven port detection with debouncing
+  const detectPorts = React.useCallback(debounce(async (sessionId: string) => {
+    try {
+      const { sshDetectPorts } = await import('@/types/ipc');
+      const ports = await sshDetectPorts(sessionId);
+      console.log(`Event-driven port detection found ${ports.length} ports`);
+      // The event handler will update the state
+    } catch (e) {
+      console.error('Port detection failed:', e);
+    }
+  }, 1000), []); // Debounce for 1 second
+  
+  // Fallback port detection at a slower rate (30 seconds)
   React.useEffect(() => {
     const interval = setInterval(async () => {
       const currentTab = tabs.find(t => t.id === activeTab);
       if (currentTab?.kind === 'ssh' && currentTab.sshSessionId) {
-        try {
-          const { sshDetectPorts } = await import('@/types/ipc');
-          const ports = await sshDetectPorts(currentTab.sshSessionId);
-          console.log(`Periodic port detection found ${ports.length} ports`);
-          // The event handler will update the state
-        } catch (e) {
-          console.error('Port detection failed:', e);
-        }
+        detectPorts(currentTab.sshSessionId);
       }
-    }, 5000); // Poll every 5 seconds
+    }, 30000); // Poll every 30 seconds as fallback
 
     return () => clearInterval(interval);
-  }, [tabs, activeTab]);
+  }, [tabs, activeTab, detectPorts]);
 
 
   // Ensure local helper when a local tab becomes active and has a cwd, if not checked yet
@@ -592,7 +692,24 @@ export default function App() {
     }
   }, [tabs, activeTab]);
 
-  // Auto-refresh Git status periodically for the active tab (only when inside a Git repo)
+  // Event-driven Git status updates with debouncing
+  const updateGitStatus = React.useCallback(debounce(async (tabId: string) => {
+    const t = tabs.find((x) => x.id === tabId);
+    if (!t) return;
+    const cwd = (t.status?.fullPath ?? t.cwd) as string | undefined;
+    if (!cwd) return;
+    
+    const kind = t.kind === 'ssh' ? 'ssh' : 'local';
+    const sessionId = (t as any)?.sshSessionId as string | undefined;
+    const helperPath = t.status?.helperPath ?? null;
+    
+    try {
+      const st = await gitStatusViaHelper({ kind: kind as any, sessionId, helperPath }, cwd);
+      setTabs((prev) => prev.map((tb) => (tb.id === tabId ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)));
+    } catch {}
+  }, 500), [tabs]); // Debounce for 500ms
+  
+  // Fallback polling at a much slower rate (30 seconds) for safety
   React.useEffect(() => {
     const t = tabs.find((x) => x.id === activeTab);
     if (!t) return;
@@ -601,19 +718,13 @@ export default function App() {
     // Only poll when we know we're inside a repo
     const inRepo = !!t.status && t.status.branch && t.status.branch !== '-';
     if (!inRepo) return;
-    const kind = t.kind === 'ssh' ? 'ssh' : 'local';
-    const sessionId = (t as any)?.sshSessionId as string | undefined;
-    const helperPath = t.status?.helperPath ?? null;
-    const refresh = async () => {
-      try {
-        const st = await gitStatusViaHelper({ kind: kind as any, sessionId, helperPath }, cwd);
-        setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)));
-      } catch {}
-    };
-    const iv = window.setInterval(refresh, 5000);
+    
+    const iv = window.setInterval(() => {
+      updateGitStatus(t.id);
+    }, 30000); // 30 seconds instead of 5
+    
     return () => window.clearInterval(iv);
-    // Recreate interval when tab, path, helper, or ssh session changes
-  }, [tabs, activeTab]);
+  }, [tabs, activeTab, updateGitStatus]);
 
   // Persist workspace on changes (local tabs only)
   React.useEffect(() => {
@@ -852,6 +963,7 @@ export default function App() {
                           onClose={closePane}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
                           onCompose={() => setComposeOpen(true)}
+                          onTerminalEvent={handleTerminalData}
                         />
                       )}
                     />
@@ -869,6 +981,7 @@ export default function App() {
                           onClose={closePane}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
                           onCompose={() => setComposeOpen(true)}
+                          onTerminalEvent={handleTerminalData}
                         />
                       ))}
                     </SplitView>
@@ -889,6 +1002,7 @@ export default function App() {
                           onClose={closePane}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
                           onCompose={() => setComposeOpen(true)}
+                          onTerminalEvent={handleTerminalData}
                         />
                       )}
                     />
@@ -904,6 +1018,7 @@ export default function App() {
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
+                          onTerminalEvent={handleTerminalData}
                         />
                       ))}
                     </SplitView>

@@ -14,9 +14,10 @@ type Props = {
   onSplit?: (id: string, dir: 'row' | 'column') => void;
   sessionId?: string;
   onCompose?: () => void;
+  onTerminalEvent?: (id: string, event: any) => void;
 };
 
-export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId, onCompose }: Props) {
+export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId, onCompose, onTerminalEvent }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
@@ -99,7 +100,13 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   }, [attach, dispose, id, term]);
 
   useEffect(() => {
-    const sub = term.onData((data) => { if (id) sshWrite({ channelId: id, data }); });
+    const sub = term.onData((data) => { 
+      if (id) {
+        sshWrite({ channelId: id, data });
+        // Feed input to event detector
+        onTerminalEvent?.(id, { type: 'input', data });
+      }
+    });
     const keySub = term.onKey(({ key, domEvent }) => {
       if ((domEvent.key === 'Enter' || domEvent.code === 'Enter') && domEvent.shiftKey) { domEvent.preventDefault(); if (id) sshWrite({ channelId: id, data: '\n' }); }
     });
@@ -179,6 +186,8 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
           });
         } catch {}
         term.write(bytes);
+        // Feed output to event detector
+        onTerminalEvent?.(id, { type: 'output', data: new TextDecoder('utf-8', { fatal: false }).decode(bytes) });
       } else if (e.data) {
         const data = e.data as string;
         const cwds = parseOsc7Cwds(data);
@@ -190,6 +199,8 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
           }
         });
         term.write(data);
+        // Feed output to event detector
+        onTerminalEvent?.(id, { type: 'output', data });
       }
     }).then((u) => (unlisten = u));
     onSshExit((e) => { if (e.channelId === id) { console.info('[ssh] exit', id); onClose?.(id); } }).then((u) => (unlistenExit = u));
