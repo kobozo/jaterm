@@ -55,13 +55,40 @@ export default function App() {
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
-  async function openFolderFor(tabId: string, path: string, opts: { remember?: boolean } = { remember: true }) {
+  async function openFolderFor(tabId: string, path: string, opts: { 
+    remember?: boolean;
+    terminal?: any; // Terminal customization
+    shell?: any; // Shell settings
+  } = { remember: true }) {
     if (opts.remember !== false) await addRecent(path);
     try {
       const abs = await resolvePathAbsolute(path);
       const res = await ptyOpen({ cwd: abs });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
       const sid = String(id);
+      
+      // Apply shell settings if provided
+      if (opts.shell) {
+        // Set environment variables
+        if (opts.shell.env) {
+          for (const [key, value] of Object.entries(opts.shell.env)) {
+            const exportCmd = `export ${key}="${value.replace(/"/g, '\\"')}"\n`;
+            await ptyWrite({ ptyId: sid, data: exportCmd });
+          }
+        }
+        
+        // Run initialization commands
+        if (opts.shell.initCommands) {
+          for (const cmd of opts.shell.initCommands) {
+            await ptyWrite({ ptyId: sid, data: cmd + '\n' });
+          }
+        }
+        
+        // Override shell if specified
+        if (opts.shell.shell) {
+          await ptyWrite({ ptyId: sid, data: `exec ${opts.shell.shell}\n` });
+        }
+      }
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, cwd: abs, panes: [sid], activePane: sid, status: { ...t.status, fullPath: abs } } : t)));
       setActiveTab(tabId);
       // Ensure local helper in background and record status
@@ -418,7 +445,17 @@ export default function App() {
     }
   }
 
-  async function openSshFor(tabId: string, opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string }) {
+  async function openSshFor(tabId: string, opts: { 
+    host: string; 
+    port?: number; 
+    user: string; 
+    auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; 
+    cwd?: string; 
+    profileId?: string;
+    terminal?: any; // Terminal customization settings
+    shell?: any; // Shell and environment settings
+    advanced?: any; // Advanced SSH settings
+  }) {
     try {
       const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
       const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: opts.auth.password, key_path: opts.auth.keyPath, passphrase: opts.auth.passphrase, agent: opts.auth.agent } as any, timeout_ms: 15000 });
@@ -438,6 +475,41 @@ export default function App() {
         });
       } catch {}
       const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
+      
+      // Apply shell settings if provided
+      if (opts.shell) {
+        // Set environment variables
+        if (opts.shell.env) {
+          for (const [key, value] of Object.entries(opts.shell.env)) {
+            const exportCmd = `export ${key}="${value.replace(/"/g, '\\"')}"\n`;
+            await sshWrite({ channelId: chanId, data: exportCmd });
+          }
+        }
+        
+        // Run initialization commands
+        if (opts.shell.initCommands) {
+          for (const cmd of opts.shell.initCommands) {
+            await sshWrite({ channelId: chanId, data: cmd + '\n' });
+          }
+        }
+        
+        // Override shell if specified
+        if (opts.shell.shell) {
+          await sshWrite({ channelId: chanId, data: `exec ${opts.shell.shell}\n` });
+        }
+      }
+      
+      // Setup default port forwards if provided
+      if (opts.advanced?.defaultForwards) {
+        for (const fwd of opts.advanced.defaultForwards) {
+          try {
+            const { sshOpenForward } = await import('@/types/ipc');
+            await sshOpenForward({ sessionId, forward: fwd as any });
+          } catch (e) {
+            console.error('Failed to setup default forward:', e);
+          }
+        }
+      }
       // Get SSH home directory to set default helper path
       let sshHome: string | undefined;
       try {

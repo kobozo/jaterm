@@ -1,5 +1,5 @@
 import React from 'react';
-import { onSshUploadProgress, sshHomeDir, sshSftpList, sshSftpMkdirs, sshSftpWrite, type SftpEntry } from '@/types/ipc';
+import { onSshUploadProgress, sshHomeDir, sshSftpList, sshSftpMkdirs, sshSftpWrite, sshSftpRead, type SftpEntry } from '@/types/ipc';
 
 type Props = {
   sessionId: string;
@@ -53,7 +53,7 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
   function parentDir(p: string) { const x = p.replace(/\/+$/, '').replace(/\/+[^/]+$/, ''); return x || '/'; }
 
   async function mkdir() {
-    const name = window.prompt('New folder name');
+    const name = (window.prompt('New folder name') || '').trim();
     if (!name) return;
     const full = join(path, name);
     setBusy(true);
@@ -78,6 +78,34 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
     } finally {
       setBusy(false);
       setProgress(null);
+    }
+  }
+
+  async function pickDirectory(): Promise<string | null> {
+    try {
+      const mod = await import('@tauri-apps/plugin-dialog');
+      const dir = await mod.open({ directory: true, multiple: false });
+      if (typeof dir === 'string') return dir;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function download(entry: SftpEntry) {
+    setBusy(true);
+    try {
+      const base = await pickDirectory();
+      if (!base) { setBusy(false); return; }
+      if (entry.is_dir) {
+        await (await import('@/types/ipc')).sshSftpDownloadDir(sessionId, entry.path, base + '/' + entry.name);
+      } else {
+        await (await import('@/types/ipc')).sshSftpDownload(sessionId, entry.path, base + '/' + entry.name);
+      }
+    } catch (e) {
+      alert('download failed: ' + (e as any));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -113,8 +141,11 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
           <div>
             <div style={{ padding: '6px 10px', cursor: canNavigateUp ? 'pointer' : 'default', color: canNavigateUp ? '#ddd' : '#666' }} onClick={() => canNavigateUp && load(parentDir(path))}>..</div>
             {entries.map((e) => (
-              <div key={e.path} style={{ padding: '6px 10px', cursor: e.is_dir ? 'pointer' : 'default' }} onClick={() => e.is_dir && load(e.path)}>
-                {e.is_dir ? '📁 ' : '📄 '}{e.name}
+              <div key={e.path} style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, cursor: e.is_dir ? 'pointer' : 'default' }} onClick={() => e.is_dir && load(e.path)}>
+                  {e.is_dir ? '📁 ' : '📄 '}{e.name}
+                </div>
+                <button disabled={busy} onClick={() => download(e)} title={e.is_dir ? 'Download Folder' : 'Download File'}>⬇</button>
               </div>
             ))}
           </div>
@@ -123,4 +154,3 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
     </div>
   );
 }
-

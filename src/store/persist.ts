@@ -34,9 +34,65 @@ export async function saveAppState(partial: AppPersistState): Promise<void> {
   }
 }
 
+// Terminal customization settings
+export type TerminalSettings = {
+  fontSize?: number;
+  fontFamily?: string;
+  lineHeight?: number;
+  cursorStyle?: 'block' | 'underline' | 'bar';
+  cursorBlink?: boolean;
+  theme?: string; // Theme name like 'dracula', 'solarized-dark', etc.
+  scrollback?: number;
+  bellStyle?: 'none' | 'visual' | 'sound' | 'both';
+};
+
+// Environment and shell settings
+export type ShellSettings = {
+  shell?: string; // Override shell command
+  env?: Record<string, string>; // Environment variables
+  initCommands?: string[]; // Commands to run on connect
+  workingDir?: 'remember' | 'default' | 'prompt'; // Working directory behavior
+};
+
+// SSH-specific settings
+export type SshAdvancedSettings = {
+  keepaliveInterval?: number; // Seconds between keepalive packets
+  compression?: boolean;
+  x11Forwarding?: boolean;
+  agentForwarding?: boolean;
+  defaultForwards?: Array<{
+    type: 'L' | 'R';
+    srcHost: string;
+    srcPort: number;
+    dstHost: string;
+    dstPort: number;
+  }>;
+  socksProxy?: { port: number };
+  autoReconnect?: boolean;
+  reconnectDelay?: number; // Seconds before reconnect attempt
+};
+
 // Profile helpers
-export type LocalProfile = { id: string; name: string; path: string };
-export type SshProfileStored = { id: string; name: string; host: string; port?: number; user: string; auth?: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; path?: string };
+export type LocalProfile = { 
+  id: string; 
+  name: string; 
+  path: string;
+  terminal?: TerminalSettings;
+  shell?: ShellSettings;
+};
+
+export type SshProfileStored = { 
+  id: string; 
+  name: string; 
+  host: string; 
+  port?: number; 
+  user: string; 
+  auth?: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; 
+  path?: string;
+  terminal?: TerminalSettings;
+  shell?: ShellSettings;
+  advanced?: SshAdvancedSettings;
+};
 
 export async function getLocalProfiles(): Promise<LocalProfile[]> {
   const s = await loadAppState();

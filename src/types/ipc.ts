@@ -208,6 +208,18 @@ export function sshSftpWrite(sessionId: string, remotePath: string, dataBase64: 
   return invoke('ssh_sftp_write', { sessionId, remotePath, dataB64: dataBase64 } as any);
 }
 
+export function sshSftpRead(sessionId: string, remotePath: string): Promise<string> {
+  return invoke('ssh_sftp_read', { sessionId, remotePath } as any);
+}
+
+export function sshSftpDownload(sessionId: string, remotePath: string, localPath: string): Promise<void> {
+  return invoke('ssh_sftp_download', { sessionId, remotePath, localPath } as any);
+}
+
+export function sshSftpDownloadDir(sessionId: string, remoteDir: string, localDir: string): Promise<void> {
+  return invoke('ssh_sftp_download_dir', { sessionId, remoteDir, localDir } as any);
+}
+
 export type SshUploadProgress = { path: string; written: number; total: number };
 export function onSshUploadProgress(handler: (e: SshUploadProgress) => void): Promise<UnlistenFn> {
   return listen<SshUploadProgress>('SSH_UPLOAD_PROGRESS', (ev) => handler(ev.payload));

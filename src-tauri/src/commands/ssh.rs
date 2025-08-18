@@ -329,6 +329,119 @@ pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, 
 }
 
 #[tauri::command]
+pub async fn ssh_sftp_download(state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String, local_path: String) -> Result<(), String> {
+  eprintln!("[ssh] sftp_download session={} remote={} local={}", session_id, remote_path, local_path);
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  // Ensure local parent directory exists
+  if let Some(parent) = std::path::Path::new(&local_path).parent() { let _ = std::fs::create_dir_all(parent); }
+  let mut remote = loop { match sftp.open(Path::new(&remote_path)) { Ok(f) => break f, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  let mut local = std::fs::File::create(&local_path).map_err(|e| e.to_string())?;
+  let mut buf = [0u8; 131072];
+  loop {
+    match remote.read(&mut buf) {
+      Ok(0) => break,
+      Ok(n) => {
+        let mut off = 0;
+        while off < n {
+          match local.write(&buf[off..n]) {
+            Ok(m) => off += m,
+            Err(e) => return Err(e.to_string()),
+          }
+        }
+      }
+      Err(e) => {
+        if e.kind() == std::io::ErrorKind::WouldBlock { std::thread::sleep(Duration::from_millis(10)); continue; }
+        else { return Err(e.to_string()); }
+      }
+    }
+  }
+  Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_sftp_download_dir(state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_dir: String, local_dir: String) -> Result<(), String> {
+  eprintln!("[ssh] sftp_download_dir session={} remote_dir={} local_dir={}", session_id, remote_dir, local_dir);
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  let remote_root = Path::new(&remote_dir).to_path_buf();
+  let local_root = std::path::Path::new(&local_dir).to_path_buf();
+  std::fs::create_dir_all(&local_root).map_err(|e| e.to_string())?;
+
+  fn rel<'a>(root: &std::path::Path, p: &std::path::Path) -> std::path::PathBuf {
+    match p.strip_prefix(root) { Ok(r) => r.to_path_buf(), Err(_) => std::path::PathBuf::from(p.file_name().unwrap_or_default()) }
+  }
+
+  fn download_recursive(sftp: &ssh2::Sftp, rroot: &std::path::Path, lroot: &std::path::Path, rcur: &std::path::Path) -> Result<(), String> {
+    let entries = loop {
+      match sftp.readdir(rcur) {
+        Ok(v) => break v,
+        Err(e) => {
+          if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
+          else { return Err(e.to_string()); }
+        }
+      }
+    };
+
+    for (rpath, st) in entries {
+      let name = match rpath.file_name().and_then(|s| s.to_str()) { Some(n) => n, None => continue };
+      if name == "." || name == ".." { continue; }
+      let lpath = lroot.join(rel(rroot, &rpath));
+      if st.is_dir() {
+        std::fs::create_dir_all(&lpath).map_err(|e| e.to_string())?;
+        download_recursive(sftp, rroot, lroot, &rpath)?;
+      } else {
+        // file copy
+        if let Some(parent) = lpath.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        let mut rfile = loop { match sftp.open(&rpath) { Ok(f) => break f, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+        let mut lfile = std::fs::File::create(&lpath).map_err(|e| e.to_string())?;
+        let mut buf = [0u8; 131072];
+        loop {
+          match rfile.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+              let mut off = 0; while off < n { match lfile.write(&buf[off..n]) { Ok(m) => off += m, Err(e) => return Err(e.to_string()) } }
+            }
+            Err(e) => {
+              if e.kind() == std::io::ErrorKind::WouldBlock { std::thread::sleep(Duration::from_millis(10)); continue; }
+              else { return Err(e.to_string()); }
+            }
+          }
+        }
+      }
+    }
+    Ok(())
+  }
+
+  download_recursive(&sftp, &remote_root, &local_root, &remote_root)
+}
+
+#[tauri::command]
+pub async fn ssh_sftp_read(state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String) -> Result<String, String> {
+  eprintln!("[ssh] sftp_read session={} path={}", session_id, remote_path);
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  let mut file = loop { match sftp.open(Path::new(&remote_path)) { Ok(f) => break f, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  let mut buf = Vec::new();
+  loop {
+    let mut tmp = [0u8; 65536];
+    match file.read(&mut tmp) {
+      Ok(0) => break,
+      Ok(n) => { buf.extend_from_slice(&tmp[..n]); }
+      Err(e) => {
+        if e.kind() == std::io::ErrorKind::WouldBlock { std::thread::sleep(Duration::from_millis(10)); continue; }
+        else { return Err(e.to_string()); }
+      }
+    }
+  }
+  let b64 = base64::engine::general_purpose::STANDARD.encode(buf);
+  Ok(b64)
+}
+
+#[tauri::command]
 pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<(), String> {
   eprintln!("[ssh] mkdirs session={} path={}", session_id, path);
   let mut inner = state.0.lock().map_err(|_| "lock")?;

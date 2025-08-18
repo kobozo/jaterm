@@ -28,7 +28,23 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   const [lpOpen, setLpOpen] = useState(false);
   const [lpForm, setLpForm] = useState<{ id?: string; name: string; path: string }>({ name: '', path: '' });
   const [spOpen, setSpOpen] = useState(false);
-  const [spForm, setSpForm] = useState<{ id?: string; name: string; host: string; port?: number; user: string; authType: 'agent'|'password'|'key'; password?: string; keyPath?: string; passphrase?: string; path?: string }>({ name: '', host: '', user: '', authType: 'agent' });
+  const [spForm, setSpForm] = useState<{ 
+    id?: string; 
+    name: string; 
+    host: string; 
+    port?: number; 
+    user: string; 
+    authType: 'agent'|'password'|'key'; 
+    password?: string; 
+    keyPath?: string; 
+    passphrase?: string; 
+    path?: string;
+    // New settings
+    envVars?: Array<{ key: string; value: string }>;
+    initCommands?: string[];
+    shellOverride?: string;
+    defaultForwards?: Array<{ type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number }>;
+  }>({ name: '', host: '', user: '', authType: 'agent' });
   const [browse, setBrowse] = useState<{ sessionId: string; cwd: string; entries: { name: string; path: string; is_dir: boolean }[] } | null>(null);
   useEffect(() => {
     (async () => {
@@ -192,7 +208,17 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     const all = await getSshProfiles();
                     const p = s.profileId ? all.find((x) => x.id === s.profileId) : undefined;
                     if (p) {
-                      onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: s.path, profileId: p.id });
+                      onOpenSsh?.({ 
+                        host: p.host, 
+                        port: p.port, 
+                        user: p.user, 
+                        auth: p.auth || { agent: true }, 
+                        cwd: s.path, 
+                        profileId: p.id,
+                        terminal: p.terminal,
+                        shell: p.shell,
+                        advanced: p.advanced
+                      });
                     } else if (s.host && s.user) {
                       onOpenSsh?.({ host: s.host, port: s.port ?? 22, user: s.user, auth: { agent: true } as any, cwd: s.path });
                     } else {
@@ -233,7 +259,17 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   <span title={(p.name || `${p.user}@${p.host}`) + (p.path ? `: ${p.path}` : '')}>{p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}</span>
                   <button onClick={async () => {
                     if (!onOpenSsh) return;
-                    onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id });
+                    onOpenSsh({ 
+                      host: p.host, 
+                      port: p.port, 
+                      user: p.user, 
+                      auth: p.auth || { agent: true }, 
+                      cwd: p.path, 
+                      profileId: p.id,
+                      terminal: p.terminal,
+                      shell: p.shell,
+                      advanced: p.advanced
+                    });
                   }}>Open</button>
                   <button onClick={async () => { await deleteSshProfile(p.id); setSshProfiles(await getSshProfiles()); }} title="Remove">×</button>
                 </li>
@@ -286,6 +322,166 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   } catch (e) { alert('SSH browse failed: ' + (e as any)); }
                 }}>Browse…</button>
               </div>
+              
+              {/* Advanced Settings Section */}
+              <details style={{ marginTop: 12, padding: '8px 0', borderTop: '1px solid #444' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 'bold', marginBottom: 8 }}>Advanced Settings</summary>
+                
+                {/* Environment Variables */}
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ display: 'block', marginBottom: 4 }}>Environment Variables</label>
+                  {(spForm.envVars || []).map((env, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                      <input 
+                        placeholder="KEY" 
+                        value={env.key} 
+                        onChange={(e) => {
+                          const newVars = [...(spForm.envVars || [])];
+                          newVars[i].key = e.target.value;
+                          setSpForm({ ...spForm, envVars: newVars });
+                        }}
+                        style={{ flex: 1 }}
+                      />
+                      <input 
+                        placeholder="value" 
+                        value={env.value} 
+                        onChange={(e) => {
+                          const newVars = [...(spForm.envVars || [])];
+                          newVars[i].value = e.target.value;
+                          setSpForm({ ...spForm, envVars: newVars });
+                        }}
+                        style={{ flex: 2 }}
+                      />
+                      <button onClick={() => {
+                        const newVars = (spForm.envVars || []).filter((_, idx) => idx !== i);
+                        setSpForm({ ...spForm, envVars: newVars.length ? newVars : undefined });
+                      }}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => {
+                    setSpForm({ ...spForm, envVars: [...(spForm.envVars || []), { key: '', value: '' }] });
+                  }} style={{ fontSize: 12 }}>+ Add Variable</button>
+                </div>
+                
+                {/* Shell Override */}
+                <div style={{ marginTop: 8 }}>
+                  <label>Shell Override
+                    <input 
+                      style={{ width: '100%' }} 
+                      value={spForm.shellOverride || ''} 
+                      onChange={(e) => setSpForm({ ...spForm, shellOverride: e.target.value || undefined })}
+                      placeholder="/bin/zsh (leave empty for default)"
+                    />
+                  </label>
+                </div>
+                
+                {/* Init Commands */}
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ display: 'block', marginBottom: 4 }}>Initialization Commands</label>
+                  {(spForm.initCommands || []).map((cmd, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                      <input 
+                        value={cmd} 
+                        onChange={(e) => {
+                          const newCmds = [...(spForm.initCommands || [])];
+                          newCmds[i] = e.target.value;
+                          setSpForm({ ...spForm, initCommands: newCmds });
+                        }}
+                        placeholder="Command to run on connect"
+                        style={{ flex: 1 }}
+                      />
+                      <button onClick={() => {
+                        const newCmds = (spForm.initCommands || []).filter((_, idx) => idx !== i);
+                        setSpForm({ ...spForm, initCommands: newCmds.length ? newCmds : undefined });
+                      }}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => {
+                    setSpForm({ ...spForm, initCommands: [...(spForm.initCommands || []), ''] });
+                  }} style={{ fontSize: 12 }}>+ Add Command</button>
+                </div>
+                
+                {/* Default Port Forwards */}
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ display: 'block', marginBottom: 4 }}>Default Port Forwards</label>
+                  {(spForm.defaultForwards || []).map((fwd, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+                      <select 
+                        value={fwd.type} 
+                        onChange={(e) => {
+                          const newFwds = [...(spForm.defaultForwards || [])];
+                          newFwds[i].type = e.target.value as 'L' | 'R';
+                          setSpForm({ ...spForm, defaultForwards: newFwds });
+                        }}
+                        style={{ width: 45 }}
+                      >
+                        <option value="L">L</option>
+                        <option value="R">R</option>
+                      </select>
+                      <input 
+                        placeholder="127.0.0.1" 
+                        value={fwd.srcHost} 
+                        onChange={(e) => {
+                          const newFwds = [...(spForm.defaultForwards || [])];
+                          newFwds[i].srcHost = e.target.value;
+                          setSpForm({ ...spForm, defaultForwards: newFwds });
+                        }}
+                        style={{ width: 90 }}
+                      />
+                      <input 
+                        type="number" 
+                        placeholder="3000" 
+                        value={fwd.srcPort || ''} 
+                        onChange={(e) => {
+                          const newFwds = [...(spForm.defaultForwards || [])];
+                          newFwds[i].srcPort = Number(e.target.value);
+                          setSpForm({ ...spForm, defaultForwards: newFwds });
+                        }}
+                        style={{ width: 60 }}
+                      />
+                      <span>→</span>
+                      <input 
+                        placeholder="127.0.0.1" 
+                        value={fwd.dstHost} 
+                        onChange={(e) => {
+                          const newFwds = [...(spForm.defaultForwards || [])];
+                          newFwds[i].dstHost = e.target.value;
+                          setSpForm({ ...spForm, defaultForwards: newFwds });
+                        }}
+                        style={{ width: 90 }}
+                      />
+                      <input 
+                        type="number" 
+                        placeholder="3000" 
+                        value={fwd.dstPort || ''} 
+                        onChange={(e) => {
+                          const newFwds = [...(spForm.defaultForwards || [])];
+                          newFwds[i].dstPort = Number(e.target.value);
+                          setSpForm({ ...spForm, defaultForwards: newFwds });
+                        }}
+                        style={{ width: 60 }}
+                      />
+                      <button onClick={() => {
+                        const newFwds = (spForm.defaultForwards || []).filter((_, idx) => idx !== i);
+                        setSpForm({ ...spForm, defaultForwards: newFwds.length ? newFwds : undefined });
+                      }}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => {
+                    setSpForm({ 
+                      ...spForm, 
+                      defaultForwards: [...(spForm.defaultForwards || []), { 
+                        type: 'L' as const, 
+                        srcHost: '127.0.0.1', 
+                        srcPort: 0, 
+                        dstHost: '127.0.0.1', 
+                        dstPort: 0 
+                      }] 
+                    });
+                  }} style={{ fontSize: 12 }}>+ Add Forward</button>
+                </div>
+              </details>
+              
               <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
                 <button onClick={async () => {
                   // Background install of helper with progress toast
@@ -302,7 +498,35 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                 <button onClick={() => setSpOpen(false)}>Cancel</button>
                 <button onClick={async () => {
                   if (!spForm.id) spForm.id = crypto.randomUUID();
-                  const profile = { id: spForm.id!, name: spForm.name, host: spForm.host, port: spForm.port, user: spForm.user, auth: spForm.authType === 'agent' ? { agent: true } : spForm.authType === 'password' ? { password: spForm.password } : { keyPath: spForm.keyPath, passphrase: spForm.passphrase }, path: spForm.path } as any;
+                  const profile: any = { 
+                    id: spForm.id!, 
+                    name: spForm.name, 
+                    host: spForm.host, 
+                    port: spForm.port, 
+                    user: spForm.user, 
+                    auth: spForm.authType === 'agent' ? { agent: true } : spForm.authType === 'password' ? { password: spForm.password } : { keyPath: spForm.keyPath, passphrase: spForm.passphrase }, 
+                    path: spForm.path 
+                  };
+                  
+                  // Add shell settings if provided
+                  if (spForm.envVars?.length || spForm.initCommands?.length || spForm.shellOverride) {
+                    profile.shell = {};
+                    if (spForm.envVars?.length) {
+                      profile.shell.env = Object.fromEntries(spForm.envVars.map(v => [v.key, v.value]));
+                    }
+                    if (spForm.initCommands?.length) {
+                      profile.shell.initCommands = spForm.initCommands;
+                    }
+                    if (spForm.shellOverride) {
+                      profile.shell.shell = spForm.shellOverride;
+                    }
+                  }
+                  
+                  // Add advanced settings if provided
+                  if (spForm.defaultForwards?.length) {
+                    profile.advanced = { defaultForwards: spForm.defaultForwards };
+                  }
+                  
                   await saveSshProfile(profile);
                   setSshProfiles(await getSshProfiles());
                   setSpOpen(false);
