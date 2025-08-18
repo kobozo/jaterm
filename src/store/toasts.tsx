@@ -39,14 +39,22 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     };
     
     // Set default timeouts based on toast type if not specified
-    if (toast.timeout === undefined && !toast.actions?.length && !toast.progress) {
-      // Auto-dismiss toasts without actions or progress after a delay
-      if (toast.kind === 'error') {
-        toast.timeout = 8000; // 8 seconds for errors
-      } else if (toast.kind === 'success') {
-        toast.timeout = 4000; // 4 seconds for success
+    if (toast.timeout === undefined) {
+      if (toast.progress) {
+        // Progress toasts don't auto-dismiss
+        toast.timeout = 0;
+      } else if (toast.actions?.length) {
+        // Toasts with actions get a longer timeout
+        toast.timeout = 15000; // 15 seconds for action toasts
       } else {
-        toast.timeout = 6000; // 6 seconds for info
+        // Regular toasts auto-dismiss based on kind
+        if (toast.kind === 'error') {
+          toast.timeout = 8000; // 8 seconds for errors
+        } else if (toast.kind === 'success') {
+          toast.timeout = 4000; // 4 seconds for success
+        } else {
+          toast.timeout = 6000; // 6 seconds for info
+        }
       }
     }
     
