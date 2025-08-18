@@ -15,11 +15,12 @@ type Props = {
   sessionId?: string;
   onCompose?: () => void;
   onTerminalEvent?: (id: string, event: any) => void;
+  terminalSettings?: { theme?: string; fontSize?: number; fontFamily?: string };
 };
 
-export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId, onCompose, onTerminalEvent }: Props) {
+export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId, onCompose, onTerminalEvent, terminalSettings }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const { attach, dispose, term } = useTerminal(id);
+  const { attach, dispose, term } = useTerminal(id, terminalSettings);
   const fitRef = useRef<FitAddon | null>(null);
   const correctedRef = useRef(false);
   useEffect(() => { correctedRef.current = false; }, [id, desiredCwd]);

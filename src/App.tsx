@@ -42,6 +42,7 @@ export default function App() {
     detectedPorts?: number[];
     sftpCwd?: string;
     indicator?: 'activity' | 'bell';
+    terminalSettings?: { theme?: string; fontSize?: number; fontFamily?: string };
   };
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
@@ -556,7 +557,9 @@ export default function App() {
           ...t.status,
           // Set default helper path if we have home directory
           helperPath: sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : undefined
-        } 
+        },
+        // Store terminal settings
+        terminalSettings: opts.terminal
       } : t)));
       setActiveTab(tabId);
     } catch (e) {
@@ -1157,6 +1160,7 @@ export default function App() {
                           id={pid}
                           desiredCwd={undefined}
                           sessionId={(t as any).sshSessionId}
+                          terminalSettings={(t as any).terminalSettings}
                           onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
@@ -1175,6 +1179,7 @@ export default function App() {
                           id={pid}
                           desiredCwd={undefined}
                           sessionId={(t as any).sshSessionId}
+                          terminalSettings={(t as any).terminalSettings}
                           onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}

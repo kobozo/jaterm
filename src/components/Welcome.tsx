@@ -4,6 +4,7 @@ import { homeDir } from '@tauri-apps/api/path';
 import { addRecent, getRecents, removeRecent, clearRecents } from '@/store/recents';
 import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
 import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, type LocalProfile, type SshProfileStored } from '@/store/persist';
+import { getThemeList } from '@/config/themes';
 import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec } from '@/types/ipc';
 import { ensureHelper } from '@/services/helper';
 import { useToasts } from '@/store/toasts';
@@ -44,8 +45,12 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     initCommands?: string[];
     shellOverride?: string;
     defaultForwards?: Array<{ type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number }>;
+    // Terminal settings
+    theme?: string;
+    fontSize?: number;
+    fontFamily?: string;
   }>({ name: '', host: '', user: '', authType: 'agent' });
-  const [activeTab, setActiveTab] = useState<'basic' | 'environment' | 'forwarding'>('basic');
+  const [activeTab, setActiveTab] = useState<'basic' | 'environment' | 'forwarding' | 'terminal'>('basic');
   const [browse, setBrowse] = useState<{ sessionId: string; cwd: string; entries: { name: string; path: string; is_dir: boolean }[] } | null>(null);
   useEffect(() => {
     (async () => {
@@ -300,7 +305,10 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined,
                       initCommands: p.shell?.initCommands,
                       shellOverride: p.shell?.shell,
-                      defaultForwards: p.advanced?.defaultForwards
+                      defaultForwards: p.advanced?.defaultForwards,
+                      theme: p.terminal?.theme,
+                      fontSize: p.terminal?.fontSize,
+                      fontFamily: p.terminal?.fontFamily
                     }); 
                     setSpOpen(true); 
                   }} title="Edit">✎</button>
@@ -371,6 +379,19 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   }}
                 >
                   Forwarding
+                </button>
+                <button 
+                  onClick={() => setActiveTab('terminal')} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: activeTab === 'terminal' ? '#333' : 'transparent',
+                    border: 'none',
+                    borderBottom: activeTab === 'terminal' ? '2px solid #0078d4' : '2px solid transparent',
+                    color: activeTab === 'terminal' ? '#fff' : '#aaa',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Terminal
                 </button>
               </div>
             </div>
@@ -564,6 +585,75 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     }} style={{ fontSize: 12 }}>+ Add Forward</button>
                 </div>
               )}
+              
+              {activeTab === 'terminal' && (
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {/* Theme Selector */}
+                  <div>
+                    <label>Theme
+                      <select 
+                        style={{ width: '100%' }} 
+                        value={spForm.theme || 'default'} 
+                        onChange={(e) => setSpForm({ ...spForm, theme: e.target.value })}
+                      >
+                        {getThemeList().map(theme => (
+                          <option key={theme.key} value={theme.key}>
+                            {theme.name} {theme.dark ? '(dark)' : '(light)'}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  
+                  {/* Font Size */}
+                  <div>
+                    <label>Font Size
+                      <input 
+                        type="number" 
+                        style={{ width: '100%' }} 
+                        value={spForm.fontSize || 14} 
+                        onChange={(e) => setSpForm({ ...spForm, fontSize: Number(e.target.value) || undefined })}
+                        min="8"
+                        max="32"
+                        placeholder="14"
+                      />
+                    </label>
+                  </div>
+                  
+                  {/* Font Family */}
+                  <div>
+                    <label>Font Family
+                      <input 
+                        style={{ width: '100%' }} 
+                        value={spForm.fontFamily || ''} 
+                        onChange={(e) => setSpForm({ ...spForm, fontFamily: e.target.value || undefined })}
+                        placeholder="'Cascadia Code', 'Fira Code', monospace"
+                      />
+                    </label>
+                  </div>
+                  
+                  {/* Theme Preview */}
+                  <div style={{ marginTop: 12 }}>
+                    <label style={{ display: 'block', marginBottom: 8 }}>Preview</label>
+                    <div 
+                      style={{ 
+                        padding: 12, 
+                        borderRadius: 4, 
+                        fontFamily: spForm.fontFamily || "'Cascadia Code', monospace",
+                        fontSize: (spForm.fontSize || 14) + 'px',
+                        background: '#1e1e1e',
+                        color: '#cccccc',
+                        border: '1px solid #444'
+                      }}
+                    >
+                      <div>$ npm run dev</div>
+                      <div style={{ color: '#0dbc79' }}>✓ Server running at http://localhost:3000</div>
+                      <div style={{ color: '#e5e510' }}>⚠ Warning: Some dependencies need update</div>
+                      <div style={{ color: '#cd3131' }}>✗ Error: Module not found</div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             
             {/* Footer */}
@@ -611,6 +701,14 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   // Add advanced settings if provided
                   if (spForm.defaultForwards?.length) {
                     profile.advanced = { defaultForwards: spForm.defaultForwards };
+                  }
+                  
+                  // Add terminal settings if provided
+                  if (spForm.theme || spForm.fontSize || spForm.fontFamily) {
+                    profile.terminal = {};
+                    if (spForm.theme) profile.terminal.theme = spForm.theme;
+                    if (spForm.fontSize) profile.terminal.fontSize = spForm.fontSize;
+                    if (spForm.fontFamily) profile.terminal.fontFamily = spForm.fontFamily;
                   }
                   
                   await saveSshProfile(profile);

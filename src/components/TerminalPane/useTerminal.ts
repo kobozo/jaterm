@@ -1,9 +1,11 @@
 import { useCallback, useMemo } from 'react';
 import { Terminal } from '@xterm/xterm';
+import { applyThemeToTerminal } from '@/config/themes';
 
-export function useTerminal(id: string) {
+export function useTerminal(id: string, options?: { theme?: string; fontSize?: number; fontFamily?: string }) {
   const term = useMemo(() => new Terminal({
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontFamily: options?.fontFamily || 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize: options?.fontSize || 14,
     cursorBlink: true,
     allowProposedApi: false,
     convertEol: false,
@@ -13,9 +15,13 @@ export function useTerminal(id: string) {
 
   const attach = useCallback((el: HTMLDivElement) => {
     term.open(el);
+    // Apply theme if specified
+    if (options?.theme) {
+      applyThemeToTerminal(term, options.theme);
+    }
     // focus so typing works
     term.focus();
-  }, [term]);
+  }, [term, options]);
 
   const dispose = useCallback(() => {
     term.dispose();
