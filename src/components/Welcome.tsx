@@ -240,11 +240,15 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
         <div style={{ display: 'flex', gap: 24 }}>
           <div style={{ flex: 1 }}>
             <h3>Local</h3>
-            <button onClick={() => { setLpForm({ id: crypto.randomUUID(), name: '', path: '' }); setLpOpen(true); }}>New Local Profile</button>
+            <button onClick={() => { setLpForm({ name: '', path: '' }); setLpOpen(true); }}>New Local Profile</button>
             <ul>
               {localProfiles.map((p) => (
                 <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <a href="#" onClick={(e) => { e.preventDefault(); onOpenFolder(p.path); }}>{p.name || p.path}</a>
+                  <button onClick={() => { 
+                    setLpForm({ id: p.id, name: p.name, path: p.path }); 
+                    setLpOpen(true); 
+                  }} title="Edit">✎</button>
                   <button onClick={async () => { await deleteLocalProfile(p.id); setLocalProfiles(await getLocalProfiles()); }} title="Remove">×</button>
                 </li>
               ))}
@@ -252,25 +256,53 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
           </div>
           <div style={{ flex: 1 }}>
             <h3>SSH</h3>
-            <button onClick={() => { setSpForm({ id: crypto.randomUUID(), name: '', host: '', user: '', authType: 'agent' }); setSpOpen(true); }}>New SSH Profile</button>
+            <button onClick={() => { setSpForm({ name: '', host: '', user: '', authType: 'agent' }); setSpOpen(true); }}>New SSH Profile</button>
             <ul>
               {sshProfiles.map((p) => (
                 <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span title={(p.name || `${p.user}@${p.host}`) + (p.path ? `: ${p.path}` : '')}>{p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}</span>
-                  <button onClick={async () => {
-                    if (!onOpenSsh) return;
-                    onOpenSsh({ 
+                  <a 
+                    href="#" 
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (!onOpenSsh) return;
+                      onOpenSsh({ 
+                        host: p.host, 
+                        port: p.port, 
+                        user: p.user, 
+                        auth: p.auth || { agent: true }, 
+                        cwd: p.path, 
+                        profileId: p.id,
+                        terminal: p.terminal,
+                        shell: p.shell,
+                        advanced: p.advanced
+                      });
+                    }}
+                    title={(p.name || `${p.user}@${p.host}`) + (p.path ? `: ${p.path}` : '')}
+                  >
+                    {p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}
+                  </a>
+                  <button onClick={() => {
+                    // Load existing profile data into form
+                    const authType = p.auth?.agent ? 'agent' : p.auth?.password ? 'password' : 'key';
+                    setSpForm({ 
+                      id: p.id,
+                      name: p.name, 
                       host: p.host, 
-                      port: p.port, 
+                      port: p.port,
                       user: p.user, 
-                      auth: p.auth || { agent: true }, 
-                      cwd: p.path, 
-                      profileId: p.id,
-                      terminal: p.terminal,
-                      shell: p.shell,
-                      advanced: p.advanced
-                    });
-                  }}>Open</button>
+                      authType: authType as any,
+                      password: p.auth?.password,
+                      keyPath: p.auth?.keyPath,
+                      passphrase: p.auth?.passphrase,
+                      path: p.path,
+                      // Load advanced settings
+                      envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined,
+                      initCommands: p.shell?.initCommands,
+                      shellOverride: p.shell?.shell,
+                      defaultForwards: p.advanced?.defaultForwards
+                    }); 
+                    setSpOpen(true); 
+                  }} title="Edit">✎</button>
                   <button onClick={async () => { await deleteSshProfile(p.id); setSshProfiles(await getSshProfiles()); }} title="Remove">×</button>
                 </li>
               ))}
@@ -282,7 +314,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       {lpOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
           <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 420 }}>
-            <h3 style={{ marginTop: 0 }}>Local Profile</h3>
+            <h3 style={{ marginTop: 0 }}>{lpForm.id ? 'Edit' : 'New'} Local Profile</h3>
             <label>Name<input style={{ width: '100%' }} value={lpForm.name} onChange={(e) => setLpForm({ ...lpForm, name: e.target.value })} /></label>
             <label>Path<input style={{ width: '100%' }} value={lpForm.path} onChange={(e) => setLpForm({ ...lpForm, path: e.target.value })} placeholder="/absolute/path" /></label>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
@@ -296,7 +328,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       {spOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
           <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 520 }}>
-            <h3 style={{ marginTop: 0 }}>SSH Profile</h3>
+            <h3 style={{ marginTop: 0 }}>{spForm.id ? 'Edit' : 'New'} SSH Profile</h3>
             <div style={{ display: 'grid', gap: 8 }}>
               <label>Name<input style={{ width: '100%' }} value={spForm.name} onChange={(e) => setSpForm({ ...spForm, name: e.target.value })} /></label>
               <label>Host<input style={{ width: '100%' }} value={spForm.host} onChange={(e) => setSpForm({ ...spForm, host: e.target.value })} placeholder="example.com" /></label>
