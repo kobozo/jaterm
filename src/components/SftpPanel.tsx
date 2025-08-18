@@ -15,6 +15,9 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
   const [busy, setBusy] = React.useState<boolean>(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [progress, setProgress] = React.useState<{ path: string; written: number; total: number } | null>(null);
+  const [showHidden, setShowHidden] = React.useState<boolean>(false);
+  const [newDirOpen, setNewDirOpen] = React.useState<boolean>(false);
+  const [newDirName, setNewDirName] = React.useState<string>('');
 
   React.useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -52,14 +55,22 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
   function join(a: string, b: string) { return (a.replace(/\/+$/, '') + '/' + b.replace(/^\/+/, '')).replace(/\/+$/, ''); }
   function parentDir(p: string) { const x = p.replace(/\/+$/, '').replace(/\/+[^/]+$/, ''); return x || '/'; }
 
-  async function mkdir() {
-    const name = (window.prompt('New folder name') || '').trim();
-    if (!name) return;
+  async function mkdirSubmit() {
+    const name = (newDirName || '').trim();
+    if (!name) { setNewDirOpen(false); setNewDirName(''); return; }
     const full = join(path, name);
     setBusy(true);
-    try { await sshSftpMkdirs(sessionId, full); await load(path); }
-    catch (e) { alert('mkdir failed: ' + (e as any)); }
-    finally { setBusy(false); }
+    try {
+      await sshSftpMkdirs(sessionId, full);
+      if (name.startsWith('.') && !showHidden) setShowHidden(true);
+      await load(path);
+    } catch (e) {
+      alert('mkdir failed: ' + (e as any));
+    } finally {
+      setBusy(false);
+      setNewDirOpen(false);
+      setNewDirName('');
+    }
   }
 
   async function uploadFiles(files: FileList | null) {
@@ -117,8 +128,18 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
         <div style={{ fontSize: 12, color: '#bbb', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {path || '—'}
         </div>
+        <label title="Show hidden files" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#bbb' }}>
+          <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
+          Hidden
+        </label>
         <button disabled={!canNavigateUp || busy} onClick={() => load(parentDir(path))} title="Up one level">↑</button>
-        <button disabled={busy} onClick={mkdir} title="New folder">＋</button>
+        <button
+          disabled={busy}
+          onClick={() => { setNewDirOpen(true); setNewDirName(''); }}
+          title="New folder"
+        >
+          ＋
+        </button>
         <label style={{ border: '1px solid #444', borderRadius: 4, padding: '4px 8px', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>
           Upload Files
           <input type="file" multiple style={{ display: 'none' }} onChange={(e) => uploadFiles(e.target.files)} />
@@ -140,7 +161,9 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
         ) : (
           <div>
             <div style={{ padding: '6px 10px', cursor: canNavigateUp ? 'pointer' : 'default', color: canNavigateUp ? '#ddd' : '#666' }} onClick={() => canNavigateUp && load(parentDir(path))}>..</div>
-            {entries.map((e) => (
+            {entries
+              .filter((e) => showHidden || !e.name.startsWith('.'))
+              .map((e) => (
               <div key={e.path} style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: 1, cursor: e.is_dir ? 'pointer' : 'default' }} onClick={() => e.is_dir && load(e.path)}>
                   {e.is_dir ? '📁 ' : '📄 '}{e.name}
@@ -151,6 +174,28 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
           </div>
         )}
       </div>
+      {newDirOpen && (
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'grid', placeItems: 'center', zIndex: 5 }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 360, border: '1px solid #444' }}>
+            <h3 style={{ margin: 0, marginBottom: 8 }}>Create Folder</h3>
+            <div style={{ fontSize: 12, color: '#aaa', marginBottom: 8 }}>Parent: {path || '/'}</div>
+            <form onSubmit={(e) => { e.preventDefault(); void mkdirSubmit(); }}>
+              <input
+                autoFocus
+                placeholder="Folder name"
+                value={newDirName}
+                onChange={(e) => setNewDirName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setNewDirOpen(false); setNewDirName(''); } }}
+                style={{ width: '100%', padding: 8, background: '#2a2a2a', color: '#eee', border: '1px solid #444', borderRadius: 4, marginBottom: 10 }}
+              />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => { setNewDirOpen(false); setNewDirName(''); }}>Cancel</button>
+                <button type="submit" disabled={busy || !newDirName.trim()}>Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

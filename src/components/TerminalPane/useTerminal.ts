@@ -8,6 +8,7 @@ export function useTerminal(id: string) {
     allowProposedApi: false,
     convertEol: false,
     scrollback: 5000,
+    bellStyle: 'none',
   }), [id]);
 
   const attach = useCallback((el: HTMLDivElement) => {

@@ -45,6 +45,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     shellOverride?: string;
     defaultForwards?: Array<{ type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number }>;
   }>({ name: '', host: '', user: '', authType: 'agent' });
+  const [activeTab, setActiveTab] = useState<'basic' | 'environment' | 'forwarding'>('basic');
   const [browse, setBrowse] = useState<{ sessionId: string; cwd: string; entries: { name: string; path: string; is_dir: boolean }[] } | null>(null);
   useEffect(() => {
     (async () => {
@@ -327,41 +328,101 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
 
       {spOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 520 }}>
-            <h3 style={{ marginTop: 0 }}>{spForm.id ? 'Edit' : 'New'} SSH Profile</h3>
-            <div style={{ display: 'grid', gap: 8 }}>
-              <label>Name<input style={{ width: '100%' }} value={spForm.name} onChange={(e) => setSpForm({ ...spForm, name: e.target.value })} /></label>
-              <label>Host<input style={{ width: '100%' }} value={spForm.host} onChange={(e) => setSpForm({ ...spForm, host: e.target.value })} placeholder="example.com" /></label>
-              <label>Port<input style={{ width: '100%' }} type="number" value={spForm.port ?? 22} onChange={(e) => setSpForm({ ...spForm, port: Number(e.target.value) || 22 })} /></label>
-              <label>User<input style={{ width: '100%' }} value={spForm.user} onChange={(e) => setSpForm({ ...spForm, user: e.target.value })} placeholder="root" /></label>
-              <div>
-                <label style={{ marginRight: 8 }}><input type="radio" checked={spForm.authType === 'agent'} onChange={() => setSpForm({ ...spForm, authType: 'agent' })} /> SSH Agent</label>
-                <label style={{ marginRight: 8 }}><input type="radio" checked={spForm.authType === 'password'} onChange={() => setSpForm({ ...spForm, authType: 'password' })} /> Password</label>
-                <label><input type="radio" checked={spForm.authType === 'key'} onChange={() => setSpForm({ ...spForm, authType: 'key' })} /> Key File</label>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, minWidth: 580, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '16px 16px 0', borderBottom: '1px solid #444' }}>
+              <h3 style={{ margin: 0 }}>{spForm.id ? 'Edit' : 'New'} SSH Profile</h3>
+              {/* Tab Navigation */}
+              <div style={{ display: 'flex', gap: 0, marginTop: 12 }}>
+                <button 
+                  onClick={() => setActiveTab('basic')} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: activeTab === 'basic' ? '#333' : 'transparent', 
+                    border: 'none',
+                    borderBottom: activeTab === 'basic' ? '2px solid #0078d4' : '2px solid transparent',
+                    color: activeTab === 'basic' ? '#fff' : '#aaa',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Basic
+                </button>
+                <button 
+                  onClick={() => setActiveTab('environment')} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: activeTab === 'environment' ? '#333' : 'transparent',
+                    border: 'none', 
+                    borderBottom: activeTab === 'environment' ? '2px solid #0078d4' : '2px solid transparent',
+                    color: activeTab === 'environment' ? '#fff' : '#aaa',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Environment
+                </button>
+                <button 
+                  onClick={() => setActiveTab('forwarding')} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: activeTab === 'forwarding' ? '#333' : 'transparent',
+                    border: 'none',
+                    borderBottom: activeTab === 'forwarding' ? '2px solid #0078d4' : '2px solid transparent',
+                    color: activeTab === 'forwarding' ? '#fff' : '#aaa',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Forwarding
+                </button>
               </div>
-              {spForm.authType === 'password' && (<label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} /></label>)}
-              {spForm.authType === 'key' && (<><label>Key Path<input style={{ width: '100%' }} value={spForm.keyPath ?? ''} onChange={(e) => setSpForm({ ...spForm, keyPath: e.target.value })} placeholder="~/.ssh/id_ed25519" /></label><label>Passphrase<input style={{ width: '100%' }} type="password" value={spForm.passphrase ?? ''} onChange={(e) => setSpForm({ ...spForm, passphrase: e.target.value })} /></label></>)}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <label style={{ flex: 1 }}>Remote Path<input style={{ width: '100%' }} value={spForm.path ?? ''} onChange={(e) => setSpForm({ ...spForm, path: e.target.value })} placeholder="/home/user" /></label>
-                <button onClick={async () => {
-                  try {
-                    const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
-                    const sessionId = await sshConnectWithTrustPrompt({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
-                    const home = await sshHomeDir(sessionId);
-                    const start = spForm.path || home;
-                    const entries = await sshSftpList(sessionId, start);
-                    setBrowse({ sessionId, cwd: start, entries });
-                  } catch (e) { alert('SSH browse failed: ' + (e as any)); }
-                }}>Browse…</button>
-              </div>
+            </div>
+            
+            {/* Tab Content */}
+            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+              {activeTab === 'basic' && (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <label>Name<input style={{ width: '100%' }} value={spForm.name} onChange={(e) => setSpForm({ ...spForm, name: e.target.value })} /></label>
+                  <label>Host<input style={{ width: '100%' }} value={spForm.host} onChange={(e) => setSpForm({ ...spForm, host: e.target.value })} placeholder="example.com" /></label>
+                  <label>Port<input style={{ width: '100%' }} type="number" value={spForm.port ?? 22} onChange={(e) => setSpForm({ ...spForm, port: Number(e.target.value) || 22 })} /></label>
+                  <label>User<input style={{ width: '100%' }} value={spForm.user} onChange={(e) => setSpForm({ ...spForm, user: e.target.value })} placeholder="root" /></label>
+                  <div>
+                    <label style={{ marginRight: 8 }}><input type="radio" checked={spForm.authType === 'agent'} onChange={() => setSpForm({ ...spForm, authType: 'agent' })} /> SSH Agent</label>
+                    <label style={{ marginRight: 8 }}><input type="radio" checked={spForm.authType === 'password'} onChange={() => setSpForm({ ...spForm, authType: 'password' })} /> Password</label>
+                    <label><input type="radio" checked={spForm.authType === 'key'} onChange={() => setSpForm({ ...spForm, authType: 'key' })} /> Key File</label>
+                  </div>
+                  {spForm.authType === 'password' && (<label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} /></label>)}
+                  {spForm.authType === 'key' && (<><label>Key Path<input style={{ width: '100%' }} value={spForm.keyPath ?? ''} onChange={(e) => setSpForm({ ...spForm, keyPath: e.target.value })} placeholder="~/.ssh/id_ed25519" /></label><label>Passphrase<input style={{ width: '100%' }} type="password" value={spForm.passphrase ?? ''} onChange={(e) => setSpForm({ ...spForm, passphrase: e.target.value })} /></label></>)}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <label style={{ flex: 1 }}>Remote Path<input style={{ width: '100%' }} value={spForm.path ?? ''} onChange={(e) => setSpForm({ ...spForm, path: e.target.value })} placeholder="/home/user" /></label>
+                    <button onClick={async () => {
+                      try {
+                        const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
+                        const sessionId = await sshConnectWithTrustPrompt({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
+                        const home = await sshHomeDir(sessionId);
+                        const start = spForm.path || home;
+                        const entries = await sshSftpList(sessionId, start);
+                        setBrowse({ sessionId, cwd: start, entries });
+                      } catch (e) { alert('SSH browse failed: ' + (e as any)); }
+                    }}>Browse…</button>
+                  </div>
+                </div>
+              )}
               
-              {/* Advanced Settings Section */}
-              <details style={{ marginTop: 12, padding: '8px 0', borderTop: '1px solid #444' }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 'bold', marginBottom: 8 }}>Advanced Settings</summary>
-                
-                {/* Environment Variables */}
-                <div style={{ marginTop: 8 }}>
-                  <label style={{ display: 'block', marginBottom: 4 }}>Environment Variables</label>
+              {activeTab === 'environment' && (
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {/* Shell Override */}
+                  <div>
+                    <label>Shell Override
+                      <input 
+                        style={{ width: '100%' }} 
+                        value={spForm.shellOverride || ''} 
+                        onChange={(e) => setSpForm({ ...spForm, shellOverride: e.target.value || undefined })}
+                        placeholder="/bin/zsh (leave empty for default)"
+                      />
+                    </label>
+                  </div>
+                  
+                  {/* Environment Variables */}
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 4 }}>Environment Variables</label>
                   {(spForm.envVars || []).map((env, i) => (
                     <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
                       <input 
@@ -390,26 +451,14 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       }}>×</button>
                     </div>
                   ))}
-                  <button onClick={() => {
-                    setSpForm({ ...spForm, envVars: [...(spForm.envVars || []), { key: '', value: '' }] });
-                  }} style={{ fontSize: 12 }}>+ Add Variable</button>
-                </div>
-                
-                {/* Shell Override */}
-                <div style={{ marginTop: 8 }}>
-                  <label>Shell Override
-                    <input 
-                      style={{ width: '100%' }} 
-                      value={spForm.shellOverride || ''} 
-                      onChange={(e) => setSpForm({ ...spForm, shellOverride: e.target.value || undefined })}
-                      placeholder="/bin/zsh (leave empty for default)"
-                    />
-                  </label>
-                </div>
-                
-                {/* Init Commands */}
-                <div style={{ marginTop: 8 }}>
-                  <label style={{ display: 'block', marginBottom: 4 }}>Initialization Commands</label>
+                    <button onClick={() => {
+                      setSpForm({ ...spForm, envVars: [...(spForm.envVars || []), { key: '', value: '' }] });
+                    }} style={{ fontSize: 12 }}>+ Add Variable</button>
+                  </div>
+                  
+                  {/* Init Commands */}
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 4 }}>Initialization Commands</label>
                   {(spForm.initCommands || []).map((cmd, i) => (
                     <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
                       <input 
@@ -428,13 +477,15 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       }}>×</button>
                     </div>
                   ))}
-                  <button onClick={() => {
-                    setSpForm({ ...spForm, initCommands: [...(spForm.initCommands || []), ''] });
-                  }} style={{ fontSize: 12 }}>+ Add Command</button>
+                    <button onClick={() => {
+                      setSpForm({ ...spForm, initCommands: [...(spForm.initCommands || []), ''] });
+                    }} style={{ fontSize: 12 }}>+ Add Command</button>
+                  </div>
                 </div>
-                
-                {/* Default Port Forwards */}
-                <div style={{ marginTop: 8 }}>
+              )}
+              
+              {activeTab === 'forwarding' && (
+                <div>
                   <label style={{ display: 'block', marginBottom: 4 }}>Default Port Forwards</label>
                   {(spForm.defaultForwards || []).map((fwd, i) => (
                     <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
@@ -499,35 +550,38 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       }}>×</button>
                     </div>
                   ))}
-                  <button onClick={() => {
-                    setSpForm({ 
-                      ...spForm, 
-                      defaultForwards: [...(spForm.defaultForwards || []), { 
-                        type: 'L' as const, 
-                        srcHost: '127.0.0.1', 
-                        srcPort: 0, 
-                        dstHost: '127.0.0.1', 
-                        dstPort: 0 
-                      }] 
-                    });
-                  }} style={{ fontSize: 12 }}>+ Add Forward</button>
+                    <button onClick={() => {
+                      setSpForm({ 
+                        ...spForm, 
+                        defaultForwards: [...(spForm.defaultForwards || []), { 
+                          type: 'L' as const, 
+                          srcHost: '127.0.0.1', 
+                          srcPort: 0, 
+                          dstHost: '127.0.0.1', 
+                          dstPort: 0 
+                        }] 
+                      });
+                    }} style={{ fontSize: 12 }}>+ Add Forward</button>
                 </div>
-              </details>
-              
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
-                <button onClick={async () => {
-                  // Background install of helper with progress toast
-                  try {
-                    const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
-                    const sessionId = await sshConnectWithTrustPrompt({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
-                    await ensureHelper(sessionId, { show, update, dismiss });
-                    try { await sshDisconnect(sessionId); } catch {}
-                  } catch (e) {
-                    const tid = show({ title: 'Install helper failed', message: String(e), kind: 'error' });
-                    setTimeout(() => dismiss(tid), 2500);
-                  }
-                }}>Install Helper</button>
-                <button onClick={() => setSpOpen(false)}>Cancel</button>
+              )}
+            </div>
+            
+            {/* Footer */}
+            <div style={{ padding: 16, borderTop: '1px solid #444', display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+              <button onClick={async () => {
+                // Background install of helper with progress toast
+                try {
+                  const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
+                  const sessionId = await sshConnectWithTrustPrompt({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
+                  await ensureHelper(sessionId, { show, update, dismiss });
+                  try { await sshDisconnect(sessionId); } catch {}
+                } catch (e) {
+                  const tid = show({ title: 'Install helper failed', message: String(e), kind: 'error' });
+                  setTimeout(() => dismiss(tid), 2500);
+                }
+              }}>Install Helper</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => { setSpOpen(false); setActiveTab('basic'); }}>Cancel</button>
                 <button onClick={async () => {
                   if (!spForm.id) spForm.id = crypto.randomUUID();
                   const profile: any = { 
@@ -562,6 +616,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   await saveSshProfile(profile);
                   setSshProfiles(await getSshProfiles());
                   setSpOpen(false);
+                  setActiveTab('basic');
                 }}>Save</button>
               </div>
             </div>

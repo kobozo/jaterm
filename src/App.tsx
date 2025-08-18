@@ -41,12 +41,35 @@ export default function App() {
     forwards?: { id: string; type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number; status?: 'starting'|'active'|'error'|'closed' }[];
     detectedPorts?: number[];
     sftpCwd?: string;
+    indicator?: 'activity' | 'bell';
   };
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
   const [composeOpen, setComposeOpen] = useState(false);
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
   const { show, update, dismiss } = useToasts();
+  // Simple bell sound using WebAudio
+  const audioCtxRef = React.useRef<AudioContext | null>(null);
+  function ringBell() {
+    try {
+      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!audioCtxRef.current && AC) audioCtxRef.current = new AC();
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = 880; // A5
+      o.connect(g);
+      g.connect(ctx.destination);
+      const now = ctx.currentTime;
+      g.gain.setValueAtTime(0.0, now);
+      g.gain.linearRampToValueAtTime(0.15, now + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+      o.start(now);
+      o.stop(now + 0.14);
+    } catch {}
+  }
   
   // Terminal event detectors for each pane
   const terminalEventDetectors = React.useRef<Map<string, TerminalEventDetector>>(new Map());
@@ -869,6 +892,10 @@ export default function App() {
       detector.processInput(event.data);
     } else {
       detector.processData(event.data);
+      if (tab.id !== activeTab) {
+        // Mark background activity if no bell pending
+        setTabs((prev) => prev.map((tb) => tb.id === tab.id && tb.indicator !== 'bell' ? { ...tb, indicator: 'activity' } : tb));
+      }
     }
   }, [tabs, registerTerminalEventDetector]);
 
@@ -974,10 +1001,14 @@ export default function App() {
         tabs={tabs.map((t) => {
           const full = t.status.fullPath ?? t.cwd;
           const title = t.kind === 'ssh' ? (t.title ?? 'SSH') : (t.title ?? (full ?? 'Welcome'));
-          return { id: t.id, title, isWelcome: !full && t.kind !== 'ssh' };
+          return { id: t.id, title, isWelcome: !full && t.kind !== 'ssh', indicator: t.indicator };
         })}
         activeId={activeTab}
-        onSelect={setActiveTab}
+        onSelect={(id) => {
+          setActiveTab(id);
+          // Clear indicator when tab becomes active
+          setTabs((prev) => prev.map((tb) => tb.id === id ? { ...tb, indicator: undefined } : tb));
+        }}
         onClose={closeTab}
         onAdd={newTab}
       />
