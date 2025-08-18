@@ -263,8 +263,24 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
 pub async fn ssh_home_dir(state: State<'_, crate::state::app_state::AppState>, session_id: String) -> Result<String, String> {
   let mut inner = state.0.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
-  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
-  let path = sftp.realpath(Path::new(".")).map_err(|e| e.to_string())?;
+  let sftp = loop {
+    match s.sess.sftp() {
+      Ok(h) => break h,
+      Err(e) => {
+        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
+        else { return Err(e.to_string()); }
+      }
+    }
+  };
+  let path = loop {
+    match sftp.realpath(Path::new(".")) {
+      Ok(p) => break p,
+      Err(e) => {
+        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
+        else { return Err(e.to_string()); }
+      }
+    }
+  };
   path.to_str().map(|s| s.to_string()).ok_or_else(|| "non-utf8 path".to_string())
 }
 
@@ -287,7 +303,15 @@ pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, 
       }
     }
   };
-  let entries = sftp.readdir(Path::new(&path)).map_err(|e| e.to_string())?;
+  let entries = loop {
+    match sftp.readdir(Path::new(&path)) {
+      Ok(v) => break v,
+      Err(e) => {
+        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
+        else { return Err(e.to_string()); }
+      }
+    }
+  };
   let mut out = Vec::new();
   for (p, st) in entries {
     if let Some(name_os) = p.file_name() {

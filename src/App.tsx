@@ -425,11 +425,44 @@ export default function App() {
       // Ensure helper in background (non-blocking) and record status in tab
       try {
         (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then((res: any) => {
-          setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path } } : t)));
+          setTabs((prev) => {
+            const updated = prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path } } : t));
+            // Once helper is ready, trigger initial git status check if we have a cwd
+            const tab = updated.find(t => t.id === tabId);
+            if (res?.ok && res?.path && (tab?.status?.fullPath || tab?.cwd)) {
+              // Use setTimeout to ensure state is updated before triggering
+              setTimeout(() => updateGitStatus(tabId), 100);
+            }
+            return updated;
+          });
         });
       } catch {}
       const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, kind: 'ssh', sshSessionId: sessionId, profileId: opts.profileId, sshHost: opts.host, sshUser: opts.user, sshPort: opts.port ?? 22, openPath: opts.cwd ?? null, cwd: opts.cwd ?? null, panes: [chanId], activePane: chanId, status: { ...t.status } } : t)));
+      // Get SSH home directory to set default helper path
+      let sshHome: string | undefined;
+      try {
+        const { sshHomeDir } = await import('@/types/ipc');
+        sshHome = await sshHomeDir(sessionId);
+      } catch {}
+      
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { 
+        ...t, 
+        kind: 'ssh', 
+        sshSessionId: sessionId, 
+        profileId: opts.profileId, 
+        sshHost: opts.host, 
+        sshUser: opts.user, 
+        sshPort: opts.port ?? 22, 
+        openPath: opts.cwd ?? null, 
+        cwd: opts.cwd ?? sshHome ?? null, 
+        panes: [chanId], 
+        activePane: chanId, 
+        status: { 
+          ...t.status,
+          // Set default helper path if we have home directory
+          helperPath: sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : undefined
+        } 
+      } : t)));
       setActiveTab(tabId);
     } catch (e) {
       alert('SSH connection failed: ' + (e as any));
