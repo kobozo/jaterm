@@ -722,6 +722,11 @@ export default function App() {
     const tab = tabs.find(t => t.panes.includes(paneId));
     if (!tab) return;
     
+    // Debug log input events
+    if (event.type === 'input') {
+      console.log('handleTerminalData input:', JSON.stringify(event.data));
+    }
+    
     // Get or create detector for this pane
     let detector = terminalEventDetectors.current.get(paneId);
     if (!detector) {

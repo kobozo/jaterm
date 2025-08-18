@@ -88,10 +88,14 @@ export class TerminalEventDetector {
   
   // Process user input (what they type)
   processInput(data: string) {
+    // Debug logging
+    console.log('processInput:', JSON.stringify(data), 'buffer:', this.commandBuffer);
+    
     // Track what the user is typing
     if (data === '\r' || data === '\n') {
       // Enter pressed - command is being executed
       if (this.commandBuffer.trim()) {
+        console.log('Executing command:', this.commandBuffer.trim());
         this.handleCommandExecution(this.commandBuffer.trim());
       }
       this.commandBuffer = '';
@@ -134,15 +138,19 @@ export class TerminalEventDetector {
   }
   
   private handleCommandExecution(command: string) {
+    console.log('handleCommandExecution:', command);
+    
     // Emit general command event
     this.emit({ type: 'command', command });
     
     // Check for specific command types
     if (this.gitCommandPatterns.some(p => p.test(command))) {
+      console.log('Detected git command:', command);
       this.emit({ type: 'git-command', command });
     }
     
     if (this.processStartPatterns.some(p => p.test(command))) {
+      console.log('Detected process start:', command);
       this.emit({ type: 'process-start', command });
     }
     

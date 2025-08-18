@@ -109,7 +109,11 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
     const keySub = term.onKey(({ key, domEvent }) => {
       if ((domEvent.key === 'Enter' || domEvent.code === 'Enter') && domEvent.shiftKey) {
         domEvent.preventDefault();
-        if (id) ptyWrite({ ptyId: id, data: '\n' });
+        if (id) {
+          ptyWrite({ ptyId: id, data: '\n' });
+          // Also feed to event detector
+          onTerminalEvent?.(id, { type: 'input', data: '\n' });
+        }
       }
     });
     // Track focus via DOM focus/mouse events (xterm has no onFocus API)

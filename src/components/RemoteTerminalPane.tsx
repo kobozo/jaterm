@@ -108,7 +108,14 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
       }
     });
     const keySub = term.onKey(({ key, domEvent }) => {
-      if ((domEvent.key === 'Enter' || domEvent.code === 'Enter') && domEvent.shiftKey) { domEvent.preventDefault(); if (id) sshWrite({ channelId: id, data: '\n' }); }
+      if ((domEvent.key === 'Enter' || domEvent.code === 'Enter') && domEvent.shiftKey) { 
+        domEvent.preventDefault(); 
+        if (id) {
+          sshWrite({ channelId: id, data: '\n' });
+          // Also feed to event detector
+          onTerminalEvent?.(id, { type: 'input', data: '\n' });
+        }
+      }
     });
     const elem = term.element as HTMLElement | null;
     const handleFocus = () => onFocusPane?.(id);
