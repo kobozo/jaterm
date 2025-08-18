@@ -529,6 +529,54 @@ export default function App() {
                         sshOpenForward(sessionId, forward);
                       });
                     }
+                  },
+                  {
+                    label: 'Custom Forward',
+                    onClick: () => {
+                      // Prompt for custom local port
+                      const customPort = prompt(`Enter local port for forwarding remote port ${port}:`, String(port));
+                      if (!customPort || isNaN(Number(customPort))) return;
+                      
+                      const localPort = Number(customPort);
+                      if (localPort < 1 || localPort > 65535) {
+                        alert('Invalid port number. Must be between 1 and 65535.');
+                        return;
+                      }
+                      
+                      // Find the current tab for this session
+                      setTabs(prev => {
+                        const currentTab = prev.find(t => t.kind === 'ssh' && t.sshSessionId === sessionId);
+                        if (!currentTab) return prev;
+                        
+                        // Switch to ports view
+                        return prev.map(t => 
+                          t.id === currentTab.id ? { ...t, view: 'ports' } : t
+                        );
+                      });
+                      
+                      // Add the forward with custom local port
+                      const forward = {
+                        id: crypto.randomUUID(),
+                        type: 'L' as const,
+                        srcHost: '127.0.0.1',
+                        srcPort: localPort,
+                        dstHost: '127.0.0.1',
+                        dstPort: port,
+                        status: 'starting' as const
+                      };
+                      
+                      // Trigger the forward activation
+                      import('@/types/ipc').then(({ sshOpenForward }) => {
+                        sshOpenForward(sessionId, forward);
+                      });
+                      
+                      // Show confirmation
+                      show({
+                        title: 'Port forward created',
+                        message: `Forwarding localhost:${localPort} → remote:${port}`,
+                        kind: 'success'
+                      });
+                    }
                   }
                 ]
               });
