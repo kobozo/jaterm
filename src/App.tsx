@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import SplitView from '@/components/SplitView';
+import SftpPanel from '@/components/SftpPanel';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import RemoteTerminalPane from '@/components/RemoteTerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
@@ -36,9 +37,10 @@ export default function App() {
     activePane: string | null;
     status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean; helperOk?: boolean; helperVersion?: string; helperChecked?: boolean; helperPath?: string | null };
     title?: string;
-    view?: 'terminal' | 'git' | 'ports';
+    view?: 'terminal' | 'git' | 'ports' | 'sftp';
     forwards?: { id: string; type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number; status?: 'starting'|'active'|'error'|'closed' }[];
     detectedPorts?: number[];
+    sftpCwd?: string;
   };
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
@@ -239,9 +241,24 @@ export default function App() {
       const helperPath = (t?.status?.helperPath as string | null) ?? (sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : null);
       console.info('[git] updateTabCwd git-status cwd=', abs, { tabId, kind: t?.kind, helperPath, sessionId: (t as any)?.sshSessionId });
       const st = await gitStatusViaHelper({ kind: t?.kind === 'ssh' ? 'ssh' : 'local', sessionId: (t as any)?.sshSessionId, helperPath }, abs);
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true } } : t)));
+      setTabs((prev) => prev.map((t) => {
+        if (t.id === tabId) {
+          const newStatus = { ...t.status, cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true };
+          // Keep current view as is when in a git repo
+          return { ...t, status: newStatus };
+        }
+        return t;
+      }));
     } catch {
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, fullPath: abs, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 } } : t)));
+      setTabs((prev) => prev.map((t) => {
+        if (t.id === tabId) {
+          const newStatus = { ...t.status, fullPath: abs, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 };
+          // If we were viewing git tools but we're no longer in a git repo, switch to terminal view
+          const newView = t.view === 'git' ? 'terminal' : t.view;
+          return { ...t, status: newStatus, view: newView };
+        }
+        return t;
+      }));
     }
   }
 
@@ -878,14 +895,24 @@ export default function App() {
               >
                 ⌘
               </button>
+              {/* Only show Git button when in a git repository */}
+              {t.status?.branch && t.status.branch !== '-' && (
+                <button
+                  style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'git' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
+                  onClick={() => {
+                    setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'git' } : tb)));
+                  }}
+                  title="Git Tools"
+                >
+                  ⎇
+                </button>
+              )}
               <button
-                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'git' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
-                onClick={() => {
-                  setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'git' } : tb)));
-                }}
-                title="Git Tools"
+                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'sftp' ? '#2b2b2b' : 'transparent', color: t.kind === 'ssh' ? '#ddd' : '#666', cursor: t.kind === 'ssh' ? 'pointer' : 'not-allowed' }}
+                onClick={() => { if (t.kind === 'ssh') setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'sftp' } : tb))); }}
+                title={t.kind === 'ssh' ? 'SFTP' : 'SFTP (SSH only)'}
               >
-                ⎇
+                ⇪
               </button>
               {t.kind === 'ssh' && (
                 <button
@@ -910,6 +937,19 @@ export default function App() {
                   isActive={t.view === 'git'}
                   onStatus={(st) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)))}
                 />
+              </div>
+              {/* SFTP view */}
+              <div style={{ display: (t.view === 'sftp') ? 'block' : 'none', height: '100%' }}>
+                {t.kind === 'ssh' && t.sshSessionId ? (
+                  <SftpPanel
+                    sessionId={t.sshSessionId}
+                    cwd={(t as any).sftpCwd || undefined}
+                    isActive={t.view === 'sftp'}
+                    onCwdChange={(next) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, sftpCwd: next } : tb)))}
+                  />
+                ) : (
+                  <div style={{ padding: 12, color: '#aaa' }}>Open an SSH session to use SFTP.</div>
+                )}
               </div>
               {/* Ports view (kept mounted) */}
               <div style={{ display: (t.view === 'ports') ? 'block' : 'none', height: '100%' }}>

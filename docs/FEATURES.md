@@ -8,6 +8,7 @@ This document tracks implemented features and candidates. Items are grouped for 
 - Known hosts: best-effort verification against `~/.ssh/known_hosts`.
 - Port forwards: Local (L) and Remote (R) via system `ssh`, events.
 - SFTP basics: list, mkdir -p, upload (base64) with progress events.
+  - UI panel (sidebar) for remote browse and local→remote upload (initial).
 - Git tools: status, changes, diff, stage/unstage, commit, sync via helper.
 - Helper installer: local and SSH; versioned ensure with progress events.
 - Local PTY: open/write/resize/kill with events.
@@ -30,4 +31,3 @@ This document tracks implemented features and candidates. Items are grouped for 
 ## Collaboration & Automation
 
 - Session recording and share-view; task runner and watchers (local/SSH via helper).
-
