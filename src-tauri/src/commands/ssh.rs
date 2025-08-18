@@ -57,7 +57,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
             // Prompt user unless trust_host is set
             if profile.trust_host.unwrap_or(false) {
               // Append host key to known_hosts
-              let key_type = sess.host_key().and_then(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
+              let key_type = sess.host_key().map(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
               let kt = match key_type {
                 ssh2::HostKeyType::Rsa => "ssh-rsa",
                 ssh2::HostKeyType::Dss => "ssh-dss",
@@ -87,7 +87,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
                 let b64 = base64::engine::general_purpose::STANDARD.encode(out);
                 b64.trim_end_matches('=') .to_string()
               };
-              let key_type = sess.host_key().and_then(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
+              let key_type = sess.host_key().map(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
               let kt = match key_type {
                 ssh2::HostKeyType::Rsa => "ssh-rsa",
                 ssh2::HostKeyType::Dss => "ssh-dss",
@@ -113,7 +113,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
           ssh2::CheckResult::Failure => {
             if profile.trust_host.unwrap_or(false) {
               // Same handling as NotFound: accept and write
-              let key_type = sess.host_key().and_then(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
+              let key_type = sess.host_key().map(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
               let kt = match key_type {
                 ssh2::HostKeyType::Rsa => "ssh-rsa",
                 ssh2::HostKeyType::Dss => "ssh-dss",
@@ -141,7 +141,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
                 let b64 = base64::engine::general_purpose::STANDARD.encode(out);
                 b64.trim_end_matches('=') .to_string()
               };
-              let key_type = sess.host_key().and_then(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
+              let key_type = sess.host_key().map(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
               let kt = match key_type {
                 ssh2::HostKeyType::Rsa => "ssh-rsa",
                 ssh2::HostKeyType::Dss => "ssh-dss",
