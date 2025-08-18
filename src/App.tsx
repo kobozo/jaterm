@@ -1054,7 +1054,7 @@ export default function App() {
                 onClick={() => { if (t.kind === 'ssh') setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'sftp' } : tb))); }}
                 title={t.kind === 'ssh' ? 'SFTP' : 'SFTP (SSH only)'}
               >
-                ⇪
+                
               </button>
               {t.kind === 'ssh' && (
                 <button

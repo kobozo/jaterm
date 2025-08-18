@@ -122,6 +122,35 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
 
   const canNavigateUp = path && path !== '/';
 
+  function nfIconFor(name: string, isDir: boolean): string {
+    if (isDir) return ''; // folder
+    const lower = name.toLowerCase();
+    // Special filenames
+    if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return '';
+    if (lower === 'docker-compose.yml' || lower === 'docker-compose.yaml' || lower === 'compose.yml' || lower === 'compose.yaml') return '';
+    const ext = (lower.includes('.') ? lower.split('.').pop() : '') || '';
+    // common types
+    if (['md', 'mdx'].includes(ext)) return '';
+    if (['js', 'mjs', 'cjs'].includes(ext)) return '';
+    if (['ts'].includes(ext)) return '';
+    if (['tsx', 'jsx'].includes(ext)) return '';
+    if (['json'].includes(ext)) return '';
+    if (['yml', 'yaml', 'toml', 'ini', 'conf', 'config'].includes(ext)) return '';
+    if (['rs'].includes(ext)) return '';
+    if (['go'].includes(ext)) return '';
+    if (['py'].includes(ext)) return '';
+    if (['rb'].includes(ext)) return '';
+    if (['c', 'h'].includes(ext)) return '';
+    if (['cpp', 'cc', 'cxx', 'hpp', 'hh', 'hxx'].includes(ext)) return '';
+    if (['sh', 'bash', 'zsh', 'fish'].includes(ext)) return '';
+    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return '';
+    if (['html', 'htm'].includes(ext)) return '';
+    if (['css', 'scss', 'sass', 'less'].includes(ext)) return '';
+    if (lower.endsWith('license')) return '';
+    if (lower.endsWith('lock')) return '';
+    return ''; // generic file
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '8px 10px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -165,8 +194,9 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
               .filter((e) => showHidden || !e.name.startsWith('.'))
               .map((e) => (
               <div key={e.path} style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ flex: 1, cursor: e.is_dir ? 'pointer' : 'default' }} onClick={() => e.is_dir && load(e.path)}>
-                  {e.is_dir ? '📁 ' : '📄 '}{e.name}
+                <div style={{ flex: 1, cursor: e.is_dir ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: 8 }} onClick={() => e.is_dir && load(e.path)}>
+                  <span className="nf-icon" style={{ width: 18, textAlign: 'center' }}>{nfIconFor(e.name, e.is_dir)}</span>
+                  <span>{e.name}</span>
                 </div>
                 <button disabled={busy} onClick={() => download(e)} title={e.is_dir ? 'Download Folder' : 'Download File'}>⬇</button>
               </div>

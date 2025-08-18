@@ -211,6 +211,32 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   function renderTree(nodes: TreeNode[], depth: number, stagedFlag: boolean) {
     return nodes.map((n) => {
       const pad = { padding: '4px 6px', paddingLeft: 6 + depth * 14 } as React.CSSProperties;
+      const iconFor = (name: string, isDir: boolean) => {
+        if (isDir) return '';
+        const lower = name.toLowerCase();
+        if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return '';
+        if (lower === 'docker-compose.yml' || lower === 'docker-compose.yaml' || lower === 'compose.yml' || lower === 'compose.yaml') return '';
+        const ext = (lower.includes('.') ? lower.split('.').pop() : '') || '';
+        if (['md', 'mdx'].includes(ext)) return '';
+        if (['js', 'mjs', 'cjs'].includes(ext)) return '';
+        if (['ts'].includes(ext)) return '';
+        if (['tsx', 'jsx'].includes(ext)) return '';
+        if (['json'].includes(ext)) return '';
+        if (['yml', 'yaml', 'toml', 'ini', 'conf', 'config'].includes(ext)) return '';
+        if (['rs'].includes(ext)) return '';
+        if (['go'].includes(ext)) return '';
+        if (['py'].includes(ext)) return '';
+        if (['rb'].includes(ext)) return '';
+        if (['c', 'h'].includes(ext)) return '';
+        if (['cpp', 'cc', 'cxx', 'hpp', 'hh', 'hxx'].includes(ext)) return '';
+        if (['sh', 'bash', 'zsh', 'fish'].includes(ext)) return '';
+        if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return '';
+        if (['html', 'htm'].includes(ext)) return '';
+        if (['css', 'scss', 'sass', 'less'].includes(ext)) return '';
+        if (lower.endsWith('license')) return '';
+        if (lower.endsWith('lock')) return '';
+        return '';
+      };
       const badge = (code: string) => {
         // Normalize code and color mapping
         let c = code || ' ';
@@ -250,7 +276,10 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
             setDiffText(dt);
           }}>
             {badge(code)}
-            <span style={{ flex: 1, textDecoration: isDeleted ? 'line-through' as const : 'none' }}>{n.name}</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flex: 1, textDecoration: isDeleted ? 'line-through' as const : 'none' }}>
+              <span className="nf-icon" style={{ width: 18, textAlign: 'center' }}>{iconFor(n.name, false)}</span>
+              <span>{n.name}</span>
+            </span>
             <span>
               {stagedFlag ? (
                 <button
@@ -326,7 +355,8 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
           });
         }}>
           <span style={{ marginRight: 6 }}>{collapsed.has(n.fullPath) ? '▸' : '▾'}</span>
-          {n.name}
+          <span className="nf-icon" style={{ marginRight: 6 }}>{iconFor(n.name, true)}</span>
+          <span>{n.name}</span>
           {!collapsed.has(n.fullPath) && (
             <ul style={{ margin: 0, padding: 0 }}>
               {renderTree(n.children || [], depth + 1, stagedFlag)}
