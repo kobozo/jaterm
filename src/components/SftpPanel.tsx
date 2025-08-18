@@ -128,6 +128,20 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
     // Special filenames
     if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return '';
     if (lower === 'docker-compose.yml' || lower === 'docker-compose.yaml' || lower === 'compose.yml' || lower === 'compose.yaml') return '';
+    if (lower === 'makefile' || lower === 'gnumakefile') return '';
+    if (lower.startsWith('.git')) return '';
+    if (lower === 'package.json' || lower === 'package-lock.json' || lower === 'yarn.lock' || lower === 'pnpm-lock.yaml') return '';
+    if (lower.startsWith('tsconfig')) return '';
+    if (lower.startsWith('.eslintrc')) return '';
+    if (lower.startsWith('.prettier')) return '';
+    if (lower === '.editorconfig') return '';
+    if (lower === '.env' || lower.startsWith('.env.')) return '';
+    if (lower === 'go.mod' || lower === 'go.sum') return '';
+    if (lower === 'cargo.toml' || lower === 'cargo.lock') return '';
+    if (lower === 'gemfile' || lower === 'gemfile.lock') return '';
+    if (lower === 'requirements.txt' || lower === 'pipfile') return '';
+    if (lower === 'composer.json' || lower === 'composer.lock') return '';
+    if (lower.startsWith('.vscode')) return '';
     const ext = (lower.includes('.') ? lower.split('.').pop() : '') || '';
     // common types
     if (['md', 'mdx'].includes(ext)) return '';
@@ -146,6 +160,20 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
     if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return '';
     if (['html', 'htm'].includes(ext)) return '';
     if (['css', 'scss', 'sass', 'less'].includes(ext)) return '';
+    if (['vue'].includes(ext)) return '﵂';
+    if (['svelte'].includes(ext)) return '';
+    if (['php'].includes(ext)) return '';
+    if (['java'].includes(ext)) return '';
+    if (['kt', 'kts'].includes(ext)) return '';
+    if (['swift'].includes(ext)) return '';
+    if (['lua'].includes(ext)) return '';
+    if (['vim'].includes(ext)) return '';
+    if (['pdf'].includes(ext)) return '';
+    if (['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar'].includes(ext)) return '';
+    if (['mp3', 'wav', 'flac', 'ogg'].includes(ext)) return '';
+    if (['mp4', 'mkv', 'mov', 'webm'].includes(ext)) return '';
+    if (['sql', 'db', 'sqlite'].includes(ext)) return '';
+    if (['bat', 'ps1'].includes(ext)) return '';
     if (lower.endsWith('license')) return '';
     if (lower.endsWith('lock')) return '';
     return ''; // generic file
