@@ -42,6 +42,7 @@ export default function App() {
   const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
   const { show, update, dismiss } = useToasts();
 
   // Start on the Welcome screen by default; no auto-open on launch.
@@ -533,49 +534,8 @@ export default function App() {
                   {
                     label: 'Custom Forward',
                     onClick: () => {
-                      // Prompt for custom local port
-                      const customPort = prompt(`Enter local port for forwarding remote port ${port}:`, String(port));
-                      if (!customPort || isNaN(Number(customPort))) return;
-                      
-                      const localPort = Number(customPort);
-                      if (localPort < 1 || localPort > 65535) {
-                        alert('Invalid port number. Must be between 1 and 65535.');
-                        return;
-                      }
-                      
-                      // Find the current tab for this session
-                      setTabs(prev => {
-                        const currentTab = prev.find(t => t.kind === 'ssh' && t.sshSessionId === sessionId);
-                        if (!currentTab) return prev;
-                        
-                        // Switch to ports view
-                        return prev.map(t => 
-                          t.id === currentTab.id ? { ...t, view: 'ports' } : t
-                        );
-                      });
-                      
-                      // Add the forward with custom local port
-                      const forward = {
-                        id: crypto.randomUUID(),
-                        type: 'L' as const,
-                        srcHost: '127.0.0.1',
-                        srcPort: localPort,
-                        dstHost: '127.0.0.1',
-                        dstPort: port,
-                        status: 'starting' as const
-                      };
-                      
-                      // Trigger the forward activation
-                      import('@/types/ipc').then(({ sshOpenForward }) => {
-                        sshOpenForward(sessionId, forward);
-                      });
-                      
-                      // Show confirmation
-                      show({
-                        title: 'Port forward created',
-                        message: `Forwarding localhost:${localPort} → remote:${port}`,
-                        kind: 'success'
-                      });
+                      // Show the custom port dialog
+                      setCustomPortDialog({ sessionId, remotePort: port });
                     }
                   }
                 ]
@@ -987,6 +947,125 @@ export default function App() {
           }}
         />
       </div>
+      {customPortDialog && (
+        <div style={{ 
+          position: 'fixed', 
+          inset: 0, 
+          display: 'grid', 
+          placeItems: 'center', 
+          background: 'rgba(0,0,0,0.5)',
+          zIndex: 999
+        }}>
+          <div style={{ 
+            background: '#1e1e1e', 
+            color: '#eee', 
+            padding: 20, 
+            borderRadius: 8, 
+            minWidth: 320,
+            border: '1px solid #444'
+          }}>
+            <h3 style={{ marginTop: 0 }}>Custom Port Forward</h3>
+            <p style={{ fontSize: 14, color: '#bbb' }}>
+              Remote port {customPortDialog.remotePort} is available.
+              Enter the local port to forward to:
+            </p>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.target as HTMLFormElement;
+              const localPort = Number((form.elements.namedItem('localPort') as HTMLInputElement).value);
+              
+              if (localPort < 1 || localPort > 65535) {
+                alert('Invalid port number. Must be between 1 and 65535.');
+                return;
+              }
+              
+              // Find the current tab for this session
+              setTabs(prev => {
+                const currentTab = prev.find(t => t.kind === 'ssh' && t.sshSessionId === customPortDialog.sessionId);
+                if (!currentTab) return prev;
+                
+                // Switch to ports view
+                return prev.map(t => 
+                  t.id === currentTab.id ? { ...t, view: 'ports' } : t
+                );
+              });
+              
+              // Add the forward with custom local port
+              const forward = {
+                id: crypto.randomUUID(),
+                type: 'L' as const,
+                srcHost: '127.0.0.1',
+                srcPort: localPort,
+                dstHost: '127.0.0.1',
+                dstPort: customPortDialog.remotePort,
+                status: 'starting' as const
+              };
+              
+              // Trigger the forward activation
+              import('@/types/ipc').then(({ sshOpenForward }) => {
+                sshOpenForward(customPortDialog.sessionId, forward);
+              });
+              
+              // Show confirmation
+              show({
+                title: 'Port forward created',
+                message: `Forwarding localhost:${localPort} → remote:${customPortDialog.remotePort}`,
+                kind: 'success'
+              });
+              
+              // Close dialog
+              setCustomPortDialog(null);
+            }}>
+              <input
+                name="localPort"
+                type="number"
+                defaultValue={customPortDialog.remotePort}
+                min="1"
+                max="65535"
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  fontSize: 14,
+                  background: '#2a2a2a',
+                  color: '#eee',
+                  border: '1px solid #444',
+                  borderRadius: 4
+                }}
+              />
+              <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => setCustomPortDialog(null)}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#333',
+                    color: '#eee',
+                    border: '1px solid #555',
+                    borderRadius: 4,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '6px 12px',
+                    background: '#4aa3ff',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Forward Port
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       <Toaster />
     </div>
   );
