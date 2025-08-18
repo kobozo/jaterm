@@ -442,6 +442,80 @@ export default function App() {
         const unlisten = await listen('ssh_detected_ports', (event) => {
           const { sessionId, ports } = event.payload as any;
           console.log(`Detected ${ports.length} open ports on session ${sessionId}`);
+          
+          // Find the tab for this session
+          const currentTab = tabs.find(t => t.kind === 'ssh' && t.sshSessionId === sessionId);
+          const previousPorts = currentTab?.detectedPorts || [];
+          
+          // Check for newly detected ports
+          const newPorts = ports.filter((port: number) => !previousPorts.includes(port));
+          
+          // Check for closed ports  
+          const closedPorts = previousPorts.filter((port: number) => !ports.includes(port));
+          
+          // Show notification for closed ports
+          if (closedPorts.length > 0 && currentTab) {
+            closedPorts.forEach((port: number) => {
+              show({
+                title: `Port ${port} closed`,
+                message: 'Service is no longer running on remote',
+                kind: 'info'
+              });
+            });
+          }
+          
+          // Show notification for each new port
+          if (newPorts.length > 0 && currentTab) {
+            newPorts.forEach((port: number) => {
+              const portName = [
+                { port: 3000, name: 'Node.js / React' },
+                { port: 3001, name: 'Node.js (alt)' },
+                { port: 4000, name: 'Jekyll / Phoenix' },
+                { port: 4200, name: 'Angular' },
+                { port: 5173, name: 'Vite' },
+                { port: 5174, name: 'Vite (alt)' },
+                { port: 8000, name: 'Django / Python' },
+                { port: 8080, name: 'HTTP Alternative' },
+                { port: 8081, name: 'Metro / React Native' },
+                { port: 8888, name: 'Jupyter' },
+                { port: 9000, name: 'PHP / SonarQube' }
+              ].find(p => p.port === port);
+              
+              show({
+                title: `Port ${port} detected`,
+                message: portName ? `${portName.name} is now running` : 'New service detected on remote',
+                kind: 'info',
+                actions: [
+                  {
+                    label: 'Forward Port',
+                    onClick: () => {
+                      // Switch to ports view
+                      setTabs(prev => prev.map(t => 
+                        t.id === currentTab.id ? { ...t, view: 'ports' } : t
+                      ));
+                      
+                      // Add the forward
+                      const forward = {
+                        id: crypto.randomUUID(),
+                        type: 'L' as const,
+                        srcHost: '127.0.0.1',
+                        srcPort: port,
+                        dstHost: '127.0.0.1',
+                        dstPort: port,
+                        status: 'starting' as const
+                      };
+                      
+                      // Trigger the forward activation
+                      import('@/types/ipc').then(({ sshOpenForward }) => {
+                        sshOpenForward(sessionId, forward);
+                      });
+                    }
+                  }
+                ]
+              });
+            });
+          }
+          
           setTabs((prev) => prev.map((tb) => {
             if (tb.kind === 'ssh' && tb.sshSessionId === sessionId) {
               return { ...tb, detectedPorts: ports };
@@ -452,7 +526,7 @@ export default function App() {
         return () => { unlisten(); };
       } catch {}
     })();
-  }, []);
+  }, [tabs, show]);
 
   // Periodic port detection for active SSH tabs
   React.useEffect(() => {

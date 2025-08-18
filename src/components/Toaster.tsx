@@ -27,6 +27,30 @@ export default function Toaster() {
               })()}
             </div>
           )}
+          {t.actions && t.actions.length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              {t.actions.map((action, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    action.onClick();
+                    dismiss(t.id);
+                  }}
+                  style={{
+                    padding: '4px 8px',
+                    background: '#4aa3ff',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 12
+                  }}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ))}
     </div>

@@ -1,6 +1,13 @@
 import React from 'react';
 
-export type Toast = { id: string; title: string; message?: string; progress?: { current: number; total: number }; kind?: 'info'|'success'|'error' };
+export type Toast = { 
+  id: string; 
+  title: string; 
+  message?: string; 
+  progress?: { current: number; total: number }; 
+  kind?: 'info'|'success'|'error';
+  actions?: { label: string; onClick: () => void }[];
+};
 
 type ToastCtx = {
   toasts: Toast[];
@@ -15,7 +22,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
   const show = React.useCallback((t: Omit<Toast, 'id'> & { id?: string }) => {
     const id = t.id || crypto.randomUUID();
-    setToasts((prev) => [{ id, title: t.title, message: t.message, progress: t.progress, kind: t.kind }, ...prev]);
+    setToasts((prev) => [{ id, title: t.title, message: t.message, progress: t.progress, kind: t.kind, actions: t.actions }, ...prev]);
     return id;
   }, []);
   const update = React.useCallback((id: string, patch: Partial<Toast>) => {
