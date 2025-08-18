@@ -96,26 +96,26 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
   // Ensure blocking mode is set initially
   sess.set_blocking(true);
   
-  // Detect open ports on the remote system (non-blocking)
-  let session_id_for_ports = format!("ssh_{}", nanoid::nanoid!(8));
-  let app_for_ports = app.clone();
-  let host_for_ports = profile.host.clone();
-  let port_for_ports = profile.port;
-  let user_for_ports = profile.user.clone();
-  let session_id_clone = session_id_for_ports.clone();
+  // Start watchdog for git status and port detection (non-blocking)
+  let session_id_for_watchdog = format!("ssh_{}", nanoid::nanoid!(8));
+  let app_for_watchdog = app.clone();
+  let host_for_watchdog = profile.host.clone();
+  let port_for_watchdog = profile.port;
+  let user_for_watchdog = profile.user.clone();
+  let session_id_clone = session_id_for_watchdog.clone();
   
   std::thread::spawn(move || {
     std::thread::sleep(std::time::Duration::from_millis(500)); // Small delay to let connection establish
     
-    // Try to detect ports using the helper
+    // Initial port detection
     let output = std::process::Command::new("ssh")
       .arg("-p")
-      .arg(port_for_ports.to_string())
+      .arg(port_for_watchdog.to_string())
       .arg("-o")
       .arg("StrictHostKeyChecking=no")
       .arg("-o")
       .arg("UserKnownHostsFile=/dev/null")
-      .arg(format!("{}@{}", user_for_ports, host_for_ports))
+      .arg(format!("{}@{}", user_for_watchdog, host_for_watchdog))
       .arg("~/.jaterm-helper/jaterm-agent detect-ports 2>/dev/null || echo '[]'")
       .output();
       
@@ -124,7 +124,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
       if let Ok(ports) = serde_json::from_str::<Vec<u16>>(&stdout) {
         eprintln!("[ssh] Detected {} open ports on remote", ports.len());
         // Emit event with detected ports
-        let _ = app_for_ports.emit(
+        let _ = app_for_watchdog.emit(
           "ssh_detected_ports",
           serde_json::json!({
             "sessionId": session_id_clone,
@@ -133,9 +133,12 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
         );
       }
     }
+    
+    // TODO: Set up periodic watchdog polling for git + ports
+    // This would be better handled by the frontend polling mechanism
   });
   
-  let id = session_id_for_ports;
+  let id = session_id_for_watchdog;
   {
     let mut inner = state.0.lock().map_err(|_| "lock state")?;
     inner.ssh.insert(

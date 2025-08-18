@@ -67,7 +67,7 @@ export default function PortsPanel({
     const existingPorts = new Set(forwards.map(f => f.dstPort));
     const suggested: Forward[] = [];
     
-    // Add detected ports
+    // Add detected ports (that are actually running on remote)
     detectedPorts.forEach(port => {
       if (!existingPorts.has(port)) {
         const portInfo = COMMON_DEV_PORTS.find(p => p.port === port);
@@ -83,7 +83,7 @@ export default function PortsPanel({
       }
     });
     
-    // Add common dev ports as suggestions
+    // Add common dev ports as suggestions (may or may not be running)
     suggestedPorts.forEach(port => {
       if (!existingPorts.has(port) && !detectedPorts.includes(port)) {
         suggested.push({
@@ -209,21 +209,31 @@ export default function PortsPanel({
               opacity: 0.7
             }}
           >
-            <div>
-              <strong>{f.type}</strong> {f.srcHost}:{f.srcPort} → {f.dstHost}:{f.dstPort}
-              <span style={{ marginLeft: 8, fontSize: 11, color: '#888' }}>
-                {getPortName(f.dstPort)}
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
               <span style={{ 
-                marginLeft: 8, 
-                fontSize: 11, 
-                padding: '1px 4px', 
-                borderRadius: 3,
-                background: f.status === 'detected' ? '#4a5f3a' : '#3a4f5f',
-                color: '#fff'
-              }}>
-                {f.status === 'detected' ? 'Open' : 'Common'}
-              </span>
+                width: 8, 
+                height: 8, 
+                borderRadius: '50%', 
+                background: f.status === 'detected' ? '#4a9f4a' : '#888',
+                marginRight: 8,
+                flexShrink: 0
+              }} title={f.status === 'detected' ? 'Port is open on remote' : 'Port not detected'} />
+              <div>
+                <strong>{f.type}</strong> {f.srcHost}:{f.srcPort} → {f.dstHost}:{f.dstPort}
+                <span style={{ marginLeft: 8, fontSize: 11, color: '#888' }}>
+                  {getPortName(f.dstPort)}
+                </span>
+                <span style={{ 
+                  marginLeft: 8, 
+                  fontSize: 11, 
+                  padding: '1px 4px', 
+                  borderRadius: 3,
+                  background: f.status === 'detected' ? '#4a5f3a' : '#3a4f5f',
+                  color: '#fff'
+                }}>
+                  {f.status === 'detected' ? 'Open' : 'Common'}
+                </span>
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button 
@@ -309,6 +319,23 @@ export default function PortsPanel({
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
+                  {f.id && (f.status === 'active' || f.status === 'starting') && f.type === 'L' && (
+                    <button 
+                      onClick={async () => {
+                        const url = `http://${f.srcHost}:${f.srcPort}`;
+                        try {
+                          const { open } = await import('@tauri-apps/plugin-shell');
+                          await open(url);
+                        } catch (e) {
+                          console.error('Failed to open browser:', e);
+                        }
+                      }} 
+                      style={{ fontSize: 12 }}
+                      title="Open in browser"
+                    >
+                      🌐
+                    </button>
+                  )}
                   {f.id && f.status !== 'closed' && (
                     <>
                       <button 

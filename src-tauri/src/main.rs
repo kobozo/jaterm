@@ -11,6 +11,7 @@ use tauri::Manager;
 fn main() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_shell::init())
     .manage(crate::state::app_state::AppState::default())
     .invoke_handler(tauri::generate_handler![
       commands::app::app_quit,

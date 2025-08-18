@@ -10,6 +10,7 @@
     "core:path:allow-resolve-directory",
     "dialog:default",
     "dialog:allow-open",
-    "dialog:allow-message"
+    "dialog:allow-message",
+    "shell:allow-open"
   ]
 }

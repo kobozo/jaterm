@@ -422,6 +422,7 @@ export default function App() {
         const { onTunnelState } = await import('@/types/ipc');
         const un = await onTunnelState((e) => {
           const { forwardId, status } = e as any;
+          console.log('Tunnel state event:', forwardId, status);
           setTabs((prev) => prev.map((tb) => {
             const t = tb;
             const f = (t.forwards || []).map((x) => x.id === forwardId ? { ...x, status } : x);
@@ -659,7 +660,7 @@ export default function App() {
                 <PortsPanel
                   forwards={t.forwards || []}
                   detectedPorts={t.detectedPorts || []}
-                  suggestedPorts={[3000, 3001, 5173, 5174, 8000, 8080, 8081]}
+                  suggestedPorts={[3000, 3001, 4000, 4200, 5173, 5174, 8000, 8080, 8081, 8888, 9000]}
                   onAdd={async (fwd) => {
                     if (t.kind !== 'ssh' || !t.sshSessionId) return;
                     const { sshOpenForward } = await import('@/types/ipc');

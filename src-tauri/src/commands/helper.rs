@@ -4,7 +4,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-const HELPER_VERSION: &str = "0.1.3";
+const HELPER_VERSION: &str = "0.1.4";
 const HELPER_NAME: &str = "jaterm-agent";
 const HELPER_REL_DIR: &str = ".jaterm-helper";
 
@@ -12,7 +12,7 @@ const HELPER_CONTENT: &str = r#"#!/bin/sh
 
 case "$1" in
   health)
-    echo '{"ok":true,"version":"0.1.3"}'
+    echo '{"ok":true,"version":"0.1.4"}'
     exit 0
     ;;
   git-status)
@@ -168,6 +168,48 @@ EOF
       echo "[]"
       exit 0
     fi | awk 'BEGIN{printf "["} {if(NR>1) printf ","; printf "%s", $1} END{printf "]"}'
+    ;;
+  watchdog)
+    # Combined watchdog that returns git status and detected ports
+    DIR="$2"
+    case "$DIR" in
+      ~*) DIR="$HOME${DIR#~}" ;;
+    esac
+    if [ -z "$DIR" ]; then DIR="."; fi
+    
+    # Get git status
+    cd "$DIR" 2>/dev/null || cd .
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo DETACHED)
+      AHEAD=0; BEHIND=0
+      if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+        set -- $(git rev-list --left-right --count @{upstream}...HEAD 2>/dev/null || echo "0 0")
+        BEHIND=$1; AHEAD=$2
+      fi
+      read STAGED UNSTAGED <<EOF
+$(git status --porcelain 2>/dev/null | awk 'BEGIN{s=0;u=0} {xy=substr($0,1,2); if (xy=="??") u++; else {x=substr(xy,1,1); y=substr(xy,2,1); if (x!=" ") s++; if (y!=" ") u++;}} END{print s, u}')
+EOF
+      GIT_STATUS="{\"branch\":\"$BRANCH\",\"ahead\":$AHEAD,\"behind\":$BEHIND,\"staged\":$STAGED,\"unstaged\":$UNSTAGED}"
+    else
+      GIT_STATUS="{\"branch\":\"-\",\"ahead\":0,\"behind\":0,\"staged\":0,\"unstaged\":0}"
+    fi
+    
+    # Get detected ports
+    if command -v ss >/dev/null 2>&1; then
+      PORTS=$(ss -tlnp 2>/dev/null | awk '/LISTEN/ {split($4,a,":"); port=a[length(a)]; if (port ~ /^[0-9]+$/ && port > 1024 && port < 65536) print port}' | sort -nu | head -20)
+    elif command -v netstat >/dev/null 2>&1; then
+      PORTS=$(netstat -an 2>/dev/null | awk '/LISTEN|\..*\./ {split($4,a,"."); port=a[length(a)]; if (port ~ /^[0-9]+$/ && port > 1024 && port < 65536) print port}' | sort -nu | head -20)
+    elif command -v lsof >/dev/null 2>&1; then
+      PORTS=$(lsof -iTCP -sTCP:LISTEN -P 2>/dev/null | awk 'NR>1 {split($9,a,":"); port=a[length(a)]; if (port ~ /^[0-9]+$/ && port > 1024 && port < 65536) print port}' | sort -nu | head -20)
+    else
+      PORTS=""
+    fi
+    
+    PORTS_JSON=$(echo "$PORTS" | awk 'BEGIN{printf "["} {if(NR>1) printf ","; printf "%s", $1} END{printf "]"}')
+    if [ -z "$PORTS" ]; then PORTS_JSON="[]"; fi
+    
+    # Return combined result
+    printf '{"git":%s,"ports":%s}\n' "$GIT_STATUS" "$PORTS_JSON"
     ;;
   *)
     echo "jaterm-agent: unknown command: $1" 1>&2
