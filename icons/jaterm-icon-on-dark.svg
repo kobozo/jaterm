@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7fd0ff"/>
+      <stop offset="55%" stop-color="#6ff7d2"/>
+      <stop offset="100%" stop-color="#b8ff7a"/>
+    </linearGradient>
+    <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="14" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- Transparent canvas; optimized for dark backgrounds -->
+  <!-- Outer subtle ring for visibility on dark surfaces -->
+  <circle cx="512" cy="512" r="432" fill="none" stroke="#2b2f35" stroke-width="6"/>
+
+  <!-- Prompt chevron and cursor (bright) -->
+  <path d="M 240 420 L 420 512 L 240 604" fill="none" stroke="url(#g)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round" filter="url(#s)"/>
+  <rect x="460" y="690" width="300" height="30" rx="15" fill="url(#g)"/>
+
+  <!-- JA monogram (light) -->
+  <g transform="translate(700, 190) scale(1.08)">
+    <path d="M0 0 L64 0 L64 120 C64 162 34 192 -8 192 L-16 192 L-16 156 L-8 156 C8 156 16 144 16 128 L16 0 Z" fill="#eaf2ff" opacity="0.95"/>
+    <path d="M84 192 L176 0 L220 0 L128 192 Z" fill="#eaf2ff" opacity="0.95"/>
+  </g>
+
+  <!-- Minimal corner marks to frame on dark bg -->
+  <path d="M120 240 L120 160 L200 160" stroke="#2b2f35" stroke-width="10" fill="none"/>
+  <path d="M824 160 L904 160 L904 240" stroke="#2b2f35" stroke-width="10" fill="none"/>
+  <path d="M120 784 L120 864 L200 864" stroke="#2b2f35" stroke-width="10" fill="none"/>
+  <path d="M904 784 L904 864 L824 864" stroke="#2b2f35" stroke-width="10" fill="none"/>
+</svg>
+
