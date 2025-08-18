@@ -1242,7 +1242,14 @@ export default function App() {
       ))}
       {/* Single status bar for active tab */}
       <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
-        <GitStatusBar cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} branch={active.status.branch} ahead={active.status.ahead} behind={active.status.behind} />
+        <GitStatusBar 
+          cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} 
+          branch={active.status.branch} 
+          ahead={active.status.ahead} 
+          behind={active.status.behind}
+          staged={active.status.staged}
+          unstaged={active.status.unstaged}
+        />
         <span style={{ width: 1, height: 14, background: '#444', display: 'inline-block' }} />
         
         {/* Helper status aligned right with colored indicator */}
