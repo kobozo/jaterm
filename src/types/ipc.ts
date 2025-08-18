@@ -74,12 +74,30 @@ export function ptyKill(args: { ptyId: string }) {
 }
 
 export type JsSshAuth = { password?: string; key_path?: string; passphrase?: string; agent?: boolean };
-export type JsSshProfile = { host: string; port?: number; user: string; auth?: JsSshAuth; timeout_ms?: number };
+export type JsSshProfile = { host: string; port?: number; user: string; auth?: JsSshAuth; timeout_ms?: number; trust_host?: boolean };
 
 export async function sshConnect(profile: JsSshProfile): Promise<string> {
   // Normalize hostnames to lowercase
   const normalized = { ...profile, host: profile.host?.toLowerCase?.() ?? profile.host };
   return invoke('ssh_connect', { profile: normalized } as any);
+}
+
+// Helper to connect with host trust prompt
+export async function sshConnectWithTrustPrompt(profile: JsSshProfile): Promise<string> {
+  try {
+    return await sshConnect({ ...profile, trust_host: profile.trust_host ?? false });
+  } catch (e: any) {
+    const msg = String(e || '');
+    try {
+      const j = JSON.parse(msg);
+      if (j && j.error === 'KNOWN_HOSTS_PROMPT') {
+        const accept = window.confirm(`First connect to ${j.host}:${j.port}\nKey: ${j.keyType}\nFingerprint (SHA256): ${j.fingerprintSHA256}\n\nTrust this host and continue?`);
+        if (!accept) throw new Error('Host not trusted');
+        return await sshConnect({ ...profile, trust_host: true });
+      }
+    } catch {}
+    throw e;
+  }
 }
 
 export function sshDisconnect(sessionId: string) {

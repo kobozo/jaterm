@@ -27,6 +27,7 @@ pub struct SshProfile {
   pub user: String,
   #[serde(default)] pub auth: Option<SshAuth>,
   #[serde(default)] pub timeout_ms: Option<u64>,
+  #[serde(default)] pub trust_host: Option<bool>,
 }
 
 fn default_port() -> u16 { 22 }
@@ -53,13 +54,112 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
         match kh.check(&host_lc, key) {
           ssh2::CheckResult::Match => {}
           ssh2::CheckResult::NotFound => {
-            eprintln!("[ssh] known_hosts: host not found for {} (continuing)", hostport);
+            // Prompt user unless trust_host is set
+            if profile.trust_host.unwrap_or(false) {
+              // Append host key to known_hosts
+              let key_type = sess.host_key().and_then(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
+              let kt = match key_type {
+                ssh2::HostKeyType::Rsa => "ssh-rsa",
+                ssh2::HostKeyType::Dss => "ssh-dss",
+                ssh2::HostKeyType::Ecdsa256 => "ecdsa-sha2-nistp256",
+                ssh2::HostKeyType::Ecdsa384 => "ecdsa-sha2-nistp384",
+                ssh2::HostKeyType::Ecdsa521 => "ecdsa-sha2-nistp521",
+                ssh2::HostKeyType::Ed25519 => "ssh-ed25519",
+                _ => "ssh-ed25519",
+              };
+              let b64 = base64::engine::general_purpose::STANDARD.encode(key);
+              // Ensure directory exists
+              if let Some(parent) = kh_path.parent() { let _ = std::fs::create_dir_all(parent); }
+              // Append line "host keytype key"
+              let line = format!("{} {} {}\n", host_lc, kt, b64);
+              use std::io::Write as IoWrite;
+              if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&kh_path) {
+                let _ = f.write_all(line.as_bytes());
+              }
+              eprintln!("[ssh] known_hosts: trusted and saved {}", hostport);
+            } else {
+              // Compute SHA256 fingerprint for prompt
+              let fp = {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(key);
+                let out = hasher.finalize();
+                let b64 = base64::engine::general_purpose::STANDARD.encode(out);
+                b64.trim_end_matches('=') .to_string()
+              };
+              let key_type = sess.host_key().and_then(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
+              let kt = match key_type {
+                ssh2::HostKeyType::Rsa => "ssh-rsa",
+                ssh2::HostKeyType::Dss => "ssh-dss",
+                ssh2::HostKeyType::Ecdsa256 => "ecdsa-sha2-nistp256",
+                ssh2::HostKeyType::Ecdsa384 => "ecdsa-sha2-nistp384",
+                ssh2::HostKeyType::Ecdsa521 => "ecdsa-sha2-nistp521",
+                ssh2::HostKeyType::Ed25519 => "ssh-ed25519",
+                _ => "unknown",
+              };
+              let prompt = serde_json::json!({
+                "error": "KNOWN_HOSTS_PROMPT",
+                "host": host_lc,
+                "port": profile.port,
+                "keyType": kt,
+                "fingerprintSHA256": fp
+              });
+              return Err(prompt.to_string());
+            }
           }
           ssh2::CheckResult::Mismatch => {
             return Err(format!("known_hosts mismatch for {}", hostport));
           }
           ssh2::CheckResult::Failure => {
-            eprintln!("[ssh] known_hosts: check failure for {} (continuing)", hostport);
+            if profile.trust_host.unwrap_or(false) {
+              // Same handling as NotFound: accept and write
+              let key_type = sess.host_key().and_then(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
+              let kt = match key_type {
+                ssh2::HostKeyType::Rsa => "ssh-rsa",
+                ssh2::HostKeyType::Dss => "ssh-dss",
+                ssh2::HostKeyType::Ecdsa256 => "ecdsa-sha2-nistp256",
+                ssh2::HostKeyType::Ecdsa384 => "ecdsa-sha2-nistp384",
+                ssh2::HostKeyType::Ecdsa521 => "ecdsa-sha2-nistp521",
+                ssh2::HostKeyType::Ed25519 => "ssh-ed25519",
+                _ => "ssh-ed25519",
+              };
+              let b64 = base64::engine::general_purpose::STANDARD.encode(key);
+              if let Some(parent) = kh_path.parent() { let _ = std::fs::create_dir_all(parent); }
+              let line = format!("{} {} {}\n", host_lc, kt, b64);
+              use std::io::Write as IoWrite;
+              if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&kh_path) {
+                let _ = f.write_all(line.as_bytes());
+              }
+              eprintln!("[ssh] known_hosts: accepted on failure and saved {}", hostport);
+            } else {
+              eprintln!("[ssh] known_hosts: check failure for {} (prompting)", hostport);
+              let fp = {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(key);
+                let out = hasher.finalize();
+                let b64 = base64::engine::general_purpose::STANDARD.encode(out);
+                b64.trim_end_matches('=') .to_string()
+              };
+              let key_type = sess.host_key().and_then(|(_, t)| t).unwrap_or(ssh2::HostKeyType::Unknown);
+              let kt = match key_type {
+                ssh2::HostKeyType::Rsa => "ssh-rsa",
+                ssh2::HostKeyType::Dss => "ssh-dss",
+                ssh2::HostKeyType::Ecdsa256 => "ecdsa-sha2-nistp256",
+                ssh2::HostKeyType::Ecdsa384 => "ecdsa-sha2-nistp384",
+                ssh2::HostKeyType::Ecdsa521 => "ecdsa-sha2-nistp521",
+                ssh2::HostKeyType::Ed25519 => "ssh-ed25519",
+                _ => "unknown",
+              };
+              let prompt = serde_json::json!({
+                "error": "KNOWN_HOSTS_PROMPT",
+                "host": host_lc,
+                "port": profile.port,
+                "keyType": kt,
+                "fingerprintSHA256": fp
+              });
+              return Err(prompt.to_string());
+            }
           }
         }
       }

@@ -7,6 +7,7 @@ export type TerminalEvent =
   | { type: 'directory-change'; path: string }
   | { type: 'git-command'; command: string }
   | { type: 'process-start'; command: string }
+  | { type: 'process-stop' }
   | { type: 'bell' };
 
 export type TerminalEventListener = (event: TerminalEvent) => void;
@@ -88,14 +89,10 @@ export class TerminalEventDetector {
   
   // Process user input (what they type)
   processInput(data: string) {
-    // Debug logging
-    console.log('processInput:', JSON.stringify(data), 'buffer:', this.commandBuffer);
-    
     // Track what the user is typing
     if (data === '\r' || data === '\n') {
       // Enter pressed - command is being executed
       if (this.commandBuffer.trim()) {
-        console.log('Executing command:', this.commandBuffer.trim());
         this.handleCommandExecution(this.commandBuffer.trim());
       }
       this.commandBuffer = '';
@@ -104,9 +101,11 @@ export class TerminalEventDetector {
       // Backspace
       this.commandBuffer = this.commandBuffer.slice(0, -1);
     } else if (data === '\x03') {
-      // Ctrl+C - clear command
+      // Ctrl+C - process interrupted
       this.commandBuffer = '';
       this.inCommand = false;
+      // Emit process-stop event to trigger checks
+      this.emit({ type: 'process-stop' });
     } else if (data.match(/^[\x20-\x7e]+$/)) {
       // Printable characters
       this.commandBuffer += data;
@@ -138,19 +137,15 @@ export class TerminalEventDetector {
   }
   
   private handleCommandExecution(command: string) {
-    console.log('handleCommandExecution:', command);
-    
     // Emit general command event
     this.emit({ type: 'command', command });
     
     // Check for specific command types
     if (this.gitCommandPatterns.some(p => p.test(command))) {
-      console.log('Detected git command:', command);
       this.emit({ type: 'git-command', command });
     }
     
     if (this.processStartPatterns.some(p => p.test(command))) {
-      console.log('Detected process start:', command);
       this.emit({ type: 'process-start', command });
     }
     

@@ -277,7 +277,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                 <label style={{ flex: 1 }}>Remote Path<input style={{ width: '100%' }} value={spForm.path ?? ''} onChange={(e) => setSpForm({ ...spForm, path: e.target.value })} placeholder="/home/user" /></label>
                 <button onClick={async () => {
                   try {
-                    const sessionId = await sshConnect({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
+                    const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
+                    const sessionId = await sshConnectWithTrustPrompt({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
                     const home = await sshHomeDir(sessionId);
                     const start = spForm.path || home;
                     const entries = await sshSftpList(sessionId, start);
@@ -289,7 +290,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                 <button onClick={async () => {
                   // Background install of helper with progress toast
                   try {
-                    const sessionId = await sshConnect({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
+                    const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
+                    const sessionId = await sshConnectWithTrustPrompt({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
                     await ensureHelper(sessionId, { show, update, dismiss });
                     try { await sshDisconnect(sessionId); } catch {}
                   } catch (e) {

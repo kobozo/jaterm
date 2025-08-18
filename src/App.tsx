@@ -403,7 +403,8 @@ export default function App() {
 
   async function openSshFor(tabId: string, opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string }) {
     try {
-      const sessionId = await sshConnect({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: opts.auth.password, key_path: opts.auth.keyPath, passphrase: opts.auth.passphrase, agent: opts.auth.agent } as any, timeout_ms: 15000 });
+      const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
+      const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: opts.auth.password, key_path: opts.auth.keyPath, passphrase: opts.auth.passphrase, agent: opts.auth.agent } as any, timeout_ms: 15000 });
       // Ensure helper in background (non-blocking) and record status in tab
       try {
         (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then((res: any) => {
@@ -658,7 +659,7 @@ export default function App() {
       const tab = tabs.find(t => t.id === tabId);
       if (!tab) return;
       
-      console.log(`Terminal event in pane ${paneId}:`, event);
+      // console.log(`Terminal event in pane ${paneId}:`, event);
       
       switch (event.type) {
         case 'git-command':
@@ -701,6 +702,18 @@ export default function App() {
             debouncedUpdateGitRef.current?.(tabId);
           }
           break;
+          
+        case 'process-stop':
+          // Process stopped (Ctrl+C), check ports for SSH tabs
+          if (tab.kind === 'ssh' && tab.sshSessionId) {
+            // Check ports after a short delay to let the process fully stop
+            setTimeout(() => {
+              if (tab.sshSessionId) debouncedDetectPortsRef.current?.(tab.sshSessionId);
+            }, 500);
+          }
+          // Also update git status in case a git operation was cancelled
+          debouncedUpdateGitRef.current?.(tabId);
+          break;
       }
     });
     
@@ -722,10 +735,6 @@ export default function App() {
     const tab = tabs.find(t => t.panes.includes(paneId));
     if (!tab) return;
     
-    // Debug log input events
-    if (event.type === 'input') {
-      console.log('handleTerminalData input:', JSON.stringify(event.data));
-    }
     
     // Get or create detector for this pane
     let detector = terminalEventDetectors.current.get(paneId);
