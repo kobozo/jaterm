@@ -15,6 +15,20 @@ body {
   color: var(--fg);
 }
 
+/* Nerd Font for UI icons */
+@font-face {
+  font-family: 'Symbols Nerd Font';
+  src: url('./assets/fonts/SymbolsNerdFont-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+.nf-icon {
+  font-family: 'Symbols Nerd Font', ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.2px;
+}
+
 .app-root {
   display: grid;
   grid-template-rows: auto 1fr auto;

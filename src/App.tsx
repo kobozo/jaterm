@@ -1022,6 +1022,7 @@ export default function App() {
             {/* Sidebar */}
             <div style={{ width: 44, borderRight: '1px solid #333', display: 'flex', flexDirection: 'column', gap: 6, padding: 6, boxSizing: 'border-box' }}>
               <button
+                className="nf-icon"
                 style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: (t.view ?? 'terminal') === 'terminal' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
                 onClick={() => {
                   setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'terminal' } : tb)));
@@ -1037,6 +1038,7 @@ export default function App() {
               {/* Only show Git button when in a git repository */}
               {t.status?.branch && t.status.branch !== '-' && (
                 <button
+                  className="nf-icon"
                   style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'git' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
                   onClick={() => {
                     setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'git' } : tb)));
@@ -1047,6 +1049,7 @@ export default function App() {
                 </button>
               )}
               <button
+                className="nf-icon"
                 style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'sftp' ? '#2b2b2b' : 'transparent', color: t.kind === 'ssh' ? '#ddd' : '#666', cursor: t.kind === 'ssh' ? 'pointer' : 'not-allowed' }}
                 onClick={() => { if (t.kind === 'ssh') setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'sftp' } : tb))); }}
                 title={t.kind === 'ssh' ? 'SFTP' : 'SFTP (SSH only)'}
@@ -1055,6 +1058,7 @@ export default function App() {
               </button>
               {t.kind === 'ssh' && (
                 <button
+                  className="nf-icon"
                   style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'ports' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
                   onClick={() => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'ports' } : tb)))}
                   title="Ports"
