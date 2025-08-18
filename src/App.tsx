@@ -961,17 +961,18 @@ export default function App() {
             color: '#eee', 
             padding: 20, 
             borderRadius: 8, 
-            minWidth: 320,
+            width: 380,
+            maxWidth: '90vw',
             border: '1px solid #444'
           }}>
             <h3 style={{ marginTop: 0 }}>Custom Port Forward</h3>
-            <p style={{ fontSize: 14, color: '#bbb' }}>
-              Remote port {customPortDialog.remotePort} is available.
-              Enter the local port to forward to:
+            <p style={{ fontSize: 14, color: '#bbb', marginBottom: 16 }}>
+              Forward remote port {customPortDialog.remotePort} to local address:
             </p>
             <form onSubmit={(e) => {
               e.preventDefault();
               const form = e.target as HTMLFormElement;
+              const bindAddress = (form.elements.namedItem('bindAddress') as HTMLInputElement).value;
               const localPort = Number((form.elements.namedItem('localPort') as HTMLInputElement).value);
               
               if (localPort < 1 || localPort > 65535) {
@@ -990,11 +991,11 @@ export default function App() {
                 );
               });
               
-              // Add the forward with custom local port
+              // Add the forward with custom local port and bind address
               const forward = {
                 id: crypto.randomUUID(),
                 type: 'L' as const,
-                srcHost: '127.0.0.1',
+                srcHost: bindAddress,
                 srcPort: localPort,
                 dstHost: '127.0.0.1',
                 dstPort: customPortDialog.remotePort,
@@ -1009,30 +1010,60 @@ export default function App() {
               // Show confirmation
               show({
                 title: 'Port forward created',
-                message: `Forwarding localhost:${localPort} → remote:${customPortDialog.remotePort}`,
+                message: `Forwarding ${bindAddress}:${localPort} → remote:${customPortDialog.remotePort}`,
                 kind: 'success'
               });
               
               // Close dialog
               setCustomPortDialog(null);
             }}>
-              <input
-                name="localPort"
-                type="number"
-                defaultValue={customPortDialog.remotePort}
-                min="1"
-                max="65535"
-                autoFocus
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  fontSize: 14,
-                  background: '#2a2a2a',
-                  color: '#eee',
-                  border: '1px solid #444',
-                  borderRadius: 4
-                }}
-              />
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 4 }}>
+                  Bind Address
+                </label>
+                <input
+                  name="bindAddress"
+                  type="text"
+                  defaultValue="127.0.0.1"
+                  placeholder="127.0.0.1"
+                  style={{
+                    width: 'calc(100% - 18px)',
+                    padding: '8px',
+                    fontSize: 14,
+                    background: '#2a2a2a',
+                    color: '#eee',
+                    border: '1px solid #444',
+                    borderRadius: 4,
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>
+                  Use 127.0.0.1 for localhost only, 0.0.0.0 for all interfaces
+                </div>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontSize: 12, color: '#999', marginBottom: 4 }}>
+                  Local Port
+                </label>
+                <input
+                  name="localPort"
+                  type="number"
+                  defaultValue={customPortDialog.remotePort}
+                  min="1"
+                  max="65535"
+                  autoFocus
+                  style={{
+                    width: 'calc(100% - 18px)',
+                    padding: '8px',
+                    fontSize: 14,
+                    background: '#2a2a2a',
+                    color: '#eee',
+                    border: '1px solid #444',
+                    borderRadius: 4,
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
               <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button
                   type="button"
