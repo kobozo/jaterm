@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::net::{TcpStream, TcpListener};
+use std::net::TcpStream;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
@@ -32,7 +32,7 @@ pub struct SshProfile {
 fn default_port() -> u16 { 22 }
 
 #[tauri::command]
-pub async fn ssh_connect(state: State<'_, crate::state::app_state::AppState>, profile: SshProfile) -> Result<String, String> {
+pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, profile: SshProfile) -> Result<String, String> {
   let addr = format!("{}:{}", profile.host, profile.port);
   let tcp = TcpStream::connect(&addr).map_err(|e| format!("tcp connect: {e}"))?;
   // Explicitly set NO timeout on the TCP socket - crucial for SSH channel operations
@@ -373,7 +373,7 @@ pub async fn ssh_open_forward(app: tauri::AppHandle, state: State<'_, crate::sta
       
       eprintln!("[fwd] Starting SSH port forward: {}", ssh_cmd);
       
-      let mut child = std::process::Command::new("ssh")
+      let child = std::process::Command::new("ssh")
         .arg("-N")  // No command execution
         .arg("-L")
         .arg(format!("{}:{}:{}:{}", src_host, src_port, dst_host, dst_port))
@@ -415,7 +415,7 @@ pub async fn ssh_open_forward(app: tauri::AppHandle, state: State<'_, crate::sta
       eprintln!("[fwd] Starting SSH remote forward: {}:{} -> {}:{}", 
                 src_host, src_port, dst_host, dst_port);
       
-      let mut child = std::process::Command::new("ssh")
+      let child = std::process::Command::new("ssh")
         .arg("-N")  // No command execution
         .arg("-R")
         .arg(format!("{}:{}:{}:{}", src_host, src_port, dst_host, dst_port))
