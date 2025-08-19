@@ -2,7 +2,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod version;
 use commands::{git, ports};
+use version::HELPER_VERSION;
 
 #[derive(Parser)]
 #[command(name = "jaterm-agent")]
@@ -143,7 +145,7 @@ fn main() -> Result<()> {
     
     match cli.command {
         Commands::Health => {
-            println!(r#"{{"ok":true,"version":"0.2.0"}}"#);
+            println!(r#"{{"ok":true,"version":"{}"}}"#, HELPER_VERSION);
         }
         
         Commands::GitStatus { dir } => {

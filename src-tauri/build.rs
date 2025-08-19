@@ -1,4 +1,4 @@
-use std::{fs, path::Path, fs::File, io::BufWriter, env};
+use std::{fs, path::Path, fs::File, io::BufWriter, env, process::Command};
 use image::{ImageEncoder, GenericImageView}; // write_image + size helpers
 
 fn is_rgba8_png(path: &Path) -> bool {
@@ -67,63 +67,76 @@ fn ensure_icon() {
   }
 }
 
+fn build_helper_binary() {
+  println!("cargo:rerun-if-changed=../src-helper/src");
+  println!("cargo:rerun-if-changed=../src-helper/Cargo.toml");
+  
+  // Build the helper binary
+  let output = Command::new("cargo")
+    .args(&["build", "--release"])
+    .current_dir("../src-helper")
+    .output()
+    .expect("Failed to build helper binary");
+  
+  if !output.status.success() {
+    panic!("Failed to build helper binary: {}", String::from_utf8_lossy(&output.stderr));
+  }
+  
+  println!("cargo:warning=Built helper binary successfully");
+}
+
 fn generate_helper_module() {
-  // Tell cargo to re-run this script if the helper script changes
-  println!("cargo:rerun-if-changed=../src/shared/helper-script.sh");
-  println!("cargo:rerun-if-changed=../src/shared/helper-constants.ts");
+  // Tell cargo to re-run this script if the helper version changes
+  println!("cargo:rerun-if-changed=../src-helper/src/version.rs");
   
-  // Read the helper script
-  let helper_script_path = Path::new("../src/shared/helper-script.sh");
-  let helper_script = fs::read_to_string(helper_script_path)
-    .expect("Failed to read helper script");
+  // Read the version from the Rust helper
+  let version_path = Path::new("../src-helper/src/version.rs");
+  let version_content = fs::read_to_string(version_path)
+    .expect("Failed to read helper version file");
   
-  // Read the version from helper-constants.ts
-  let constants_path = Path::new("../src/shared/helper-constants.ts");
-  let constants = fs::read_to_string(constants_path)
-    .expect("Failed to read helper constants");
-  
-  // Extract version from TypeScript file
-  let version = constants
+  // Extract version from Rust file
+  let version = version_content
     .lines()
-    .find(|line| line.contains("export const HELPER_VERSION"))
+    .find(|line| line.contains("pub const HELPER_VERSION"))
     .and_then(|line| {
-      line.split('\'')
+      line.split('"')
         .nth(1)
-        .or_else(|| line.split('"').nth(1))
     })
     .expect("Failed to extract HELPER_VERSION");
   
-  // Replace placeholder with actual version
-  let helper_content = helper_script.replace("HELPER_VERSION_PLACEHOLDER", version);
+  // Read the helper binary
+  let helper_binary_path = if cfg!(target_os = "windows") {
+    Path::new("../src-helper/target/release/jaterm-agent.exe")
+  } else {
+    Path::new("../src-helper/target/release/jaterm-agent")
+  };
   
-  // Write the processed content to OUT_DIR for inclusion
+  let helper_binary = fs::read(helper_binary_path)
+    .expect("Failed to read helper binary - run 'cargo build --release' in src-helper first");
+  
+  // Write the helper module with embedded binary
   let out_dir = env::var("OUT_DIR").unwrap();
   let dest_path = Path::new(&out_dir).join("helper_generated.rs");
-  
-  // Escape the helper content for Rust string literal
-  let escaped_content = helper_content
-    .replace('\\', "\\\\")
-    .replace('"', "\\\"")
-    .replace('\n', "\\n")
-    .replace('\r', "\\r")
-    .replace('\t', "\\t");
   
   let rust_code = format!(
     r#"pub const HELPER_VERSION: &str = "{}";
 pub const HELPER_NAME: &str = "jaterm-agent";
 pub const HELPER_REL_DIR: &str = ".jaterm-helper";
-pub const HELPER_CONTENT: &str = "{}";
+pub const HELPER_BINARY: &[u8] = &{:?};
 "#,
     version,
-    escaped_content
+    helper_binary
   );
   
   fs::write(&dest_path, rust_code)
-    .expect("Failed to write generated helper script");
+    .expect("Failed to write generated helper module");
+  
+  println!("cargo:warning=Embedded helper binary version {}", version);
 }
 
 fn main() {
   ensure_icon();
+  build_helper_binary();
   generate_helper_module();
   tauri_build::build()
 }

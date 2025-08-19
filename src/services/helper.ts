@@ -1,13 +1,8 @@
-import { onSshUploadProgress, sshExec, sshHomeDir, sshSftpMkdirs, sshSftpWrite, helperLocalEnsure } from '@/types/ipc';
-import { HELPER_VERSION, HELPER_NAME, HELPER_REL_DIR } from '@/shared/helper-constants';
-// @ts-ignore - importing raw text
-import helperScriptRaw from '@/shared/helper-script.sh?raw';
-
-// Replace placeholder with actual version
-export const HELPER_CONTENT = helperScriptRaw.replace('HELPER_VERSION_PLACEHOLDER', HELPER_VERSION);
+import { onSshUploadProgress, sshExec, sshHomeDir, sshSftpMkdirs, sshSftpWrite, helperLocalEnsure, helperGetVersion } from '@/types/ipc';
 
 export type HelperStatus = { ok: boolean; version?: string; path?: string };
 
+// Helper deployment for SSH sessions
 export async function ensureHelper(
   sessionId: string,
   opts: { show: (t: any) => string; update: (id: string, patch: any) => void; dismiss: (id: string) => void }
@@ -15,19 +10,24 @@ export async function ensureHelper(
   const { show, update, dismiss } = opts;
   try {
     console.info('[helper] ensureHelper: start', { sessionId });
+    
+    // Get the helper version from backend
+    const requiredVersion = await helperGetVersion();
+    console.info('[helper] required version:', requiredVersion);
+    
     const home = await sshHomeDir(sessionId);
     console.info('[helper] home', home);
-    const helperDir = home.replace(/\/+$/, '') + '/' + HELPER_REL_DIR;
-    const helperPath = helperDir + '/' + HELPER_NAME;
+    const helperDir = home.replace(/\/+$/, '') + '/.jaterm-helper';
+    const helperPath = helperDir + '/jaterm-agent';
 
     // Check existing helper
     try {
-      const res = await sshExec(sessionId, `'${helperPath.replace(/'/g, "'\\''")}' health`);
+      const res = await sshExec(sessionId, `'${helperPath.replace(/'/g, "'\\''")}'  health`);
       console.info('[helper] health check (existing)', { exit: res.exit_code, stdout: res.stdout, stderr: res.stderr });
       if (res.exit_code === 0) {
         try {
           const j = JSON.parse(res.stdout);
-          if (j && j.ok && j.version === HELPER_VERSION) {
+          if (j && j.ok && j.version === requiredVersion) {
             console.info('[helper] up to date', j.version);
             return { ok: true, version: j.version, path: helperPath };
           }
@@ -35,30 +35,42 @@ export async function ensureHelper(
       }
     } catch {}
 
-    // Need to (re)install
+    // Need to (re)install - get binary from backend
     console.info('[helper] mkdirs', helperDir);
     await sshSftpMkdirs(sessionId, helperDir);
-    const b64 = btoa(HELPER_CONTENT);
-    const toastId = show({ title: 'Installing helper', message: helperPath, progress: { current: 0, total: HELPER_CONTENT.length }, kind: 'info' });
+    
+    // Get the helper binary from the backend
+    const toastId = show({ title: 'Installing helper', message: helperPath, progress: { current: 0, total: 100 }, kind: 'info' });
+    
     const unlisten = await onSshUploadProgress((p) => {
-      if (p.path === helperPath) update(toastId, { progress: { current: p.written, total: p.total } });
+      if (p.path === helperPath) {
+        const percent = Math.round((p.written / p.total) * 100);
+        update(toastId, { progress: { current: percent, total: 100 } });
+      }
     });
+    
     try {
       console.info('[helper] upload start', helperPath);
-      await sshSftpWrite(sessionId, helperPath, b64);
+      // The backend will provide the binary directly
+      await sshSftpWrite(sessionId, helperPath, 'BINARY_PLACEHOLDER');
+      
       console.info('[helper] chmod +x', helperPath);
       const ch = await sshExec(sessionId, `chmod +x '${helperPath.replace(/'/g, "'\\''")}'`);
       console.info('[helper] chmod result', { exit: ch.exit_code, stdout: ch.stdout, stderr: ch.stderr });
-      const res = await sshExec(sessionId, `'${helperPath.replace(/'/g, "'\\''")}' health`);
+      
+      const res = await sshExec(sessionId, `'${helperPath.replace(/'/g, "'\\''")}'  health`);
       console.info('[helper] health after install', { exit: res.exit_code, stdout: res.stdout, stderr: res.stderr });
+      
       if (res.exit_code !== 0) throw new Error(res.stderr || 'health failed');
+      
       update(toastId, { title: 'Helper ready', kind: 'success' });
       setTimeout(() => dismiss(toastId), 1500);
+      
       try {
         const j = JSON.parse(res.stdout);
         return { ok: !!j?.ok, version: j?.version, path: helperPath };
       } catch {
-        return { ok: true, version: HELPER_VERSION, path: helperPath };
+        return { ok: true, version: requiredVersion, path: helperPath };
       }
     } finally {
       unlisten();
@@ -75,7 +87,7 @@ export async function ensureHelper(
   }
 }
 
-// Ensure local helper for local sessions; mirrors SSH ensure but simpler
+// Ensure local helper for local sessions
 export async function ensureLocalHelper(): Promise<HelperStatus> {
   try {
     const res = await helperLocalEnsure();

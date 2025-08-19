@@ -46,6 +46,7 @@ fn main() {
       commands::ssh::ssh_exec,
       commands::helper::helper_local_ensure,
       commands::helper::helper_local_exec,
+      commands::helper::helper_get_version,
       commands::git::git_status,
       commands::watcher::watch_subscribe
     ])

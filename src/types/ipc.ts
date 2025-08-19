@@ -274,6 +274,9 @@ export type HelperStatus = { ok: boolean; version?: string; path?: string };
 export function helperLocalEnsure(): Promise<HelperStatus> {
   return invoke('helper_local_ensure');
 }
+export function helperGetVersion(): Promise<string> {
+  return invoke('helper_get_version');
+}
 export type HelperExecResult = { stdout: string; stderr: string; exit_code: number };
 export function helperLocalExec(command: string, args?: string[]): Promise<HelperExecResult> {
   return invoke('helper_local_exec', { command, args } as any);
