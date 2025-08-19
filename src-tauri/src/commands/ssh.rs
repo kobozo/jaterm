@@ -481,8 +481,8 @@ pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>
 pub async fn ssh_deploy_helper(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String) -> Result<(), String> {
   eprintln!("[ssh] deploy_helper session={} path={}", session_id, remote_path);
   
-  // Get the embedded helper binary from the generated module
-  let helper_binary = crate::commands::helper::HELPER_BINARY;
+  // Get the embedded helper binary from the helper module
+  let helper_binary = crate::commands::helper::get_helper_binary();
   
   let mut inner = state.0.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;

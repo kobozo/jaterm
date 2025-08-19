@@ -7,8 +7,10 @@ use std::path::PathBuf;
 // Include the generated helper module from build.rs
 include!(concat!(env!("OUT_DIR"), "/helper_generated.rs"));
 
-// Re-export for use by SSH module
-pub use HELPER_BINARY;
+// Function to get the helper binary for SSH deployment
+pub fn get_helper_binary() -> &'static [u8] {
+  HELPER_BINARY
+}
 
 #[derive(Serialize)]
 pub struct HelperStatus { pub ok: bool, pub version: Option<String>, pub path: Option<String> }
