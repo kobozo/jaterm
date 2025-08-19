@@ -348,7 +348,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                             onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'profile', node: n }); }}
                             style={{ border: '1px solid #333', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'default' }}
                           >
-                            <div className="nf-icon" style={{ fontSize: 28, fontFamily: "'Hack Nerd Font', 'FiraCode Nerd Font', 'JetBrainsMono Nerd Font', 'CaskaydiaCove Nerd Font', 'CaskaydiaCove NF', 'Hack NF', 'FiraCode NF', monospace" }}>{iconFor(n)}</div>
+                            <div className="nf-icon" style={{ fontSize: 28 }}>{iconFor(n)}</div>
                             <div style={{ fontSize: 12, textAlign: 'center', wordBreak: 'break-word' }}>{profileLabel(n)}</div>
                           </div>
                         )
