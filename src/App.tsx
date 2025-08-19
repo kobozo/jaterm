@@ -1309,7 +1309,13 @@ export default function App() {
                       const id = crypto.randomUUID();
                       setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
                       setActiveTab(id);
-                      openFolderFor(id, p);
+                      if (typeof p === 'string') {
+                        openFolderFor(id, p);
+                      } else if (p && typeof p === 'object' && p.path) {
+                        openFolderFor(id, p.path, { terminal: (p as any).terminal, shell: (p as any).shell });
+                      } else {
+                        console.error('Invalid path provided to onOpenFolder:', p);
+                      }
                     }}
                     onOpenSession={(s) => {
                       const id = crypto.randomUUID();

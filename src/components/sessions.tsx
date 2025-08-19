@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { addRecent } from '@/store/recents';
 import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
-import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, ensureProfilesTree, saveProfilesTree, type LocalProfile, type SshProfileStored, type ProfilesTreeNode } from '@/store/persist';
+import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, ensureProfilesTree, saveProfilesTree, resolveEffectiveSettings, type LocalProfile, type SshProfileStored, type ProfilesTreeNode } from '@/store/persist';
 import { getThemeList, themes } from '@/config/themes';
 import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec } from '@/types/ipc';
 import { ensureHelper } from '@/services/helper';
@@ -12,7 +12,7 @@ import { useToasts } from '@/store/toasts';
 import type { RecentSession, RecentSshSession } from '@/store/sessions';
 
 type Props = {
-  onOpenFolder: (path: string) => void;
+  onOpenFolder: (arg: string | { path: string; terminal?: any; shell?: any }) => void;
   onOpenSession?: (session: RecentSession) => void;
   onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string; os?: string }) => void;
 };
@@ -25,6 +25,18 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<null | { x: number; y: number; type: 'folder' | 'profile'; node: any }>(null);
   const [folderDialog, setFolderDialog] = useState<null | { parentId: string; name: string }>(null);
+  const [folderActiveTab, setFolderActiveTab] = useState<'environment' | 'forwarding' | 'terminal'>('environment');
+  const [folderSettingsDialog, setFolderSettingsDialog] = useState<null | { folderId: string; form: { 
+    envVars?: Array<{ key: string; value: string }>;
+    initCommands?: string[];
+    shellOverride?: string;
+    // Terminal
+    theme?: string;
+    fontSize?: number;
+    fontFamily?: string;
+    // SSH
+    defaultForwards?: Array<{ type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number }>;
+  } }>(null);
   const [sshOpen, setSshOpen] = useState(false);
   const [sshForm, setSshForm] = useState<{ host: string; port?: number; user: string; authType: 'password' | 'key' | 'agent'; password?: string; keyPath?: string; passphrase?: string; cwd?: string }>({ host: '', user: '', authType: 'agent' });
   const [localProfiles, setLocalProfiles] = useState<LocalProfile[]>([]);
@@ -181,10 +193,21 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   function openProfile(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
     if (n.ref.kind === 'local') {
       const p = localProfiles.find((x) => x.id === n.ref.id);
-      if (p) onOpenFolder(p.path);
+      if (p && p.path) {
+        const effective = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'local', profileSettings: { terminal: p.terminal, shell: p.shell } });
+        const arg: any = { path: p.path };
+        if (effective.shell) arg.shell = effective.shell;
+        if (effective.terminal) arg.terminal = effective.terminal;
+        onOpenFolder(arg);
+      } else if (p) {
+        alert('Local profile has no path configured');
+      }
     } else {
       const p = sshProfiles.find((x) => x.id === n.ref.id);
-      if (p && onOpenSsh) onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id, terminal: p.terminal, shell: p.shell, advanced: p.advanced, os: p.os } as any);
+      if (p && onOpenSsh) {
+        const effective = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced } });
+        onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id, terminal: effective.terminal, shell: effective.shell, advanced: effective.advanced, os: p.os } as any);
+      }
     }
   }
   function editProfile(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
@@ -415,7 +438,25 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                               const all = await getSshProfiles();
                               const p = r.s.profileId ? all.find((x) => x.id === r.s.profileId) : undefined;
                               if (p) {
-                                onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: r.s.path, profileId: p.id, terminal: p.terminal, shell: p.shell, advanced: p.advanced, os: p.os });
+                                // Try to resolve effective settings from the first occurrence in the tree
+                                let term = p.terminal, shell = p.shell, advanced = p.advanced;
+                                try {
+                                  const t = tree ?? (await ensureProfilesTree());
+                                  // Find first tree node referencing this profile
+                                  function findNode(n: ProfilesTreeNode, kind: 'ssh'|'local', id: string): Extract<ProfilesTreeNode, { type: 'profile' }> | null {
+                                    if (n.type === 'profile' && n.ref.kind === kind && n.ref.id === id) return n as any;
+                                    if (n.type === 'folder') {
+                                      for (const c of n.children) { const f = findNode(c, kind, id); if (f) return f; }
+                                    }
+                                    return null;
+                                  }
+                                  const node = t ? findNode(t, 'ssh', p.id) : null;
+                                  if (node) {
+                                    const eff = resolveEffectiveSettings({ root: t, nodeId: node.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced } });
+                                    term = eff.terminal; shell = eff.shell; advanced = eff.advanced;
+                                  }
+                                } catch {}
+                                onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: r.s.path, profileId: p.id, terminal: term, shell, advanced, os: p.os });
                               } else if (r.s.host && r.s.user) {
                                 onOpenSsh?.({ host: r.s.host, port: r.s.port ?? 22, user: r.s.user, auth: { agent: true } as any, cwd: r.s.path });
                               } else {
@@ -524,6 +565,10 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
               <button onClick={() => setLpOpen(false)}>Cancel</button>
               <button onClick={async () => { 
+                if (!lpForm.path || lpForm.path.trim() === '') {
+                  alert('Path is required for local profile');
+                  return;
+                }
                 if (!lpForm.id) lpForm.id = crypto.randomUUID(); 
                 await saveLocalProfile(lpForm as any); 
                 setLocalProfiles(await getLocalProfiles()); 
@@ -1016,6 +1061,21 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                 <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { setCurrentFolderId(ctxMenu.node.id); setCtxMenu(null); }}>Open</button>
                 <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { const name = prompt('Rename folder', ctxMenu.node.name); if (name) updateTree((root) => { const f = findFolder(root, ctxMenu.node.id); if (f) (f as any).name = name; }); setCtxMenu(null); }}>Rename</button>
                 <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { setFolderDialog({ parentId: ctxMenu.node.id, name: '' }); setCtxMenu(null); }}>New subfolder</button>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => {
+                  const f = tree ? findFolder(tree, ctxMenu.node.id) : null;
+                  if (!f) return;
+                  const settings = (f as any).settings || {};
+                  const form: any = {};
+                  if (settings.shell?.env) form.envVars = Object.entries(settings.shell.env).map(([key, value]: any) => ({ key, value }));
+                  if (settings.shell?.initCommands) form.initCommands = settings.shell.initCommands.slice();
+                  if (settings.shell?.shell) form.shellOverride = settings.shell.shell;
+                  if (settings.terminal?.theme) form.theme = settings.terminal.theme;
+                  if (settings.terminal?.fontSize) form.fontSize = settings.terminal.fontSize;
+                  if (settings.terminal?.fontFamily) form.fontFamily = settings.terminal.fontFamily;
+                  if (settings.ssh?.advanced?.defaultForwards) form.defaultForwards = settings.ssh.advanced.defaultForwards.slice();
+                  setFolderSettingsDialog({ folderId: ctxMenu.node.id, form });
+                  setCtxMenu(null);
+                }}>Edit settings…</button>
                 <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { if ((ctxMenu.node.children || []).length) { alert('Folder not empty'); return; } updateTree((root) => { removeNode(root, ctxMenu.node.id); }); setCtxMenu(null); }}>Delete</button>
               </>
             ) : (
@@ -1049,6 +1109,174 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
               <button onClick={async () => { try { await sshDisconnect(browse.sessionId); } catch {} setBrowse(null); }}>Cancel</button>
               <button onClick={async () => { setSpForm({ ...spForm, path: browse.cwd }); try { await sshDisconnect(browse.sessionId); } catch {} setBrowse(null); }}>Select</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {folderSettingsDialog && (
+        <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.45)', zIndex: 999 }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, minWidth: 620, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '16px 16px 0', borderBottom: '1px solid #444' }}>
+              <h3 style={{ margin: 0 }}>Folder Settings</h3>
+              {/* Tabs matching profile modal */}
+              <div style={{ display: 'flex', gap: 0, marginTop: 12 }}>
+                <button onClick={() => setFolderActiveTab('environment')} style={{ padding: '8px 16px', background: folderActiveTab === 'environment' ? '#333' : 'transparent', border: 'none', borderBottom: folderActiveTab === 'environment' ? '2px solid #0078d4' : '2px solid transparent', color: folderActiveTab === 'environment' ? '#fff' : '#aaa', cursor: 'pointer' }}>Environment</button>
+                <button onClick={() => setFolderActiveTab('forwarding')} style={{ padding: '8px 16px', background: folderActiveTab === 'forwarding' ? '#333' : 'transparent', border: 'none', borderBottom: folderActiveTab === 'forwarding' ? '2px solid #0078d4' : '2px solid transparent', color: folderActiveTab === 'forwarding' ? '#fff' : '#aaa', cursor: 'pointer' }}>Forwarding</button>
+                <button onClick={() => setFolderActiveTab('terminal')} style={{ padding: '8px 16px', background: folderActiveTab === 'terminal' ? '#333' : 'transparent', border: 'none', borderBottom: folderActiveTab === 'terminal' ? '2px solid #0078d4' : '2px solid transparent', color: folderActiveTab === 'terminal' ? '#fff' : '#aaa', cursor: 'pointer' }}>Terminal</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+              {folderActiveTab === 'environment' && (
+                <div>
+                  <h4 style={{ margin: '8px 0' }}>Environment Variables</h4>
+                  {(folderSettingsDialog.form.envVars || []).map((env, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                      <input value={env.key} onChange={(e) => {
+                        const envVars = [...(folderSettingsDialog.form.envVars || [])];
+                        envVars[i] = { ...envVars[i], key: e.target.value };
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, envVars } });
+                      }} placeholder="KEY" style={{ flex: 1 }} />
+                      <input value={env.value} onChange={(e) => {
+                        const envVars = [...(folderSettingsDialog.form.envVars || [])];
+                        envVars[i] = { ...envVars[i], value: e.target.value };
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, envVars } });
+                      }} placeholder="value" style={{ flex: 2 }} />
+                      <button onClick={() => {
+                        const next = (folderSettingsDialog.form.envVars || []).filter((_, idx) => idx !== i);
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, envVars: next.length ? next : undefined } });
+                      }}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, envVars: [...(folderSettingsDialog.form.envVars || []), { key: '', value: '' }] } })} style={{ fontSize: 12 }}>+ Add Variable</button>
+                  <div style={{ height: 1, background: '#333', margin: '8px 0' }} />
+                  <h4 style={{ margin: '8px 0' }}>Init Commands</h4>
+                  {(folderSettingsDialog.form.initCommands || []).map((cmd, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                      <input value={cmd} onChange={(e) => {
+                        const initCommands = [...(folderSettingsDialog.form.initCommands || [])];
+                        initCommands[i] = e.target.value;
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, initCommands } });
+                      }} placeholder="echo Hello" style={{ flex: 1 }} />
+                      <button onClick={() => {
+                        const next = (folderSettingsDialog.form.initCommands || []).filter((_, idx) => idx !== i);
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, initCommands: next.length ? next : undefined } });
+                      }}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, initCommands: [...(folderSettingsDialog.form.initCommands || []), '' ] } })} style={{ fontSize: 12 }}>+ Add Command</button>
+                  <div style={{ height: 1, background: '#333', margin: '8px 0' }} />
+                  <h4 style={{ margin: '8px 0' }}>Shell Override</h4>
+                  <input value={folderSettingsDialog.form.shellOverride || ''} onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, shellOverride: e.target.value || undefined } })} placeholder="/bin/zsh" style={{ width: '100%' }} />
+                </div>
+              )}
+              {folderActiveTab === 'forwarding' && (
+                <div>
+                  <h4 style={{ margin: '8px 0' }}>Default Forwards</h4>
+                  {(folderSettingsDialog.form.defaultForwards || []).map((fwd, i) => (
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '60px 1fr 80px 1fr 80px auto', gap: 6, marginBottom: 6 }}>
+                      <select value={fwd.type} onChange={(e) => {
+                        const arr = [...(folderSettingsDialog.form.defaultForwards || [])];
+                        arr[i] = { ...arr[i], type: e.target.value as any };
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, defaultForwards: arr } });
+                      }}>
+                        <option value="L">L</option>
+                        <option value="R">R</option>
+                      </select>
+                      <input value={fwd.srcHost} onChange={(e) => {
+                        const arr = [...(folderSettingsDialog.form.defaultForwards || [])];
+                        arr[i] = { ...arr[i], srcHost: e.target.value };
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, defaultForwards: arr } });
+                      }} placeholder="src host" />
+                      <input type="number" value={fwd.srcPort} onChange={(e) => {
+                        const arr = [...(folderSettingsDialog.form.defaultForwards || [])];
+                        arr[i] = { ...arr[i], srcPort: Number(e.target.value) };
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, defaultForwards: arr } });
+                      }} placeholder="src port" />
+                      <input value={fwd.dstHost} onChange={(e) => {
+                        const arr = [...(folderSettingsDialog.form.defaultForwards || [])];
+                        arr[i] = { ...arr[i], dstHost: e.target.value };
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, defaultForwards: arr } });
+                      }} placeholder="dst host" />
+                      <input type="number" value={fwd.dstPort} onChange={(e) => {
+                        const arr = [...(folderSettingsDialog.form.defaultForwards || [])];
+                        arr[i] = { ...arr[i], dstPort: Number(e.target.value) };
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, defaultForwards: arr } });
+                      }} placeholder="dst port" />
+                      <button onClick={() => {
+                        const next = (folderSettingsDialog.form.defaultForwards || []).filter((_, idx) => idx !== i);
+                        setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, defaultForwards: next.length ? next : undefined } });
+                      }}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, defaultForwards: [...(folderSettingsDialog.form.defaultForwards || []), { type: 'L', srcHost: '127.0.0.1', srcPort: 3000, dstHost: '127.0.0.1', dstPort: 3000 } ] } })} style={{ fontSize: 12 }}>+ Add Forward</button>
+                </div>
+              )}
+              {folderActiveTab === 'terminal' && (
+                <div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+                    <label style={{ minWidth: 80 }}>Theme</label>
+                    <select
+                      value={folderSettingsDialog.form.theme || 'default'}
+                      onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, theme: e.target.value || undefined } })}
+                      style={{ flex: 1 }}
+                    >
+                      {getThemeList().map(theme => (
+                        <option key={theme.key} value={theme.key}>
+                          {theme.name} {theme.dark ? '(dark)' : '(light)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                    <label style={{ minWidth: 80 }}>Font size</label>
+                    <input type="number" value={folderSettingsDialog.form.fontSize || 14} onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, fontSize: Number(e.target.value) || undefined } })} style={{ width: 100 }} />
+                    <label style={{ minWidth: 80 }}>Font family</label>
+                    <input value={folderSettingsDialog.form.fontFamily || ''} onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, fontFamily: e.target.value || undefined } })} placeholder="Font family" style={{ flex: 1 }} />
+                  </div>
+                  {/* Preview box reusing theme colors */}
+                  <div style={{ border: '1px solid #333', borderRadius: 6, padding: 12, fontFamily: folderSettingsDialog.form.fontFamily || 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: (folderSettingsDialog.form.fontSize || 14) + 'px', background: themes[folderSettingsDialog.form.theme || 'default']?.colors.background || '#1e1e1e', color: themes[folderSettingsDialog.form.theme || 'default']?.colors.foreground || '#cccccc' }}>
+                    <div>$ echo "Folder terminal preview"</div>
+                    <div style={{ color: themes[folderSettingsDialog.form.theme || 'default']?.colors.green || '#0dbc79' }}>✓ Service mounted</div>
+                    <div style={{ color: themes[folderSettingsDialog.form.theme || 'default']?.colors.yellow || '#e5e510' }}>⚠ Warning example</div>
+                    <div style={{ color: themes[folderSettingsDialog.form.theme || 'default']?.colors.red || '#cd3131' }}>✗ Error example</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: 16, borderTop: '1px solid #444' }}>
+              <button onClick={() => setFolderSettingsDialog(null)}>Cancel</button>
+              <button onClick={() => {
+                updateTree((root) => {
+                  const findFolder = (node: ProfilesTreeNode, id: string): (ProfilesTreeNode & { type: 'folder' }) | null => {
+                    if (node.type === 'folder') {
+                      if (node.id === id) return node as any;
+                      for (const c of node.children) { const f = findFolder(c, id); if (f) return f; }
+                    }
+                    return null;
+                  };
+                  const f = root ? findFolder(root, folderSettingsDialog.folderId) : null;
+                  if (!f) return;
+                  const form = folderSettingsDialog.form;
+                  const settings: any = {};
+                  if (form.envVars?.length || form.initCommands?.length || form.shellOverride) {
+                    settings.shell = {};
+                    if (form.envVars?.length) settings.shell.env = Object.fromEntries(form.envVars.map(v => [v.key, v.value]));
+                    if (form.initCommands?.length) settings.shell.initCommands = form.initCommands;
+                    if (form.shellOverride) settings.shell.shell = form.shellOverride;
+                  }
+                  if (form.theme || form.fontSize || form.fontFamily) {
+                    settings.terminal = {};
+                    if (form.theme) settings.terminal.theme = form.theme;
+                    if (form.fontSize) settings.terminal.fontSize = form.fontSize;
+                    if (form.fontFamily) settings.terminal.fontFamily = form.fontFamily;
+                  }
+                  if (form.defaultForwards?.length) {
+                    settings.ssh = { advanced: { defaultForwards: form.defaultForwards } };
+                  }
+                  if (Object.keys(settings).length) (f as any).settings = settings; else delete (f as any).settings;
+                });
+                setFolderSettingsDialog(null);
+              }}>Save</button>
             </div>
           </div>
         </div>
