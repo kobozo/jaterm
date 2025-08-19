@@ -146,7 +146,38 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       return p ? (p.name || `${p.user}@${p.host}`) : '(missing ssh profile)';
     }
   }
-  function iconFor(n: ProfilesTreeNode): string { return n.type === 'folder' ? '📁' : (n.ref.kind === 'ssh' ? '🔗' : '💻'); }
+  function iconFor(n: ProfilesTreeNode): string { 
+    if (n.type === 'folder') return '📁';
+    if (n.ref.kind === 'local') return '💻';
+    
+    // For SSH profiles, use OS-specific icons
+    const profile = sshProfiles.find((x) => x.id === n.ref.id);
+    if (!profile) return '🔗';
+    
+    // Map OS to Nerd Font icons
+    const os = profile.os || 'auto-detect';
+    switch (os) {
+      case 'linux':
+      case 'linux-ubuntu': return ''; // Ubuntu logo
+      case 'linux-debian': return ''; // Debian logo
+      case 'linux-fedora': return ''; // Fedora logo
+      case 'linux-rhel':
+      case 'linux-redhat': return ''; // Red Hat logo
+      case 'linux-centos': return ''; // CentOS logo
+      case 'linux-arch': return ''; // Arch Linux logo
+      case 'linux-alpine': return ''; // Alpine logo
+      case 'linux-opensuse':
+      case 'linux-suse': return ''; // SUSE logo
+      case 'macos': return ''; // Apple logo
+      case 'windows': return ''; // Windows logo
+      case 'freebsd': return ''; // FreeBSD logo
+      case 'auto-detect': return ''; // Generic server icon
+      default: 
+        // Generic Linux for any linux-* not specifically handled
+        if (os.startsWith('linux-')) return ''; // Generic Linux logo
+        return ''; // Generic server icon
+    }
+  }
   function openProfile(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
     if (n.ref.kind === 'local') {
       const p = localProfiles.find((x) => x.id === n.ref.id);
@@ -317,7 +348,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                             onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'profile', node: n }); }}
                             style={{ border: '1px solid #333', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'default' }}
                           >
-                            <div style={{ fontSize: 28 }}>{iconFor(n)}</div>
+                            <div className="nf-icon" style={{ fontSize: 28 }}>{iconFor(n)}</div>
                             <div style={{ fontSize: 12, textAlign: 'center', wordBreak: 'break-word' }}>{profileLabel(n)}</div>
                           </div>
                         )
