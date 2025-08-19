@@ -636,7 +636,7 @@ export default function App() {
     }
   }
 
-  const active = tabs.find((t) => t.id === activeTab)!;
+  const active = tabs.find((t) => t.id === activeTab) || { id: '', cwd: null, panes: [], activePane: null, status: {}, view: 'terminal' as const };
   // When switching tabs, ask panes to refit when shown
   React.useEffect(() => {
     window.dispatchEvent(new CustomEvent('jaterm:panes-resized'));
@@ -1333,41 +1333,41 @@ export default function App() {
       {/* Single status bar for active tab */}
       <div className="status-bar" style={{ display: 'flex', gap: 12, alignItems: 'center', position: 'relative' }}>
         <GitStatusBar 
-          cwd={active.status.fullPath ?? active.status.cwd ?? active.cwd} 
-          branch={active.status.branch} 
-          ahead={active.status.ahead} 
-          behind={active.status.behind}
-          staged={active.status.staged}
-          unstaged={active.status.unstaged}
+          cwd={active?.status?.fullPath ?? active?.status?.cwd ?? active?.cwd} 
+          branch={active?.status?.branch} 
+          ahead={active?.status?.ahead} 
+          behind={active?.status?.behind}
+          staged={active?.status?.staged}
+          unstaged={active?.status?.unstaged}
         />
         <span style={{ width: 1, height: 14, background: '#444', display: 'inline-block' }} />
         
         {/* Helper status aligned right with colored indicator */}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-          {active.status.os && (
+          {active?.status?.os && (
             <>
-              <span style={{ color: '#8fe18f' }}>OS: {active.status.os}</span>
+              <span style={{ color: '#8fe18f' }}>OS: {active?.status?.os}</span>
               <span style={{ width: 1, height: 14, background: '#444', display: 'inline-block' }} />
             </>
           )}
           <span
-            title={active.status.helperOk ? 'Helper OK' : 'Helper not ready'}
+            title={active?.status?.helperOk ? 'Helper OK' : 'Helper not ready'}
             style={{
               width: 10,
               height: 10,
               borderRadius: '50%',
-              background: active.status.helperOk ? '#8fe18f' : '#f0a1a1',
+              background: active?.status?.helperOk ? '#8fe18f' : '#f0a1a1',
               display: 'inline-block',
             }}
           />
-          <span>Helper: {active.status.helperVersion ? active.status.helperVersion : '—'}</span>
+          <span>Helper: {active?.status?.helperVersion ? active?.status?.helperVersion : '—'}</span>
         </div>
         <ComposeDrawer
           open={composeOpen}
           onClose={() => setComposeOpen(false)}
           onSend={(text) => {
-            if (active.activePane) {
-              if (active.kind === 'ssh') sshWrite({ channelId: active.activePane, data: text });
+            if (active?.activePane) {
+              if (active?.kind === 'ssh') sshWrite({ channelId: active.activePane, data: text });
               else ptyWrite({ ptyId: active.activePane, data: text });
             }
             setComposeOpen(false);
