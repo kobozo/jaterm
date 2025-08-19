@@ -208,6 +208,10 @@ export function sshSftpWrite(sessionId: string, remotePath: string, dataBase64: 
   return invoke('ssh_sftp_write', { sessionId, remotePath, dataB64: dataBase64 } as any);
 }
 
+export function sshDeployHelper(sessionId: string, remotePath: string): Promise<void> {
+  return invoke('ssh_deploy_helper', { sessionId, remotePath } as any);
+}
+
 export function sshSftpRead(sessionId: string, remotePath: string): Promise<string> {
   return invoke('ssh_sftp_read', { sessionId, remotePath } as any);
 }

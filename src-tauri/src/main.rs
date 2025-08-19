@@ -41,6 +41,7 @@ fn main() {
       commands::ssh::ssh_sftp_mkdirs,
       commands::ssh::ssh_sftp_read,
       commands::ssh::ssh_sftp_write,
+      commands::ssh::ssh_deploy_helper,
       commands::ssh::ssh_sftp_download,
       commands::ssh::ssh_sftp_download_dir,
       commands::ssh::ssh_exec,

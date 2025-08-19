@@ -478,6 +478,69 @@ pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>
 }
 
 #[tauri::command]
+pub async fn ssh_deploy_helper(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String) -> Result<(), String> {
+  eprintln!("[ssh] deploy_helper session={} path={}", session_id, remote_path);
+  
+  // Get the embedded helper binary from the generated module
+  let helper_binary = crate::commands::helper::HELPER_BINARY;
+  
+  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
+  let sftp = loop { 
+    match s.sess.sftp() { 
+      Ok(h) => break h, 
+      Err(e) => { 
+        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { 
+          std::thread::sleep(Duration::from_millis(10)); 
+          continue; 
+        } else { 
+          return Err(e.to_string()); 
+        } 
+      } 
+    } 
+  };
+  
+  let total = helper_binary.len();
+  let mut written = 0usize;
+  let mut file = loop { 
+    match sftp.create(Path::new(&remote_path)) { 
+      Ok(f) => break f, 
+      Err(e) => { 
+        eprintln!("[ssh] sftp create failed: {}", e); 
+        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { 
+          std::thread::sleep(Duration::from_millis(10)); 
+          continue; 
+        } else { 
+          return Err(e.to_string()); 
+        } 
+      } 
+    } 
+  };
+  
+  while written < total {
+    let end = usize::min(written + 8192, total);
+    let chunk = &helper_binary[written..end];
+    loop {
+      match file.write_all(chunk) {
+        Ok(_) => break,
+        Err(e) => {
+          if e.kind() == std::io::ErrorKind::WouldBlock { 
+            std::thread::sleep(Duration::from_millis(10)); 
+            continue; 
+          } else { 
+            return Err(e.to_string()); 
+          }
+        }
+      }
+    }
+    written = end;
+    let _ = app.emit(crate::events::SSH_UPLOAD_PROGRESS, &serde_json::json!({ "path": remote_path, "written": written, "total": total }));
+    std::thread::sleep(Duration::from_millis(1));
+  }
+  Ok(())
+}
+
+#[tauri::command]
 pub async fn ssh_sftp_write(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String, data_b64: String) -> Result<(), String> {
   eprintln!("[ssh] sftp_write session={} path={} size={}B", session_id, remote_path, data_b64.len());
   let mut inner = state.0.lock().map_err(|_| "lock")?;

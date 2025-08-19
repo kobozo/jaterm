@@ -1,4 +1,4 @@
-import { onSshUploadProgress, sshExec, sshHomeDir, sshSftpMkdirs, sshSftpWrite, helperLocalEnsure, helperGetVersion } from '@/types/ipc';
+import { onSshUploadProgress, sshExec, sshHomeDir, sshSftpMkdirs, sshDeployHelper, helperLocalEnsure, helperGetVersion } from '@/types/ipc';
 
 export type HelperStatus = { ok: boolean; version?: string; path?: string };
 
@@ -51,8 +51,8 @@ export async function ensureHelper(
     
     try {
       console.info('[helper] upload start', helperPath);
-      // The backend will provide the binary directly
-      await sshSftpWrite(sessionId, helperPath, 'BINARY_PLACEHOLDER');
+      // Deploy the binary directly from the backend
+      await sshDeployHelper(sessionId, helperPath);
       
       console.info('[helper] chmod +x', helperPath);
       const ch = await sshExec(sessionId, `chmod +x '${helperPath.replace(/'/g, "'\\''")}'`);
