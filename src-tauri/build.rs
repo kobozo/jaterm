@@ -71,7 +71,7 @@ fn build_helper_binary() {
   println!("cargo:rerun-if-changed=../src-helper/src");
   println!("cargo:rerun-if-changed=../src-helper/Cargo.toml");
   
-  // Build the helper binary
+  // Build the native helper binary
   let output = Command::new("cargo")
     .args(&["build", "--release"])
     .current_dir("../src-helper")
@@ -82,7 +82,29 @@ fn build_helper_binary() {
     panic!("Failed to build helper binary: {}", String::from_utf8_lossy(&output.stderr));
   }
   
-  println!("cargo:warning=Built helper binary successfully");
+  println!("cargo:warning=Built native helper binary successfully");
+  
+  // Also build Linux binary if cargo-zigbuild is available and we're on macOS
+  if cfg!(target_os = "macos") {
+    if let Ok(output) = Command::new("which")
+      .arg("cargo-zigbuild")
+      .output() {
+      if output.status.success() {
+        println!("cargo:warning=Building Linux helper binary with cargo-zigbuild...");
+        let output = Command::new("cargo")
+          .args(&["zigbuild", "--release", "--target", "x86_64-unknown-linux-gnu"])
+          .current_dir("../src-helper")
+          .output()
+          .expect("Failed to build Linux helper binary");
+        
+        if !output.status.success() {
+          println!("cargo:warning=Failed to build Linux helper binary: {}", String::from_utf8_lossy(&output.stderr));
+        } else {
+          println!("cargo:warning=Built Linux helper binary successfully");
+        }
+      }
+    }
+  }
 }
 
 fn generate_helper_module() {
@@ -104,7 +126,7 @@ fn generate_helper_module() {
     })
     .expect("Failed to extract HELPER_VERSION");
   
-  // Read the helper binary
+  // Read the native helper binary
   let helper_binary_path = if cfg!(target_os = "windows") {
     Path::new("../src-helper/target/release/jaterm-agent.exe")
   } else {
@@ -114,24 +136,49 @@ fn generate_helper_module() {
   let helper_binary = fs::read(helper_binary_path)
     .expect("Failed to read helper binary - run 'cargo build --release' in src-helper first");
   
-  // Write the helper module with embedded binary
+  // Try to read Linux binary if it exists
+  let linux_binary_path = Path::new("../src-helper/target/x86_64-unknown-linux-gnu/release/jaterm-agent");
+  let linux_binary = if linux_binary_path.exists() {
+    fs::read(linux_binary_path).ok()
+  } else {
+    None
+  };
+  
+  // Write the helper module with embedded binary/binaries
   let out_dir = env::var("OUT_DIR").unwrap();
   let dest_path = Path::new(&out_dir).join("helper_generated.rs");
   
-  let rust_code = format!(
-    r#"pub const HELPER_VERSION: &str = "{}";
+  let rust_code = if let Some(linux_bin) = linux_binary {
+    format!(
+      r#"pub const HELPER_VERSION: &str = "{}";
+pub const HELPER_NAME: &str = "jaterm-agent";
+pub const HELPER_REL_DIR: &str = ".jaterm-helper";
+pub const HELPER_BINARY: &[u8] = &{:?};
+pub const HELPER_BINARY_LINUX: &[u8] = &{:?};
+"#,
+      version,
+      helper_binary,
+      linux_bin
+    )
+  } else {
+    format!(
+      r#"pub const HELPER_VERSION: &str = "{}";
 pub const HELPER_NAME: &str = "jaterm-agent";
 pub const HELPER_REL_DIR: &str = ".jaterm-helper";
 pub const HELPER_BINARY: &[u8] = &{:?};
 "#,
-    version,
-    helper_binary
-  );
+      version,
+      helper_binary
+    )
+  };
   
   fs::write(&dest_path, rust_code)
     .expect("Failed to write generated helper module");
   
   println!("cargo:warning=Embedded helper binary version {}", version);
+  if linux_binary_path.exists() {
+    println!("cargo:warning=Also embedded Linux helper binary");
+  }
 }
 
 fn main() {

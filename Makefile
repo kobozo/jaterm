@@ -5,12 +5,24 @@
 dev: build-helper build-tauri
 	pnpm dev
 
-# Build helper binary
+# Build helper binary (native)
 .PHONY: build-helper
 build-helper:
-	@echo "Building helper binary..."
+	@echo "Building helper binary (native)..."
 	cd src-helper && cargo build --release
 	@echo "Helper binary built at src-helper/target/release/jaterm-agent"
+
+# Build helper binary for Linux x86_64
+.PHONY: build-helper-linux
+build-helper-linux:
+	@echo "Building helper binary for Linux x86_64..."
+	cd src-helper && cargo build --release --target x86_64-unknown-linux-gnu
+	@echo "Linux helper binary built at src-helper/target/x86_64-unknown-linux-gnu/release/jaterm-agent"
+
+# Build helper for all platforms
+.PHONY: build-helper-all
+build-helper-all: build-helper build-helper-linux
+	@echo "Built helpers for all platforms"
 
 # Build Tauri app
 .PHONY: build-tauri

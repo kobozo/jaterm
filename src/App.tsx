@@ -490,9 +490,15 @@ export default function App() {
             const updated = prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path } } : t));
             // Once helper is ready, trigger initial git status check if we have a cwd
             const tab = updated.find(t => t.id === tabId);
-            if (res?.ok && res?.path && (tab?.status?.fullPath || tab?.cwd)) {
+            if (res?.ok && res?.path) {
               // Use setTimeout to ensure state is updated before triggering
-              setTimeout(() => updateGitStatus(tabId), 100);
+              if (tab?.status?.fullPath || tab?.cwd) {
+                setTimeout(() => updateGitStatus(tabId), 100);
+              }
+              // Also trigger port detection after helper is ready
+              setTimeout(() => {
+                detectPorts(sessionId);
+              }, 200);
             }
             return updated;
           });

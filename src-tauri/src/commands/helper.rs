@@ -7,9 +7,17 @@ use std::path::PathBuf;
 // Include the generated helper module from build.rs
 include!(concat!(env!("OUT_DIR"), "/helper_generated.rs"));
 
-// Function to get the helper binary for SSH deployment
+// Function to get the helper binary for SSH deployment  
 pub fn get_helper_binary() -> &'static [u8] {
   HELPER_BINARY
+}
+
+// Function to get the Linux helper binary for SSH deployment (if available)
+pub fn get_linux_helper_binary() -> Option<&'static [u8]> {
+  // HELPER_BINARY_LINUX is conditionally defined by build.rs
+  // If it exists, return it; otherwise return None
+  // The build.rs script only defines this constant when the Linux binary is available
+  Some(HELPER_BINARY_LINUX)
 }
 
 #[derive(Serialize)]

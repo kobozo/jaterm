@@ -481,9 +481,30 @@ pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>
 pub async fn ssh_deploy_helper(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String) -> Result<(), String> {
   eprintln!("[ssh] deploy_helper session={} path={}", session_id, remote_path);
   
-  // Get the embedded helper binary from the helper module
-  let helper_binary = crate::commands::helper::get_helper_binary();
+  // Use ssh_exec to detect OS first - it handles the locking properly
+  let uname_result = ssh_exec(state.clone(), session_id.clone(), "uname -s".to_string()).await?;
+  let os_name = uname_result.stdout.trim().to_lowercase();
+  eprintln!("[ssh] detected OS: {}", os_name);
   
+  // Choose the appropriate helper binary based on the OS
+  let helper_binary = if os_name.contains("linux") {
+    // Try to get Linux binary if available
+    match crate::commands::helper::get_linux_helper_binary() {
+      Some(linux_bin) => {
+        eprintln!("[ssh] using Linux helper binary");
+        linux_bin
+      }
+      None => {
+        eprintln!("[ssh] Linux helper not available, using native binary");
+        crate::commands::helper::get_helper_binary()
+      }
+    }
+  } else {
+    eprintln!("[ssh] using native helper binary for OS: {}", os_name);
+    crate::commands::helper::get_helper_binary()
+  };
+  
+  // Now open SFTP connection and deploy the binary
   let mut inner = state.0.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop { 
