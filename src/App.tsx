@@ -1114,7 +1114,7 @@ export default function App() {
                 {t.kind === 'ssh' && t.sshSessionId ? (
                   <SftpPanel
                     sessionId={t.sshSessionId}
-                    cwd={(t as any).sftpCwd || undefined}
+                    cwd={(t as any).sftpCwd || t.status.cwd || t.cwd || undefined}
                     isActive={t.view === 'sftp'}
                     onCwdChange={(next) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, sftpCwd: next } : tb)))}
                   />
