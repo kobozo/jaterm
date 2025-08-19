@@ -25,7 +25,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<null | { x: number; y: number; type: 'folder' | 'profile'; node: any }>(null);
   const [folderDialog, setFolderDialog] = useState<null | { parentId: string; name: string }>(null);
-  const [folderActiveTab, setFolderActiveTab] = useState<'environment' | 'forwarding' | 'terminal'>('environment');
+  const [moveDialog, setMoveDialog] = useState<null | { node: Extract<ProfilesTreeNode, { type: 'profile' }>; destId: string | null }>(null);
+  const [folderActiveTab, setFolderActiveTab] = useState<'environment' | 'forwarding' | 'terminal' | 'ssh'>('environment');
   const [folderSettingsDialog, setFolderSettingsDialog] = useState<null | { folderId: string; form: { 
     envVars?: Array<{ key: string; value: string }>;
     initCommands?: string[];
@@ -67,6 +68,11 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     // OS detection
     os?: string;
   }>({ name: '', host: '', user: '', authType: 'agent', os: 'auto-detect' });
+  // Inheritance helpers for SSH modal
+  const [spInherit, setSpInherit] = useState<{ theme?: boolean; fontSize?: boolean; fontFamily?: boolean; sshUser?: boolean; sshAuth?: boolean }>({});
+  const [inheritedForSsh, setInheritedForSsh] = useState<ResolvedSettings | null>(null);
+  const [inheritContextNodeId, setInheritContextNodeId] = useState<string | null>(null);
+  const [inheritContextFolderId, setInheritContextFolderId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'basic' | 'environment' | 'forwarding' | 'terminal'>('basic');
   const [browse, setBrowse] = useState<{ sessionId: string; cwd: string; entries: { name: string; path: string; is_dir: boolean }[] } | null>(null);
   
@@ -143,10 +149,21 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     if (node.type === 'profile') return node.ref.kind === kind && node.ref.id === id;
     return node.children.some((c) => hasProfileNode(c, kind, id));
   }
-  function addProfileNode(root: ProfilesTreeNode, kind: 'local' | 'ssh', id: string) {
+  function addProfileNode(root: ProfilesTreeNode, kind: 'local' | 'ssh', id: string, destFolderId?: string | null) {
+    function findFolder(node: ProfilesTreeNode, fid: string): (ProfilesTreeNode & { type: 'folder' }) | null {
+      if (node.type === 'folder') {
+        if (node.id === fid) return node as any;
+        for (const c of node.children) { const f = findFolder(c, fid); if (f) return f; }
+      }
+      return null;
+    }
     if (root.type !== 'folder') return;
-    // Default: add to root (user can organize into any folder later)
-    (root as any).children.push({ id: `${kind}-${id}`, type: 'profile', ref: { kind, id } });
+    const node: any = { id: `${kind}-${id}`, type: 'profile', ref: { kind, id } };
+    if (destFolderId) {
+      const dest = findFolder(root, destFolderId);
+      if (dest) { (dest as any).children.push(node); return; }
+    }
+    (root as any).children.push(node);
   }
 
   function profileLabel(n: Extract<ProfilesTreeNode, { type: 'profile' }>): string {
@@ -205,8 +222,15 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     } else {
       const p = sshProfiles.find((x) => x.id === n.ref.id);
       if (p && onOpenSsh) {
-        const effective = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced } });
-        onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id, terminal: effective.terminal, shell: effective.shell, advanced: effective.advanced, os: p.os } as any);
+        const effective = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced, ssh: { host: p.host, port: p.port, user: p.user, auth: p.auth } } });
+        onOpenSsh({ 
+          host: effective.ssh?.host ?? p.host,
+          port: effective.ssh?.port ?? p.port,
+          user: effective.ssh?.user ?? p.user,
+          auth: effective.ssh?.auth ?? (p.auth || { agent: true }),
+          cwd: p.path, profileId: p.id,
+          terminal: effective.terminal, shell: effective.shell, advanced: effective.advanced, os: p.os
+        } as any);
       }
     }
   }
@@ -219,6 +243,21 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       if (p) {
         const authType = p.auth?.agent ? 'agent' : p.auth?.password ? 'password' : 'key';
         setSpForm({ id: p.id, name: p.name, host: p.host, port: p.port, user: p.user, authType: authType as any, password: p.auth?.password, keyPath: p.auth?.keyPath, passphrase: p.auth?.passphrase, path: p.path, envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined, initCommands: p.shell?.initCommands, shellOverride: p.shell?.shell, defaultForwards: p.advanced?.defaultForwards, theme: p.terminal?.theme, fontSize: p.terminal?.fontSize, fontFamily: p.terminal?.fontFamily, os: p.os || 'auto-detect' });
+        try {
+          if (tree) {
+            const eff = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'ssh' });
+            setInheritedForSsh(eff);
+            setSpInherit({ 
+              theme: !!eff.terminal?.theme && typeof p.terminal?.theme === 'undefined',
+              fontSize: typeof eff.terminal?.fontSize !== 'undefined' && typeof p.terminal?.fontSize === 'undefined',
+              fontFamily: !!eff.terminal?.fontFamily && typeof p.terminal?.fontFamily === 'undefined',
+              sshUser: !!eff.ssh?.user && !p.user,
+              sshAuth: !!eff.ssh?.auth && !p.auth,
+            });
+            setInheritContextNodeId(n.id);
+            setInheritContextFolderId(null);
+          } else { setInheritedForSsh(null); setSpInherit({}); setInheritContextNodeId(null); setInheritContextFolderId(null); }
+        } catch { setInheritedForSsh(null); setSpInherit({}); setInheritContextNodeId(null); setInheritContextFolderId(null); }
         setSpOpen(true);
       }
     }
@@ -320,7 +359,25 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             <h2>Profiles</h2>
             <div style={{ display: 'flex', gap: 12, marginBottom: 8, alignItems: 'center' }}>
               <button onClick={() => { setLpForm({ name: '', path: '' }); setLpOpen(true); }}>New Local Profile</button>
-              <button onClick={() => { setSpForm({ name: '', host: '', user: '', authType: 'agent', os: 'auto-detect' }); setSpOpen(true); }}>New SSH Profile</button>
+              <button onClick={async () => { 
+                setSpForm({ name: '', host: '', user: '', authType: 'agent', os: 'auto-detect' });
+                try {
+                  if (tree && currentFolderId) {
+                    const eff = resolveEffectiveSettings({ root: tree, nodeId: currentFolderId, profileKind: 'ssh' });
+                    setInheritedForSsh(eff);
+                    setSpInherit({ 
+                      theme: !!eff.terminal?.theme,
+                      fontSize: typeof eff.terminal?.fontSize !== 'undefined',
+                      fontFamily: !!eff.terminal?.fontFamily,
+                      sshUser: !!eff.ssh?.user,
+                      sshAuth: !!eff.ssh?.auth,
+                    });
+                    setInheritContextFolderId(currentFolderId);
+                    setInheritContextNodeId(null);
+                  } else { setInheritedForSsh(null); setSpInherit({}); setInheritContextFolderId(null); setInheritContextNodeId(null); }
+                } catch { setInheritedForSsh(null); setSpInherit({}); setInheritContextFolderId(null); setInheritContextNodeId(null); }
+                setSpOpen(true);
+              }}>New SSH Profile</button>
               <span style={{ flex: 1 }} />
               <button onClick={() => {
                 if (!tree || !currentFolderId) return;
@@ -359,10 +416,15 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                             key={n.id}
                             onDoubleClick={() => setCurrentFolderId(n.id)}
                             onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'folder', node: n }); }}
-                            style={{ border: '1px solid #333', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'default' }}
+                            style={{ position: 'relative', border: '1px solid #333', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'default' }}
                           >
+                            {/* Folder icon */}
                             <div className="nf-icon" style={{ fontSize: 28 }}>{'\uf07b'}</div>
                             <div style={{ fontSize: 12, textAlign: 'center', wordBreak: 'break-word' }}>{n.name}</div>
+                            {/* Overrides indicator: tiny gear at top-right when settings exist */}
+                            {Boolean((n as any).settings) && (
+                              <div title="Has overrides" style={{ position: 'absolute', top: 6, right: 6, fontSize: 12, color: '#cbd5e1' }}>⚙</div>
+                            )}
                           </div>
                         ) : (
                           <div
@@ -439,7 +501,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                               const p = r.s.profileId ? all.find((x) => x.id === r.s.profileId) : undefined;
                               if (p) {
                                 // Try to resolve effective settings from the first occurrence in the tree
-                                let term = p.terminal, shell = p.shell, advanced = p.advanced;
+                                let term = p.terminal, shell = p.shell, advanced = p.advanced, ssh: any = { host: p.host, port: p.port, user: p.user, auth: p.auth };
                                 try {
                                   const t = tree ?? (await ensureProfilesTree());
                                   // Find first tree node referencing this profile
@@ -452,11 +514,11 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                                   }
                                   const node = t ? findNode(t, 'ssh', p.id) : null;
                                   if (node) {
-                                    const eff = resolveEffectiveSettings({ root: t, nodeId: node.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced } });
-                                    term = eff.terminal; shell = eff.shell; advanced = eff.advanced;
+                                    const eff = resolveEffectiveSettings({ root: t, nodeId: node.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced, ssh: { host: p.host, port: p.port, user: p.user, auth: p.auth } } });
+                                    term = eff.terminal; shell = eff.shell; advanced = eff.advanced; ssh = eff.ssh ? { ...ssh, ...eff.ssh } : ssh;
                                   }
                                 } catch {}
-                                onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: r.s.path, profileId: p.id, terminal: term, shell, advanced, os: p.os });
+                                onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.s.path, profileId: p.id, terminal: term, shell, advanced, os: p.os });
                               } else if (r.s.host && r.s.user) {
                                 onOpenSsh?.({ host: r.s.host, port: r.s.port ?? 22, user: r.s.user, auth: { agent: true } as any, cwd: r.s.path });
                               } else {
@@ -573,7 +635,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                 await saveLocalProfile(lpForm as any); 
                 setLocalProfiles(await getLocalProfiles()); 
                 if (tree && !hasProfileNode(tree, 'local', lpForm.id)) {
-                  updateTree((root) => addProfileNode(root, 'local', lpForm.id!));
+                  const dest = currentFolderId;
+                  updateTree((root) => addProfileNode(root, 'local', lpForm.id!, dest));
                 }
                 setLpOpen(false); 
               }}>Save</button>
@@ -651,20 +714,73 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   <label>Name<input style={{ width: '100%' }} value={spForm.name} onChange={(e) => setSpForm({ ...spForm, name: e.target.value })} /></label>
                   <label>Host<input style={{ width: '100%' }} value={spForm.host} onChange={(e) => setSpForm({ ...spForm, host: e.target.value })} placeholder="example.com" /></label>
                   <label>Port<input style={{ width: '100%' }} type="number" value={spForm.port ?? 22} onChange={(e) => setSpForm({ ...spForm, port: Number(e.target.value) || 22 })} /></label>
-                  <label>User<input style={{ width: '100%' }} value={spForm.user} onChange={(e) => setSpForm({ ...spForm, user: e.target.value })} placeholder="root" /></label>
                   <div>
-                    <label style={{ marginRight: 8 }}><input type="radio" checked={spForm.authType === 'agent'} onChange={() => setSpForm({ ...spForm, authType: 'agent' })} /> SSH Agent</label>
-                    <label style={{ marginRight: 8 }}><input type="radio" checked={spForm.authType === 'password'} onChange={() => setSpForm({ ...spForm, authType: 'password' })} /> Password</label>
-                    <label><input type="radio" checked={spForm.authType === 'key'} onChange={() => setSpForm({ ...spForm, authType: 'key' })} /> Key File</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <label style={{ flex: 1 }}>User
+                        <input 
+                          style={{ width: '100%' }}
+                          value={spForm.user}
+                          onChange={(e) => setSpForm({ ...spForm, user: e.target.value })}
+                          placeholder={inheritedForSsh?.ssh?.user ? `(inherits: ${inheritedForSsh.ssh.user})` : 'root'}
+                          disabled={!!spInherit.sshUser}
+                        />
+                      </label>
+                      {inheritedForSsh?.ssh?.user && (
+                        <label style={{ fontSize: 12 }}>
+                          <input type="checkbox" checked={!!spInherit.sshUser} onChange={(e) => {
+                            const on = e.target.checked; 
+                            setSpInherit({ ...spInherit, sshUser: on });
+                            if (!on && inheritedForSsh?.ssh?.user) setSpForm({ ...spForm, user: inheritedForSsh.ssh.user });
+                          }} /> Inherit
+                        </label>
+                      )}
+                    </div>
                   </div>
-                  {spForm.authType === 'password' && (<label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} /></label>)}
-                  {spForm.authType === 'key' && (<><label>Key Path<input style={{ width: '100%' }} value={spForm.keyPath ?? ''} onChange={(e) => setSpForm({ ...spForm, keyPath: e.target.value })} placeholder="~/.ssh/id_ed25519" /></label><label>Passphrase<input style={{ width: '100%' }} type="password" value={spForm.passphrase ?? ''} onChange={(e) => setSpForm({ ...spForm, passphrase: e.target.value })} /></label></>)}
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div>
+                        <label style={{ marginRight: 8 }}><input type="radio" disabled={!!spInherit.sshAuth} checked={spForm.authType === 'agent'} onChange={() => setSpForm({ ...spForm, authType: 'agent' })} /> SSH Agent</label>
+                        <label style={{ marginRight: 8 }}><input type="radio" disabled={!!spInherit.sshAuth} checked={spForm.authType === 'password'} onChange={() => setSpForm({ ...spForm, authType: 'password' })} /> Password</label>
+                        <label><input type="radio" disabled={!!spInherit.sshAuth} checked={spForm.authType === 'key'} onChange={() => setSpForm({ ...spForm, authType: 'key' })} /> Key File</label>
+                      </div>
+                      {inheritedForSsh?.ssh?.auth && (
+                        <label style={{ fontSize: 12 }}>
+                          <input type="checkbox" checked={!!spInherit.sshAuth} onChange={(e) => {
+                            const on = e.target.checked;
+                            setSpInherit({ ...spInherit, sshAuth: on });
+                            if (!on) {
+                              // Prefill auth type from inherited
+                              const inh = inheritedForSsh.ssh.auth;
+                              if (inh?.agent) setSpForm({ ...spForm, authType: 'agent', password: undefined, keyPath: undefined, passphrase: undefined });
+                              else if (inh?.password) setSpForm({ ...spForm, authType: 'password', password: inh.password });
+                              else if (inh?.keyPath) setSpForm({ ...spForm, authType: 'key', keyPath: inh.keyPath, passphrase: inh.passphrase });
+                            }
+                          }} /> Inherit
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  {spForm.authType === 'password' && (<label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} /></label>)}
+                  {spForm.authType === 'key' && (<><label>Key Path<input style={{ width: '100%' }} value={spForm.keyPath ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, keyPath: e.target.value })} placeholder="~/.ssh/id_ed25519" /></label><label>Passphrase<input style={{ width: '100%' }} type="password" value={spForm.passphrase ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, passphrase: e.target.value })} /></label></>)}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <label style={{ flex: 1 }}>Remote Path<input style={{ width: '100%' }} value={spForm.path ?? ''} onChange={(e) => setSpForm({ ...spForm, path: e.target.value })} placeholder="/home/user" /></label>
                     <button onClick={async () => {
                       try {
                         const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
-                        const sessionId = await sshConnectWithTrustPrompt({ host: spForm.host, port: spForm.port ?? 22, user: spForm.user, auth: { password: spForm.password, key_path: spForm.keyPath, passphrase: spForm.passphrase, agent: spForm.authType === 'agent' } as any, timeout_ms: 15000 });
+                        const effHost = spForm.host || inheritedForSsh?.ssh?.host || '';
+                        const effPort = spForm.port ?? inheritedForSsh?.ssh?.port ?? 22;
+                        const effUser = spInherit.sshUser ? (inheritedForSsh?.ssh?.user || spForm.user) : spForm.user;
+                        let effAuth: any;
+                        if (spInherit.sshAuth && inheritedForSsh?.ssh?.auth) {
+                          const a = inheritedForSsh.ssh.auth;
+                          if (a.agent) effAuth = { agent: true };
+                          else if (a.password) effAuth = { password: a.password };
+                          else if (a.keyPath) effAuth = { key_path: a.keyPath, passphrase: a.passphrase };
+                        } else {
+                          effAuth = spForm.authType === 'agent' ? { agent: true } : spForm.authType === 'password' ? { password: spForm.password } : { key_path: spForm.keyPath, passphrase: spForm.passphrase };
+                        }
+                        if (!effHost || !effUser) { alert('Host and user are required'); return; }
+                        const sessionId = await sshConnectWithTrustPrompt({ host: effHost, port: effPort, user: effUser, auth: effAuth, timeout_ms: 15000 });
                         const home = await sshHomeDir(sessionId);
                         const start = spForm.path || home;
                         const entries = await sshSftpList(sessionId, start);
@@ -860,48 +976,82 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
               
               {activeTab === 'terminal' && (
                 <div style={{ display: 'grid', gap: 12 }}>
-                  {/* Theme Selector */}
+                  {/* Theme Selector with Inherit */}
                   <div>
-                    <label>Theme
-                      <select 
-                        style={{ width: '100%' }} 
-                        value={spForm.theme || 'default'} 
-                        onChange={(e) => setSpForm({ ...spForm, theme: e.target.value })}
-                      >
-                        {getThemeList().map(theme => (
-                          <option key={theme.key} value={theme.key}>
-                            {theme.name} {theme.dark ? '(dark)' : '(light)'}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <label style={{ flex: 1 }}>Theme
+                        <select 
+                          style={{ width: '100%' }} 
+                          value={spForm.theme || (inheritedForSsh?.terminal?.theme ? inheritedForSsh.terminal.theme : 'default')} 
+                          onChange={(e) => setSpForm({ ...spForm, theme: e.target.value })}
+                          disabled={!!spInherit.theme}
+                        >
+                          {getThemeList().map(theme => (
+                            <option key={theme.key} value={theme.key}>
+                              {theme.name} {theme.dark ? '(dark)' : '(light)'}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {inheritedForSsh?.terminal?.theme && (
+                        <label style={{ fontSize: 12 }}>
+                          <input type="checkbox" checked={!!spInherit.theme} onChange={(e) => {
+                            const on = e.target.checked;
+                            setSpInherit({ ...spInherit, theme: on });
+                            if (!on && inheritedForSsh?.terminal?.theme) setSpForm({ ...spForm, theme: inheritedForSsh.terminal.theme });
+                          }} /> Inherit
+                        </label>
+                      )}
+                    </div>
                   </div>
                   
-                  {/* Font Size */}
+                  {/* Font Size with Inherit */}
                   <div>
-                    <label>Font Size
-                      <input 
-                        type="number" 
-                        style={{ width: '100%' }} 
-                        value={spForm.fontSize || 14} 
-                        onChange={(e) => setSpForm({ ...spForm, fontSize: Number(e.target.value) || undefined })}
-                        min="8"
-                        max="32"
-                        placeholder="14"
-                      />
-                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <label style={{ flex: 1 }}>Font Size
+                        <input 
+                          type="number" 
+                          style={{ width: '100%' }} 
+                          value={spForm.fontSize || inheritedForSsh?.terminal?.fontSize || 14} 
+                          onChange={(e) => setSpForm({ ...spForm, fontSize: Number(e.target.value) || undefined })}
+                          min="8"
+                          max="32"
+                          placeholder="14"
+                          disabled={!!spInherit.fontSize}
+                        />
+                      </label>
+                      {typeof inheritedForSsh?.terminal?.fontSize !== 'undefined' && (
+                        <label style={{ fontSize: 12 }}>
+                          <input type="checkbox" checked={!!spInherit.fontSize} onChange={(e) => {
+                            const on = e.target.checked; setSpInherit({ ...spInherit, fontSize: on });
+                            if (!on && typeof inheritedForSsh?.terminal?.fontSize !== 'undefined') setSpForm({ ...spForm, fontSize: inheritedForSsh.terminal.fontSize });
+                          }} /> Inherit
+                        </label>
+                      )}
+                    </div>
                   </div>
                   
-                  {/* Font Family */}
+                  {/* Font Family with Inherit */}
                   <div>
-                    <label>Font Family
-                      <input 
-                        style={{ width: '100%' }} 
-                        value={spForm.fontFamily || ''} 
-                        onChange={(e) => setSpForm({ ...spForm, fontFamily: e.target.value || undefined })}
-                        placeholder="'Cascadia Code', 'Fira Code', monospace"
-                      />
-                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <label style={{ flex: 1 }}>Font Family
+                        <input 
+                          style={{ width: '100%' }} 
+                          value={spForm.fontFamily || inheritedForSsh?.terminal?.fontFamily || ''} 
+                          onChange={(e) => setSpForm({ ...spForm, fontFamily: e.target.value || undefined })}
+                          placeholder="'Cascadia Code', 'Fira Code', monospace"
+                          disabled={!!spInherit.fontFamily}
+                        />
+                      </label>
+                      {inheritedForSsh?.terminal?.fontFamily && (
+                        <label style={{ fontSize: 12 }}>
+                          <input type="checkbox" checked={!!spInherit.fontFamily} onChange={(e) => {
+                            const on = e.target.checked; setSpInherit({ ...spInherit, fontFamily: on });
+                            if (!on && inheritedForSsh?.terminal?.fontFamily) setSpForm({ ...spForm, fontFamily: inheritedForSsh.terminal.fontFamily });
+                          }} /> Inherit
+                        </label>
+                      )}
+                    </div>
                   </div>
                   
                   {/* Theme Preview */}
@@ -949,15 +1099,10 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                 <button onClick={() => { setSpOpen(false); setActiveTab('basic'); }}>Cancel</button>
                 <button onClick={async () => {
                   if (!spForm.id) spForm.id = crypto.randomUUID();
-                  const profile: any = { 
-                    id: spForm.id!, 
-                    name: spForm.name, 
-                    host: spForm.host, 
-                    port: spForm.port, 
-                    user: spForm.user, 
-                    auth: spForm.authType === 'agent' ? { agent: true } : spForm.authType === 'password' ? { password: spForm.password } : { keyPath: spForm.keyPath, passphrase: spForm.passphrase }, 
-                    path: spForm.path 
-                  };
+                  const profile: any = { id: spForm.id!, name: spForm.name, host: spForm.host, port: spForm.port, path: spForm.path };
+                  // Only set user/auth if not inheriting
+                  if (!spInherit.sshUser) profile.user = spForm.user;
+                  if (!spInherit.sshAuth) profile.auth = spForm.authType === 'agent' ? { agent: true } : spForm.authType === 'password' ? { password: spForm.password } : { keyPath: spForm.keyPath, passphrase: spForm.passphrase };
                   
                   // Add shell settings if provided
                   if (spForm.envVars?.length || spForm.initCommands?.length || spForm.shellOverride) {
@@ -978,13 +1123,12 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     profile.advanced = { defaultForwards: spForm.defaultForwards };
                   }
                   
-                  // Add terminal settings if provided
-                  if (spForm.theme || spForm.fontSize || spForm.fontFamily) {
-                    profile.terminal = {};
-                    if (spForm.theme) profile.terminal.theme = spForm.theme;
-                    if (spForm.fontSize) profile.terminal.fontSize = spForm.fontSize;
-                    if (spForm.fontFamily) profile.terminal.fontFamily = spForm.fontFamily;
-                  }
+                  // Add terminal settings only for fields not inheriting
+                  const term: any = {};
+                  if (!spInherit.theme && spForm.theme) term.theme = spForm.theme;
+                  if (!spInherit.fontSize && spForm.fontSize) term.fontSize = spForm.fontSize;
+                  if (!spInherit.fontFamily && spForm.fontFamily) term.fontFamily = spForm.fontFamily;
+                  if (Object.keys(term).length) profile.terminal = term;
                   
                   // Add OS field if not auto-detect
                   if (spForm.os && spForm.os !== 'auto-detect') {
@@ -994,7 +1138,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   await saveSshProfile(profile);
                   setSshProfiles(await getSshProfiles());
                   if (tree && !hasProfileNode(tree, 'ssh', spForm.id!)) {
-                    updateTree((root) => addProfileNode(root, 'ssh', spForm.id!));
+                    const dest = inheritContextFolderId || currentFolderId;
+                    updateTree((root) => addProfileNode(root, 'ssh', spForm.id!, dest));
                   }
                   setSpOpen(false);
                   setActiveTab('basic');
@@ -1073,6 +1218,12 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   if (settings.terminal?.fontSize) form.fontSize = settings.terminal.fontSize;
                   if (settings.terminal?.fontFamily) form.fontFamily = settings.terminal.fontFamily;
                   if (settings.ssh?.advanced?.defaultForwards) form.defaultForwards = settings.ssh.advanced.defaultForwards.slice();
+                  if (settings.ssh?.user) form.sshUser = settings.ssh.user;
+                  if (settings.ssh?.auth) {
+                    if (settings.ssh.auth.agent) { form.sshAuthType = 'agent'; }
+                    else if (settings.ssh.auth.password) { form.sshAuthType = 'password'; form.sshPassword = settings.ssh.auth.password; }
+                    else if (settings.ssh.auth.keyPath) { form.sshAuthType = 'key'; form.sshKeyPath = settings.ssh.auth.keyPath; form.sshPassphrase = settings.ssh.auth.passphrase; }
+                  }
                   setFolderSettingsDialog({ folderId: ctxMenu.node.id, form });
                   setCtxMenu(null);
                 }}>Edit settings…</button>
@@ -1082,7 +1233,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
               <>
                 <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { openProfile(ctxMenu.node); setCtxMenu(null); }}>Open</button>
                 <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { editProfile(ctxMenu.node); setCtxMenu(null); }}>Edit</button>
-                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { moveProfileNode(ctxMenu.node); setCtxMenu(null); }}>Move</button>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { setMoveDialog({ node: ctxMenu.node, destId: currentFolderId }); setCtxMenu(null); }}>Move</button>
                 <button style={{ width: '100%', textAlign: 'left' }} onClick={async () => { await deleteProfileNode(ctxMenu.node); setCtxMenu(null); }}>Delete</button>
               </>
             )}
@@ -1123,6 +1274,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                 <button onClick={() => setFolderActiveTab('environment')} style={{ padding: '8px 16px', background: folderActiveTab === 'environment' ? '#333' : 'transparent', border: 'none', borderBottom: folderActiveTab === 'environment' ? '2px solid #0078d4' : '2px solid transparent', color: folderActiveTab === 'environment' ? '#fff' : '#aaa', cursor: 'pointer' }}>Environment</button>
                 <button onClick={() => setFolderActiveTab('forwarding')} style={{ padding: '8px 16px', background: folderActiveTab === 'forwarding' ? '#333' : 'transparent', border: 'none', borderBottom: folderActiveTab === 'forwarding' ? '2px solid #0078d4' : '2px solid transparent', color: folderActiveTab === 'forwarding' ? '#fff' : '#aaa', cursor: 'pointer' }}>Forwarding</button>
                 <button onClick={() => setFolderActiveTab('terminal')} style={{ padding: '8px 16px', background: folderActiveTab === 'terminal' ? '#333' : 'transparent', border: 'none', borderBottom: folderActiveTab === 'terminal' ? '2px solid #0078d4' : '2px solid transparent', color: folderActiveTab === 'terminal' ? '#fff' : '#aaa', cursor: 'pointer' }}>Terminal</button>
+                <button onClick={() => setFolderActiveTab('ssh')} style={{ padding: '8px 16px', background: folderActiveTab === 'ssh' ? '#333' : 'transparent', border: 'none', borderBottom: folderActiveTab === 'ssh' ? '2px solid #0078d4' : '2px solid transparent', color: folderActiveTab === 'ssh' ? '#fff' : '#aaa', cursor: 'pointer' }}>SSH</button>
               </div>
             </div>
             <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
@@ -1242,6 +1394,46 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   </div>
                 </div>
               )}
+              {folderActiveTab === 'ssh' && (
+                <div>
+                  <div style={{ marginBottom: 8 }}>
+                    <label>Username
+                      <input 
+                        style={{ width: '100%' }} 
+                        value={folderSettingsDialog.form.sshUser || ''} 
+                        onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshUser: e.target.value || undefined } })}
+                        placeholder="user"
+                      />
+                    </label>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ marginRight: 8 }}><input type="radio" checked={(folderSettingsDialog.form.sshAuthType || 'agent') === 'agent'} onChange={() => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshAuthType: 'agent', sshPassword: undefined, sshKeyPath: undefined, sshPassphrase: undefined } })} /> SSH Agent</label>
+                    <label style={{ marginRight: 8 }}><input type="radio" checked={folderSettingsDialog.form.sshAuthType === 'password'} onChange={() => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshAuthType: 'password', sshKeyPath: undefined, sshPassphrase: undefined } })} /> Password</label>
+                    <label><input type="radio" checked={folderSettingsDialog.form.sshAuthType === 'key'} onChange={() => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshAuthType: 'key', sshPassword: undefined } })} /> Key File</label>
+                  </div>
+                  {folderSettingsDialog.form.sshAuthType === 'password' && (
+                    <div style={{ marginBottom: 8 }}>
+                      <label>Password
+                        <input type="password" style={{ width: '100%' }} value={folderSettingsDialog.form.sshPassword || ''} onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshPassword: e.target.value || undefined } })} />
+                      </label>
+                    </div>
+                  )}
+                  {folderSettingsDialog.form.sshAuthType === 'key' && (
+                    <>
+                      <div style={{ marginBottom: 8 }}>
+                        <label>Key Path
+                          <input style={{ width: '100%' }} value={folderSettingsDialog.form.sshKeyPath || ''} onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshKeyPath: e.target.value || undefined } })} placeholder="~/.ssh/id_ed25519" />
+                        </label>
+                      </div>
+                      <div style={{ marginBottom: 8 }}>
+                        <label>Passphrase
+                          <input type="password" style={{ width: '100%' }} value={folderSettingsDialog.form.sshPassphrase || ''} onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshPassphrase: e.target.value || undefined } })} />
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: 16, borderTop: '1px solid #444' }}>
               <button onClick={() => setFolderSettingsDialog(null)}>Cancel</button>
@@ -1270,13 +1462,47 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     if (form.fontSize) settings.terminal.fontSize = form.fontSize;
                     if (form.fontFamily) settings.terminal.fontFamily = form.fontFamily;
                   }
-                  if (form.defaultForwards?.length) {
-                    settings.ssh = { advanced: { defaultForwards: form.defaultForwards } };
+                  // SSH overrides: connection + forwarding
+                  if (form.defaultForwards?.length || form.sshUser || form.sshAuthType) {
+                    settings.ssh = settings.ssh || {};
+                    if (form.defaultForwards?.length) settings.ssh.advanced = { defaultForwards: form.defaultForwards };
+                    if (form.sshUser) settings.ssh.user = form.sshUser;
+                    if (form.sshAuthType) {
+                      if (form.sshAuthType === 'agent') settings.ssh.auth = { agent: true };
+                      if (form.sshAuthType === 'password' && form.sshPassword) settings.ssh.auth = { password: form.sshPassword };
+                      if (form.sshAuthType === 'key' && form.sshKeyPath) settings.ssh.auth = { keyPath: form.sshKeyPath, passphrase: form.sshPassphrase };
+                    }
                   }
                   if (Object.keys(settings).length) (f as any).settings = settings; else delete (f as any).settings;
                 });
                 setFolderSettingsDialog(null);
               }}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {moveDialog && (
+        <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.45)', zIndex: 999 }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 420 }}>
+            <h3 style={{ marginTop: 0 }}>Move Profile</h3>
+            <div style={{ marginBottom: 8, fontSize: 12, color: '#bbb' }}>Select destination folder</div>
+            <select style={{ width: '100%' }} value={moveDialog.destId || ''} onChange={(e) => setMoveDialog({ ...moveDialog, destId: e.target.value })}>
+              {folderList(tree).map((f) => (
+                <option key={f.id} value={f.id}>{f.path}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button onClick={() => setMoveDialog(null)}>Cancel</button>
+              <button onClick={() => {
+                if (!moveDialog.destId || !tree) { setMoveDialog(null); return; }
+                updateTree((root) => {
+                  removeNode(root, moveDialog.node.id);
+                  const dest = (function findF(n: ProfilesTreeNode, id: string): any { if (n.type === 'folder') { if (n.id === id) return n; for (const c of n.children) { const r = findF(c, id); if (r) return r; } } return null; })(root, moveDialog.destId!);
+                  if (dest) dest.children.push(moveDialog.node);
+                });
+                setMoveDialog(null);
+              }}>Move</button>
             </div>
           </div>
         </div>

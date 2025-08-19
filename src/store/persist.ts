@@ -194,6 +194,8 @@ export async function deleteSshProfile(id: string): Promise<void> {
 export type ResolvedSettings = {
   shell?: ShellSettings;
   terminal?: TerminalSettings;
+  // SSH connection overrides and advanced
+  ssh?: { host?: string; port?: number; user?: string; auth?: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean } };
   advanced?: SshAdvancedSettings;
 };
 
@@ -244,7 +246,7 @@ export function resolveEffectiveSettings(args: {
   root: ProfilesTreeNode | null;
   nodeId: string; // profile node id in tree
   profileKind: 'local' | 'ssh';
-  profileSettings?: { shell?: ShellSettings; terminal?: TerminalSettings; advanced?: SshAdvancedSettings };
+  profileSettings?: { shell?: ShellSettings; terminal?: TerminalSettings; advanced?: SshAdvancedSettings; ssh?: { host?: string; port?: number; user?: string; auth?: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean } } };
 }): ResolvedSettings {
   const { root, nodeId, profileKind, profileSettings } = args;
   const path = findPathToNode(root, nodeId);
@@ -367,5 +369,36 @@ export function resolveEffectiveSettings(args: {
     advanced = Object.values(maybe).some((v) => typeof v !== 'undefined') ? maybe : undefined;
   }
 
-  return { shell, terminal, advanced };
+  // SSH base connection overrides (nearest defined wins)
+  let sshHostChain: (string | undefined)[] = [];
+  let sshPortChain: (number | undefined)[] = [];
+  let sshUserChain: (string | undefined)[] = [];
+  let sshAuthChain: ({ password?: string; keyPath?: string; passphrase?: string; agent?: boolean } | undefined)[] = [];
+  if (profileKind === 'ssh') {
+    for (const f of folders) {
+      const s = f.settings?.ssh;
+      if (!s) continue;
+      sshHostChain.push(s.host);
+      sshPortChain.push(s.port);
+      sshUserChain.push(s.user);
+      sshAuthChain.push(s.auth);
+    }
+    if (profileSettings?.ssh) {
+      sshHostChain.push(profileSettings.ssh.host);
+      sshPortChain.push(profileSettings.ssh.port);
+      sshUserChain.push(profileSettings.ssh.user);
+      sshAuthChain.push(profileSettings.ssh.auth);
+    }
+  }
+
+  const sshOverrides = (profileKind === 'ssh')
+    ? {
+        host: nearest(sshHostChain),
+        port: nearest(sshPortChain),
+        user: nearest(sshUserChain),
+        auth: nearest(sshAuthChain),
+      }
+    : undefined;
+
+  return { shell, terminal, ssh: sshOverrides, advanced };
 }
