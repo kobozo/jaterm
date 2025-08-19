@@ -14,7 +14,7 @@ import type { RecentSession, RecentSshSession } from '@/store/sessions';
 type Props = {
   onOpenFolder: (path: string) => void;
   onOpenSession?: (session: RecentSession) => void;
-  onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string }) => void;
+  onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string; os?: string }) => void;
 };
 
 export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Props) {
@@ -52,7 +52,9 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     theme?: string;
     fontSize?: number;
     fontFamily?: string;
-  }>({ name: '', host: '', user: '', authType: 'agent' });
+    // OS detection
+    os?: string;
+  }>({ name: '', host: '', user: '', authType: 'agent', os: 'auto-detect' });
   const [activeTab, setActiveTab] = useState<'basic' | 'environment' | 'forwarding' | 'terminal'>('basic');
   const [browse, setBrowse] = useState<{ sessionId: string; cwd: string; entries: { name: string; path: string; is_dir: boolean }[] } | null>(null);
   
@@ -151,7 +153,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       if (p) onOpenFolder(p.path);
     } else {
       const p = sshProfiles.find((x) => x.id === n.ref.id);
-      if (p && onOpenSsh) onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id, terminal: p.terminal, shell: p.shell, advanced: p.advanced } as any);
+      if (p && onOpenSsh) onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id, terminal: p.terminal, shell: p.shell, advanced: p.advanced, os: p.os } as any);
     }
   }
   function editProfile(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
@@ -162,7 +164,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       const p = sshProfiles.find((x) => x.id === n.ref.id);
       if (p) {
         const authType = p.auth?.agent ? 'agent' : p.auth?.password ? 'password' : 'key';
-        setSpForm({ id: p.id, name: p.name, host: p.host, port: p.port, user: p.user, authType: authType as any, password: p.auth?.password, keyPath: p.auth?.keyPath, passphrase: p.auth?.passphrase, path: p.path, envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined, initCommands: p.shell?.initCommands, shellOverride: p.shell?.shell, defaultForwards: p.advanced?.defaultForwards, theme: p.terminal?.theme, fontSize: p.terminal?.fontSize, fontFamily: p.terminal?.fontFamily });
+        setSpForm({ id: p.id, name: p.name, host: p.host, port: p.port, user: p.user, authType: authType as any, password: p.auth?.password, keyPath: p.auth?.keyPath, passphrase: p.auth?.passphrase, path: p.path, envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined, initCommands: p.shell?.initCommands, shellOverride: p.shell?.shell, defaultForwards: p.advanced?.defaultForwards, theme: p.terminal?.theme, fontSize: p.terminal?.fontSize, fontFamily: p.terminal?.fontFamily, os: p.os || 'auto-detect' });
         setSpOpen(true);
       }
     }
@@ -255,7 +257,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             <h2>Profiles</h2>
             <div style={{ display: 'flex', gap: 12, marginBottom: 8, alignItems: 'center' }}>
               <button onClick={() => { setLpForm({ name: '', path: '' }); setLpOpen(true); }}>New Local Profile</button>
-              <button onClick={() => { setSpForm({ name: '', host: '', user: '', authType: 'agent' }); setSpOpen(true); }}>New SSH Profile</button>
+              <button onClick={() => { setSpForm({ name: '', host: '', user: '', authType: 'agent', os: 'auto-detect' }); setSpOpen(true); }}>New SSH Profile</button>
               <span style={{ flex: 1 }} />
               <button onClick={() => {
                 if (!tree || !currentFolderId) return;
@@ -373,7 +375,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                               const all = await getSshProfiles();
                               const p = r.s.profileId ? all.find((x) => x.id === r.s.profileId) : undefined;
                               if (p) {
-                                onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: r.s.path, profileId: p.id, terminal: p.terminal, shell: p.shell, advanced: p.advanced });
+                                onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: r.s.path, profileId: p.id, terminal: p.terminal, shell: p.shell, advanced: p.advanced, os: p.os });
                               } else if (r.s.host && r.s.user) {
                                 onOpenSsh?.({ host: r.s.host, port: r.s.port ?? 22, user: r.s.user, auth: { agent: true } as any, cwd: r.s.path });
                               } else {
@@ -585,6 +587,30 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       } catch (e) { alert('SSH browse failed: ' + (e as any)); }
                     }}>Browse…</button>
                   </div>
+                  <label>
+                    Operating System
+                    <select 
+                      style={{ width: '100%' }} 
+                      value={spForm.os || 'auto-detect'} 
+                      onChange={(e) => setSpForm({ ...spForm, os: e.target.value })}
+                    >
+                      <option value="auto-detect">Auto-detect</option>
+                      <option value="linux">Linux (Generic)</option>
+                      <option value="linux-ubuntu">Ubuntu</option>
+                      <option value="linux-debian">Debian</option>
+                      <option value="linux-rhel">Red Hat Enterprise Linux</option>
+                      <option value="linux-centos">CentOS</option>
+                      <option value="linux-fedora">Fedora</option>
+                      <option value="linux-arch">Arch Linux</option>
+                      <option value="linux-alpine">Alpine Linux</option>
+                      <option value="linux-opensuse">openSUSE</option>
+                      <option value="macos">macOS</option>
+                      <option value="freebsd">FreeBSD</option>
+                      <option value="windows">Windows</option>
+                      <option value="openbsd">OpenBSD</option>
+                      <option value="netbsd">NetBSD</option>
+                    </select>
+                  </label>
                 </div>
               )}
               
@@ -873,6 +899,11 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     if (spForm.theme) profile.terminal.theme = spForm.theme;
                     if (spForm.fontSize) profile.terminal.fontSize = spForm.fontSize;
                     if (spForm.fontFamily) profile.terminal.fontFamily = spForm.fontFamily;
+                  }
+                  
+                  // Add OS field if not auto-detect
+                  if (spForm.os && spForm.os !== 'auto-detect') {
+                    profile.os = spForm.os;
                   }
                   
                   await saveSshProfile(profile);

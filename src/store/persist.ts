@@ -93,6 +93,7 @@ export type SshProfileStored = {
   terminal?: TerminalSettings;
   shell?: ShellSettings;
   advanced?: SshAdvancedSettings;
+  os?: string; // auto-detected or user-selected OS
 };
 
 // Profiles tree: folders and profile references

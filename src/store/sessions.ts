@@ -16,6 +16,7 @@ export type RecentSshSession = {
   panes?: number;
   title?: string;
   layoutShape?: LayoutShape;
+  os?: string; // auto-detected or user-selected OS
 };
 
 export async function getRecentSessions(limit = 10): Promise<RecentSession[]> {

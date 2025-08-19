@@ -1,6 +1,6 @@
 import { onSshUploadProgress, sshExec, sshHomeDir, sshSftpMkdirs, sshDeployHelper, helperLocalEnsure, helperGetVersion } from '@/types/ipc';
 
-export type HelperStatus = { ok: boolean; version?: string; path?: string };
+export type HelperStatus = { ok: boolean; version?: string; path?: string; os?: string };
 
 // Helper deployment for SSH sessions
 export async function ensureHelper(
@@ -28,8 +28,8 @@ export async function ensureHelper(
         try {
           const j = JSON.parse(res.stdout);
           if (j && j.ok && j.version === requiredVersion) {
-            console.info('[helper] up to date', j.version);
-            return { ok: true, version: j.version, path: helperPath };
+            console.info('[helper] up to date', j.version, 'os:', j.os);
+            return { ok: true, version: j.version, path: helperPath, os: j.os };
           }
         } catch {}
       }
@@ -68,7 +68,7 @@ export async function ensureHelper(
       
       try {
         const j = JSON.parse(res.stdout);
-        return { ok: !!j?.ok, version: j?.version, path: helperPath };
+        return { ok: !!j?.ok, version: j?.version, path: helperPath, os: j?.os };
       } catch {
         return { ok: true, version: requiredVersion, path: helperPath };
       }

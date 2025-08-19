@@ -6,6 +6,39 @@ mod version;
 use commands::{git, ports};
 use version::HELPER_VERSION;
 
+/// Detect the operating system
+fn detect_os() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        // Try to detect specific Linux distribution
+        if let Ok(contents) = std::fs::read_to_string("/etc/os-release") {
+            for line in contents.lines() {
+                if line.starts_with("ID=") {
+                    let id = line.trim_start_matches("ID=").trim_matches('"');
+                    return format!("linux-{}", id);
+                }
+            }
+        }
+        "linux".to_string()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "macos".to_string()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows".to_string()
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        "freebsd".to_string()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows", target_os = "freebsd")))]
+    {
+        std::env::consts::OS.to_string()
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "jaterm-agent")]
 #[command(about = "JaTerm helper agent for git and system operations")]
@@ -145,7 +178,8 @@ fn main() -> Result<()> {
     
     match cli.command {
         Commands::Health => {
-            println!(r#"{{"ok":true,"version":"{}"}}"#, HELPER_VERSION);
+            let os = detect_os();
+            println!(r#"{{"ok":true,"version":"{}","os":"{}"}}"#, HELPER_VERSION, os);
         }
         
         Commands::GitStatus { dir } => {

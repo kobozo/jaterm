@@ -25,6 +25,7 @@ export type SshProfile = {
   user?: string;
   auth?: SshAuth;
   jump?: string; // profile id
+  os?: string; // auto-detected or user-selected OS
 };
 
 export type ForwardType = 'L' | 'R' | 'D'; // Local, Remote, Dynamic (SOCKS)

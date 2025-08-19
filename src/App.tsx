@@ -479,6 +479,7 @@ export default function App() {
     terminal?: any; // Terminal customization settings
     shell?: any; // Shell and environment settings
     advanced?: any; // Advanced SSH settings
+    os?: string; // OS from profile
   }) {
     try {
       const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
@@ -487,7 +488,9 @@ export default function App() {
       try {
         (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then((res: any) => {
           setTabs((prev) => {
-            const updated = prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path } } : t));
+            // If auto-detect or no OS specified, use detected OS from helper
+            const detectedOs = (!opts.os || opts.os === 'auto-detect') ? res?.os : opts.os;
+            const updated = prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path, os: detectedOs } } : t));
             // Once helper is ready, trigger initial git status check if we have a cwd
             const tab = updated.find(t => t.id === tabId);
             if (res?.ok && res?.path) {
