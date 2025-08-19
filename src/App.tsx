@@ -251,10 +251,20 @@ export default function App() {
     }
   }
 
-  // Track pending CWD updates to prevent race conditions
+  // Track pending CWD updates and last update time to prevent race conditions
   const pendingCwdUpdates = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const lastCwdUpdate = React.useRef<Map<string, { dir: string; timestamp: number }>>(new Map());
   
   async function updateTabCwd(tabId: string, dir: string) {
+    const now = Date.now();
+    
+    // Check if this is a stale update (same as last or going backwards)
+    const last = lastCwdUpdate.current.get(tabId);
+    if (last && last.dir === dir && (now - last.timestamp) < 1000) {
+      // Same directory within 1 second, skip
+      return;
+    }
+    
     // Cancel any pending update for this tab
     const pending = pendingCwdUpdates.current.get(tabId);
     if (pending) {
@@ -262,11 +272,22 @@ export default function App() {
       pendingCwdUpdates.current.delete(tabId);
     }
     
+    // Record this update attempt
+    lastCwdUpdate.current.set(tabId, { dir, timestamp: now });
+    
     // Debounce the update to avoid race conditions
     const timeoutId = setTimeout(async () => {
       pendingCwdUpdates.current.delete(tabId);
+      
+      // Double-check this is still the most recent directory
+      const latest = lastCwdUpdate.current.get(tabId);
+      if (!latest || latest.dir !== dir) {
+        console.info('[git] Skipping stale CWD update:', dir, 'latest:', latest?.dir);
+        return;
+      }
+      
       await doUpdateTabCwd(tabId, dir);
-    }, 100); // 100ms debounce
+    }, 150); // 150ms debounce
     
     pendingCwdUpdates.current.set(tabId, timeoutId);
   }
