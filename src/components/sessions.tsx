@@ -75,6 +75,10 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   const [inheritContextFolderId, setInheritContextFolderId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'basic' | 'environment' | 'forwarding' | 'terminal'>('basic');
   const [browse, setBrowse] = useState<{ sessionId: string; cwd: string; entries: { name: string; path: string; is_dir: boolean }[] } | null>(null);
+  // Global search state
+  const [search, setSearch] = useState('');
+  const [searchActive, setSearchActive] = useState(false);
+  const [searchIndex, setSearchIndex] = useState(0);
   
   function folderList(n: ProfilesTreeNode | null): { id: string; name: string; path: string }[] {
     const acc: { id: string; name: string; path: string }[] = [];
@@ -87,6 +91,90 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     }
     if (n) walk(n, '', 0);
     return acc;
+  }
+
+  // Build a flat list of profile nodes from the tree
+  function flattenProfiles(node: ProfilesTreeNode | null): Array<Extract<ProfilesTreeNode, { type: 'profile' }>> {
+    const out: Array<Extract<ProfilesTreeNode, { type: 'profile' }>> = [];
+    function walk(n: ProfilesTreeNode) {
+      if (n.type === 'profile') out.push(n as any);
+      else n.children.forEach(walk);
+    }
+    if (node) walk(node);
+    return out;
+  }
+
+  type SearchItem =
+    | { kind: 'profile'; node: Extract<ProfilesTreeNode, { type: 'profile' }>; label: string; aux?: string; icon: string }
+    | { kind: 'recent-local'; s: { cwd: string; closedAt: number; panes?: number; title?: string; layoutShape?: any }; label: string; icon: string }
+    | { kind: 'recent-ssh'; s: RecentSshSession; label: string; icon: string };
+
+  const searchResults = React.useMemo<SearchItem[]>(() => {
+    const q = (search || '').trim().toLowerCase();
+    if (!q) return [];
+    const items: SearchItem[] = [];
+    // Profiles
+    for (const n of flattenProfiles(tree)) {
+      const label = profileLabel(n);
+      const icon = iconFor(n);
+      if (!label) continue;
+      if (label.toLowerCase().includes(q)) items.push({ kind: 'profile', node: n, label, icon });
+    }
+    // Recents (locals + ssh)
+    for (const s of recentSessions) {
+      const label = s.cwd;
+      if (label.toLowerCase().includes(q)) items.push({ kind: 'recent-local', s, label, icon: '\uf07c' }); // folder-open icon
+    }
+    for (const s of recentSsh) {
+      const text = s.path + (s.user && s.host ? ` [${s.user}@${s.host}]` : '');
+      if (text.toLowerCase().includes(q)) items.push({ kind: 'recent-ssh', s, label: text, icon: '\uf0c1' });
+    }
+    // Limit
+    return items.slice(0, 30);
+  }, [search, tree, recentSessions, recentSsh, localProfiles, sshProfiles]);
+
+  function openSearchItem(it: SearchItem) {
+    if (it.kind === 'profile') {
+      openProfile(it.node);
+      setSearch('');
+      setSearchActive(false);
+      return;
+    }
+    if (it.kind === 'recent-local') {
+      if (onOpenSession) onOpenSession(it.s);
+      else onOpenFolder(it.s.cwd);
+      setSearch(''); setSearchActive(false);
+      return;
+    }
+    // recent-ssh
+    (async () => {
+      const r = it.s;
+      if (r.profileId) {
+        const pAll = await getSshProfiles();
+        const p = pAll.find((x) => x.id === r.profileId);
+        if (p) {
+          // Resolve effective settings from tree if possible
+          let term = p.terminal, shell = p.shell, advanced = p.advanced, ssh: any = { host: p.host, port: p.port, user: p.user, auth: p.auth };
+          try {
+            const t = tree ?? (await ensureProfilesTree());
+            function findNode(n: ProfilesTreeNode, kind: 'ssh'|'local', id: string): Extract<ProfilesTreeNode, { type: 'profile' }> | null {
+              if (n.type === 'profile' && n.ref.kind === kind && n.ref.id === id) return n as any;
+              if (n.type === 'folder') { for (const c of n.children) { const f = findNode(c, kind, id); if (f) return f; } }
+              return null;
+            }
+            const node = t ? findNode(t, 'ssh', p.id) : null;
+            if (node) {
+              const eff = resolveEffectiveSettings({ root: t, nodeId: node.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced, ssh: { host: p.host, port: p.port, user: p.user, auth: p.auth } } });
+              term = eff.terminal; shell = eff.shell; advanced = eff.advanced; ssh = eff.ssh ? { ...ssh, ...eff.ssh } : ssh;
+            }
+          } catch {}
+          onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.path, profileId: p.id, terminal: term, shell, advanced, os: p.os });
+        }
+      } else if (r.user && r.host) {
+        onOpenSsh?.({ host: r.host, port: (r as any).port ?? 22, user: r.user, auth: { agent: true } as any, cwd: r.path });
+      }
+      setSearch(''); setSearchActive(false);
+    })();
   }
 
   function updateTree(mut: (n: ProfilesTreeNode) => void) {
@@ -347,6 +435,38 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
         {/* Left column: quick actions + profiles (60%) */}
         <div style={{ flex: 6, minWidth: 0 }}>
           <h1>Start New Session</h1>
+          {/* Global search */}
+          <div style={{ margin: '12px 0' }}>
+            <input
+              placeholder="Search profiles and recent sessions…"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setSearchIndex(0); setSearchActive(true); }}
+              onFocus={() => setSearchActive(true)}
+              onKeyDown={(e) => {
+                if (!searchResults.length) return;
+                if (e.key === 'ArrowDown') { e.preventDefault(); setSearchIndex((i) => Math.min(i + 1, searchResults.length - 1)); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); setSearchIndex((i) => Math.max(i - 1, 0)); }
+                else if (e.key === 'Enter') { e.preventDefault(); openSearchItem(searchResults[searchIndex]); }
+                else if (e.key === 'Escape') { setSearch(''); setSearchActive(false); }
+              }}
+              style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #333', background: '#1b1b1b', color: '#eee' }}
+            />
+            {searchActive && search && searchResults.length > 0 && (
+              <div style={{ marginTop: 6, border: '1px solid #333', borderRadius: 6, maxHeight: 260, overflow: 'auto' }}>
+                {searchResults.map((it, i) => (
+                  <div
+                    key={(it as any).label + ':' + i}
+                    onMouseDown={(e) => { e.preventDefault(); openSearchItem(it); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: i === searchIndex ? '#2a2a2a' : 'transparent', cursor: 'pointer' }}
+                  >
+                    <span className="nf-icon" style={{ width: 18 }}>{it.icon}</span>
+                    <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.label}</span>
+                    <span style={{ fontSize: 11, color: '#888' }}>{it.kind === 'profile' ? 'Profile' : it.kind === 'recent-local' ? 'Recent' : 'SSH'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <p>Start a local terminal in your home or a specific folder.</p>
           <div style={{ margin: '16px 0', display: 'flex', gap: 12 }}>
             <button onClick={handleHome}>Start in Home Folder</button>
