@@ -49,6 +49,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
+  // Updater state
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState<null | { version?: string }>(null);
   const { show, update, dismiss } = useToasts();
   // Simple bell sound using WebAudio
   const audioCtxRef = React.useRef<AudioContext | null>(null);
@@ -71,6 +74,69 @@ export default function App() {
       o.start(now);
       o.stop(now + 0.14);
     } catch {}
+  }
+
+  // Check updates on startup (non-blocking toast)
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const mod: any = await import('@tauri-apps/plugin-updater');
+        const res = await mod.check();
+        if (res && res.available) {
+          setUpdateAvailable({ version: (res as any).version || undefined });
+          const tid = show({
+            title: `Update available${(res as any).version ? ' ' + (res as any).version : ''}`,
+            message: 'Restart to install the latest version.',
+            kind: 'info',
+            actions: [
+              { label: 'Restart & Update', onClick: async () => {
+                try {
+                  // v2 exposes install(); fallback to downloadAndInstall if present
+                  if (mod.install) await mod.install();
+                  else if (res.downloadAndInstall) await res.downloadAndInstall();
+                } catch (e) {
+                  show({ title: 'Update failed', message: String(e), kind: 'error' });
+                }
+              } }
+            ]
+          });
+          setTimeout(() => dismiss(tid), 15000);
+        }
+      } catch {}
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function checkForUpdatesInteractive() {
+    if (updateChecking) return;
+    setUpdateChecking(true);
+    try {
+      const mod: any = await import('@tauri-apps/plugin-updater');
+      const res = await mod.check();
+      if (res && res.available) {
+        setUpdateAvailable({ version: (res as any).version || undefined });
+        const tid = show({
+          title: `Update available${(res as any).version ? ' ' + (res as any).version : ''}`,
+          message: 'Click to restart and install.',
+          kind: 'info',
+          actions: [
+            { label: 'Restart & Update', onClick: async () => {
+              try { if (mod.install) await mod.install(); else if (res.downloadAndInstall) await res.downloadAndInstall(); }
+              catch (e) { show({ title: 'Update failed', message: String(e), kind: 'error' }); }
+            } }
+          ]
+        });
+        setTimeout(() => dismiss(tid), 15000);
+      } else {
+        const tid = show({ title: 'Up to date', message: 'No updates available.', kind: 'success' });
+        setTimeout(() => dismiss(tid), 2500);
+      }
+    } catch (e) {
+      const tid = show({ title: 'Update check failed', message: String(e), kind: 'error' });
+      setTimeout(() => dismiss(tid), 3000);
+    } finally {
+      setUpdateChecking(false);
+    }
   }
   
   // Terminal event detectors for each pane
@@ -1368,6 +1434,10 @@ export default function App() {
               }}
             />
             <span>Helper: {active.status?.helperVersion ? active.status?.helperVersion : '—'}</span>
+            <span style={{ width: 1, height: 14, background: '#444', display: 'inline-block' }} />
+            <button onClick={checkForUpdatesInteractive} disabled={updateChecking} title="Check for updates" style={{ fontSize: 12 }}>
+              {updateChecking ? 'Checking…' : (updateAvailable ? 'Update Ready' : 'Check Updates')}
+            </button>
           </div>
           <ComposeDrawer
             open={composeOpen}
