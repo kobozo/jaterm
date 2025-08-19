@@ -1,5 +1,5 @@
 /// Helper version - update this when making changes to the helper
-pub const HELPER_VERSION: &str = "0.2.0";
+pub const HELPER_VERSION: &str = "0.2.1";
 
 /// Helper binary name
 pub const HELPER_NAME: &str = "jaterm-agent";
