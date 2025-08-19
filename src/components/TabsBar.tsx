@@ -50,7 +50,7 @@ export default function TabsBar({ tabs, activeId, onSelect, onClose, onAdd }: Pr
             />
           )}
           {t.icon && (
-            <span style={{ opacity: 0.9 }} aria-hidden>
+            <span className="nf-icon" style={{ opacity: 0.9 }} aria-hidden>
               {t.icon}
             </span>
           )}
