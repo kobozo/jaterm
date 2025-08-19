@@ -154,28 +154,28 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     const profile = sshProfiles.find((x) => x.id === n.ref.id);
     if (!profile) return '🔗';
     
-    // Map OS to Nerd Font icons
+    // Map OS to Nerd Font icons using Unicode code points
     const os = profile.os || 'auto-detect';
     switch (os) {
       case 'linux':
-      case 'linux-ubuntu': return ''; // Ubuntu logo
-      case 'linux-debian': return ''; // Debian logo
-      case 'linux-fedora': return ''; // Fedora logo
+      case 'linux-ubuntu': return '\uf31b'; // Ubuntu logo
+      case 'linux-debian': return '\uf306'; // Debian logo
+      case 'linux-fedora': return '\uf30a'; // Fedora logo
       case 'linux-rhel':
-      case 'linux-redhat': return ''; // Red Hat logo
-      case 'linux-centos': return ''; // CentOS logo
-      case 'linux-arch': return ''; // Arch Linux logo
-      case 'linux-alpine': return ''; // Alpine logo
+      case 'linux-redhat': return '\uf316'; // Red Hat logo
+      case 'linux-centos': return '\uf304'; // CentOS logo
+      case 'linux-arch': return '\uf303'; // Arch Linux logo
+      case 'linux-alpine': return '\uf300'; // Alpine logo
       case 'linux-opensuse':
-      case 'linux-suse': return ''; // SUSE logo
-      case 'macos': return ''; // Apple logo
-      case 'windows': return ''; // Windows logo
-      case 'freebsd': return ''; // FreeBSD logo
-      case 'auto-detect': return ''; // Generic server icon
+      case 'linux-suse': return '\uf314'; // SUSE logo
+      case 'macos': return '\uf179'; // Apple logo
+      case 'windows': return '\uf17a'; // Windows logo
+      case 'freebsd': return '\uf30c'; // FreeBSD logo
+      case 'auto-detect': return '\uf233'; // Generic server icon
       default: 
         // Generic Linux for any linux-* not specifically handled
-        if (os.startsWith('linux-')) return ''; // Generic Linux logo
-        return ''; // Generic server icon
+        if (os.startsWith('linux-')) return '\uf17c'; // Generic Linux logo
+        return '\uf233'; // Generic server icon
     }
   }
   function openProfile(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
@@ -348,7 +348,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                             onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'profile', node: n }); }}
                             style={{ border: '1px solid #333', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'default' }}
                           >
-                            <div className="nf-icon" style={{ fontSize: 28 }}>{iconFor(n)}</div>
+                            <div className="nf-icon" style={{ fontSize: 28, fontFamily: "'Hack Nerd Font', 'FiraCode Nerd Font', 'JetBrainsMono Nerd Font', 'CaskaydiaCove Nerd Font', 'CaskaydiaCove NF', 'Hack NF', 'FiraCode NF', monospace" }}>{iconFor(n)}</div>
                             <div style={{ fontSize: 12, textAlign: 'center', wordBreak: 'break-word' }}>{profileLabel(n)}</div>
                           </div>
                         )
