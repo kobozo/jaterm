@@ -297,7 +297,8 @@ export default function App() {
         if (t.id === tabId) {
           const newStatus = { ...t.status, cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true };
           // Keep current view as is when in a git repo
-          return { ...t, status: newStatus };
+          // Reset sftpCwd to null so SFTP follows the terminal's CWD
+          return { ...t, status: newStatus, sftpCwd: null };
         }
         return t;
       }));
@@ -307,7 +308,8 @@ export default function App() {
           const newStatus = { ...t.status, fullPath: abs, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 };
           // If we were viewing git tools but we're no longer in a git repo, switch to terminal view
           const newView = t.view === 'git' ? 'terminal' : t.view;
-          return { ...t, status: newStatus, view: newView };
+          // Reset sftpCwd to null so SFTP follows the terminal's CWD
+          return { ...t, status: newStatus, view: newView, sftpCwd: null };
         }
         return t;
       }));
