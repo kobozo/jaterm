@@ -251,7 +251,27 @@ export default function App() {
     }
   }
 
+  // Track pending CWD updates to prevent race conditions
+  const pendingCwdUpdates = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
+  
   async function updateTabCwd(tabId: string, dir: string) {
+    // Cancel any pending update for this tab
+    const pending = pendingCwdUpdates.current.get(tabId);
+    if (pending) {
+      clearTimeout(pending);
+      pendingCwdUpdates.current.delete(tabId);
+    }
+    
+    // Debounce the update to avoid race conditions
+    const timeoutId = setTimeout(async () => {
+      pendingCwdUpdates.current.delete(tabId);
+      await doUpdateTabCwd(tabId, dir);
+    }, 100); // 100ms debounce
+    
+    pendingCwdUpdates.current.set(tabId, timeoutId);
+  }
+  
+  async function doUpdateTabCwd(tabId: string, dir: string) {
     // Resolve to absolute for local sessions only; SSH paths are remote and should not be resolved locally
     let abs = dir;
     const tcur = tabs.find((x) => x.id === tabId);
@@ -291,7 +311,7 @@ export default function App() {
     try {
       const t = tabs.find((x) => x.id === tabId);
       const helperPath = (t?.status?.helperPath as string | null) ?? (sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : null);
-      console.info('[git] updateTabCwd git-status cwd=', abs, { tabId, kind: t?.kind, helperPath, sessionId: (t as any)?.sshSessionId });
+      console.info('[git] doUpdateTabCwd git-status cwd=', abs, { tabId, kind: t?.kind, helperPath, sessionId: (t as any)?.sshSessionId });
       const st = await gitStatusViaHelper({ kind: t?.kind === 'ssh' ? 'ssh' : 'local', sessionId: (t as any)?.sshSessionId, helperPath }, abs);
       setTabs((prev) => prev.map((t) => {
         if (t.id === tabId) {
