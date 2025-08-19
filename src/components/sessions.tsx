@@ -196,7 +196,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   }
   // Tree renderer removed in favor of an explorer view
   useEffect(() => {
-    (async () => {
+    const loadData = async () => {
       setRecentSessions(await getRecentSessions());
       setRecentSsh(await getRecentSshSessions());
       setLocalProfiles(await getLocalProfiles());
@@ -204,7 +204,16 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       const root = await ensureProfilesTree();
       setTree(root);
       setCurrentFolderId(root.id);
-    })();
+    };
+    
+    loadData();
+    
+    // Refresh profiles periodically to catch external updates (e.g., OS detection)
+    const interval = setInterval(async () => {
+      setSshProfiles(await getSshProfiles());
+    }, 5000); // Check every 5 seconds
+    
+    return () => clearInterval(interval);
   }, []);
 
   const handleHome = async () => {
