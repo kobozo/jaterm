@@ -12,12 +12,12 @@ build-helper:
 	cd src-helper && cargo build --release
 	@echo "Helper binary built at src-helper/target/release/jaterm-agent"
 
-# Build helper binary for Linux x86_64
+# Build helper binary for Linux x86_64 (musl for static linking)
 .PHONY: build-helper-linux
 build-helper-linux:
-	@echo "Building helper binary for Linux x86_64..."
-	cd src-helper && cargo build --release --target x86_64-unknown-linux-gnu
-	@echo "Linux helper binary built at src-helper/target/x86_64-unknown-linux-gnu/release/jaterm-agent"
+	@echo "Building helper binary for Linux x86_64 (musl)..."
+	cd src-helper && cargo zigbuild --release --target x86_64-unknown-linux-musl
+	@echo "Linux helper binary built at src-helper/target/x86_64-unknown-linux-musl/release/jaterm-agent"
 
 # Build helper for all platforms
 .PHONY: build-helper-all

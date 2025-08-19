@@ -147,12 +147,12 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     }
   }
   function iconFor(n: ProfilesTreeNode): string { 
-    if (n.type === 'folder') return '📁';
-    if (n.ref.kind === 'local') return '💻';
+    if (n.type === 'folder') return '\uf07b'; // Nerd Font folder icon
+    if (n.ref.kind === 'local') return '\uf108'; // Nerd Font terminal/computer icon
     
     // For SSH profiles, use OS-specific icons
     const profile = sshProfiles.find((x) => x.id === n.ref.id);
-    if (!profile) return '🔗';
+    if (!profile) return '\uf0c1'; // Nerd Font link/chain icon for SSH
     
     // Map OS to Nerd Font icons using Unicode code points
     const os = profile.os || 'auto-detect';
@@ -338,7 +338,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                             onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'folder', node: n }); }}
                             style={{ border: '1px solid #333', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'default' }}
                           >
-                            <div style={{ fontSize: 28 }}>📁</div>
+                            <div className="nf-icon" style={{ fontSize: 28 }}>{'\uf07b'}</div>
                             <div style={{ fontSize: 12, textAlign: 'center', wordBreak: 'break-word' }}>{n.name}</div>
                           </div>
                         ) : (

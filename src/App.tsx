@@ -1074,7 +1074,7 @@ export default function App() {
           const isSessions = t.id === sessionsId;
           const nonSshBaseTitle = t.title ?? (isSessions ? 'Sessions' : (full ?? ''));
           const title = t.kind === 'ssh' ? (t.title ?? 'SSH') : (nonSshBaseTitle || '');
-          const icon = isSessions ? '🗂' : (t.kind === 'ssh' ? '🔗' : '⌘');
+          const icon = isSessions ? '\uf07c' : (t.kind === 'ssh' ? '\uf0c1' : '\uf120'); // folder-open, link, terminal icons
           return { id: t.id, title, icon, isWelcome: isSessions, indicator: t.indicator };
         })}
         activeId={activeTab}

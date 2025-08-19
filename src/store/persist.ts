@@ -97,8 +97,22 @@ export type SshProfileStored = {
 };
 
 // Profiles tree: folders and profile references
+// Folder-level settings that profiles can inherit
+export type FolderSettings = {
+  shell?: ShellSettings;
+  terminal?: TerminalSettings;
+  ssh?: {
+    // Keep host/user/auth optional defaults for future use; today we primarily use advanced
+    host?: string;
+    port?: number;
+    user?: string;
+    auth?: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean };
+    advanced?: SshAdvancedSettings;
+  };
+};
+
 export type ProfilesTreeNode =
-  | { id: string; type: 'folder'; name: string; children: ProfilesTreeNode[] }
+  | { id: string; type: 'folder'; name: string; children: ProfilesTreeNode[]; settings?: FolderSettings }
   | { id: string; type: 'profile'; ref: { kind: 'local' | 'ssh'; id: string } };
 
 export async function getProfilesTree(): Promise<ProfilesTreeNode | null> {
@@ -171,4 +185,187 @@ export async function deleteSshProfile(id: string): Promise<void> {
   const s = await loadAppState();
   const list = s.profiles?.ssh ?? [];
   await saveAppState({ profiles: { ...(s.profiles ?? {}), ssh: list.filter((x) => x.id !== id) } });
+}
+
+// -------------------------------
+// Inheritance resolver
+// -------------------------------
+
+export type ResolvedSettings = {
+  shell?: ShellSettings;
+  terminal?: TerminalSettings;
+  advanced?: SshAdvancedSettings;
+};
+
+function mergeEnv(base?: Record<string, string>, overlay?: Record<string, string>): Record<string, string> | undefined {
+  if (!base && !overlay) return undefined;
+  return { ...(base || {}), ...(overlay || {}) };
+}
+
+function concatUniqueForwards(parent?: SshAdvancedSettings['defaultForwards'], child?: SshAdvancedSettings['defaultForwards']): SshAdvancedSettings['defaultForwards'] | undefined {
+  const list = [...(parent || []), ...(child || [])];
+  if (!list.length) return undefined;
+  const seen = new Set<string>();
+  const uniq: NonNullable<SshAdvancedSettings['defaultForwards']> = [];
+  for (const f of list) {
+    const key = [f.type, f.srcHost, f.srcPort, f.dstHost, f.dstPort].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniq.push(f);
+  }
+  return uniq;
+}
+
+function nearest<T>(vals: (T | undefined)[]): T | undefined {
+  for (let i = vals.length - 1; i >= 0; i--) {
+    const v = vals[i];
+    if (typeof v !== 'undefined') return v;
+  }
+  return undefined;
+}
+
+export function findPathToNode(root: ProfilesTreeNode | null, targetId: string): ProfilesTreeNode[] {
+  if (!root) return [];
+  const path: ProfilesTreeNode[] = [];
+  function walk(n: ProfilesTreeNode, acc: ProfilesTreeNode[]): boolean {
+    if (n.id === targetId) { path.push(...acc, n); return true; }
+    if (n.type === 'folder') {
+      for (const c of n.children) {
+        if (walk(c, [...acc, n])) return true;
+      }
+    }
+    return false;
+  }
+  walk(root, []);
+  return path;
+}
+
+export function resolveEffectiveSettings(args: {
+  root: ProfilesTreeNode | null;
+  nodeId: string; // profile node id in tree
+  profileKind: 'local' | 'ssh';
+  profileSettings?: { shell?: ShellSettings; terminal?: TerminalSettings; advanced?: SshAdvancedSettings };
+}): ResolvedSettings {
+  const { root, nodeId, profileKind, profileSettings } = args;
+  const path = findPathToNode(root, nodeId);
+  // Collect folder settings along the path (exclude the profile node itself)
+  const folders = path.filter((n) => n.type === 'folder') as Array<Extract<ProfilesTreeNode, { type: 'folder' }>>;
+
+  // Accumulate shell
+  let shellEnv: Record<string, string> | undefined = undefined;
+  let shellInit: string[] | undefined = undefined;
+  const shellOverrideChain: (string | undefined)[] = [];
+  for (const f of folders) {
+    const s = f.settings?.shell;
+    if (s?.env) shellEnv = mergeEnv(shellEnv, s.env);
+    if (s?.initCommands) shellInit = [...(shellInit || []), ...s.initCommands];
+    shellOverrideChain.push(s?.shell);
+  }
+  // Apply profile shell settings
+  if (profileSettings?.shell?.env) shellEnv = mergeEnv(shellEnv, profileSettings.shell.env);
+  if (profileSettings?.shell?.initCommands) shellInit = [...(shellInit || []), ...profileSettings.shell.initCommands];
+  shellOverrideChain.push(profileSettings?.shell?.shell);
+
+  const shell: ShellSettings | undefined = (shellEnv || shellInit || nearest(shellOverrideChain))
+    ? {
+        env: shellEnv,
+        initCommands: shellInit,
+        shell: nearest(shellOverrideChain),
+      }
+    : undefined;
+
+  // Accumulate terminal: nearest defined wins per field
+  const termFontSizeChain: (number | undefined)[] = [];
+  const termFontFamilyChain: (string | undefined)[] = [];
+  const termLineHeightChain: (number | undefined)[] = [];
+  const termCursorStyleChain: (NonNullable<TerminalSettings['cursorStyle']> | undefined)[] = [];
+  const termCursorBlinkChain: (boolean | undefined)[] = [];
+  const termThemeChain: (string | undefined)[] = [];
+  const termScrollbackChain: (number | undefined)[] = [];
+  const termBellStyleChain: (NonNullable<TerminalSettings['bellStyle']> | undefined)[] = [];
+  for (const f of folders) {
+    const t = f.settings?.terminal;
+    if (!t) continue;
+    termFontSizeChain.push(t.fontSize);
+    termFontFamilyChain.push(t.fontFamily);
+    termLineHeightChain.push(t.lineHeight);
+    termCursorStyleChain.push(t.cursorStyle);
+    termCursorBlinkChain.push(t.cursorBlink);
+    termThemeChain.push(t.theme);
+    termScrollbackChain.push(t.scrollback);
+    termBellStyleChain.push(t.bellStyle);
+  }
+  if (profileSettings?.terminal) {
+    const t = profileSettings.terminal;
+    termFontSizeChain.push(t.fontSize);
+    termFontFamilyChain.push(t.fontFamily);
+    termLineHeightChain.push(t.lineHeight);
+    termCursorStyleChain.push(t.cursorStyle);
+    termCursorBlinkChain.push(t.cursorBlink);
+    termThemeChain.push(t.theme);
+    termScrollbackChain.push(t.scrollback);
+    termBellStyleChain.push(t.bellStyle);
+  }
+  const terminal: TerminalSettings | undefined = (termFontSizeChain.length || termFontFamilyChain.length || termThemeChain.length)
+    ? {
+        fontSize: nearest(termFontSizeChain),
+        fontFamily: nearest(termFontFamilyChain),
+        lineHeight: nearest(termLineHeightChain),
+        cursorStyle: nearest(termCursorStyleChain),
+        cursorBlink: nearest(termCursorBlinkChain),
+        theme: nearest(termThemeChain),
+        scrollback: nearest(termScrollbackChain),
+        bellStyle: nearest(termBellStyleChain),
+      }
+    : undefined;
+
+  // Accumulate SSH advanced (only for ssh profiles)
+  let advanced: SshAdvancedSettings | undefined = undefined;
+  if (profileKind === 'ssh') {
+    let keepaliveChain: (number | undefined)[] = [];
+    let compressionChain: (boolean | undefined)[] = [];
+    let x11Chain: (boolean | undefined)[] = [];
+    let agentChain: (boolean | undefined)[] = [];
+    let socksChain: ({ port: number } | undefined)[] = [];
+    let autoReconnectChain: (boolean | undefined)[] = [];
+    let reconnectDelayChain: (number | undefined)[] = [];
+    let forwards: SshAdvancedSettings['defaultForwards'] | undefined = undefined;
+    for (const f of folders) {
+      const a = f.settings?.ssh?.advanced;
+      if (!a) continue;
+      keepaliveChain.push(a.keepaliveInterval);
+      compressionChain.push(a.compression);
+      x11Chain.push(a.x11Forwarding);
+      agentChain.push(a.agentForwarding);
+      socksChain.push(a.socksProxy);
+      autoReconnectChain.push(a.autoReconnect);
+      reconnectDelayChain.push(a.reconnectDelay);
+      forwards = concatUniqueForwards(forwards, a.defaultForwards);
+    }
+    if (profileSettings?.advanced) {
+      const a = profileSettings.advanced;
+      keepaliveChain.push(a.keepaliveInterval);
+      compressionChain.push(a.compression);
+      x11Chain.push(a.x11Forwarding);
+      agentChain.push(a.agentForwarding);
+      socksChain.push(a.socksProxy);
+      autoReconnectChain.push(a.autoReconnect);
+      reconnectDelayChain.push(a.reconnectDelay);
+      forwards = concatUniqueForwards(forwards, a.defaultForwards);
+    }
+    const maybe: SshAdvancedSettings = {
+      keepaliveInterval: nearest(keepaliveChain),
+      compression: nearest(compressionChain),
+      x11Forwarding: nearest(x11Chain),
+      agentForwarding: nearest(agentChain),
+      socksProxy: nearest(socksChain),
+      autoReconnect: nearest(autoReconnectChain),
+      reconnectDelay: nearest(reconnectDelayChain),
+      defaultForwards: forwards,
+    };
+    // Strip empty object
+    advanced = Object.values(maybe).some((v) => typeof v !== 'undefined') ? maybe : undefined;
+  }
+
+  return { shell, terminal, advanced };
 }

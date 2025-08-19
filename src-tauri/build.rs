@@ -92,7 +92,7 @@ fn build_helper_binary() {
       if output.status.success() {
         println!("cargo:warning=Building Linux helper binary with cargo-zigbuild...");
         let output = Command::new("cargo")
-          .args(&["zigbuild", "--release", "--target", "x86_64-unknown-linux-gnu"])
+          .args(&["zigbuild", "--release", "--target", "x86_64-unknown-linux-musl"])
           .current_dir("../src-helper")
           .output()
           .expect("Failed to build Linux helper binary");
@@ -136,8 +136,12 @@ fn generate_helper_module() {
   let helper_binary = fs::read(helper_binary_path)
     .expect("Failed to read helper binary - run 'cargo build --release' in src-helper first");
   
-  // Try to read Linux binary if it exists
-  let linux_binary_path = Path::new("../src-helper/target/x86_64-unknown-linux-gnu/release/jaterm-agent");
+  // Try to read Linux binary if it exists (try musl first, then gnu)
+  let linux_binary_path = if Path::new("../src-helper/target/x86_64-unknown-linux-musl/release/jaterm-agent").exists() {
+    Path::new("../src-helper/target/x86_64-unknown-linux-musl/release/jaterm-agent")
+  } else {
+    Path::new("../src-helper/target/x86_64-unknown-linux-gnu/release/jaterm-agent")
+  };
   let linux_binary = if linux_binary_path.exists() {
     fs::read(linux_binary_path).ok()
   } else {
