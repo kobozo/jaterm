@@ -486,7 +486,7 @@ export default function App() {
       const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: opts.auth.password, key_path: opts.auth.keyPath, passphrase: opts.auth.passphrase, agent: opts.auth.agent } as any, timeout_ms: 15000 });
       // Ensure helper in background (non-blocking) and record status in tab
       try {
-        (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then((res: any) => {
+        (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then(async (res: any) => {
           setTabs((prev) => {
             // If auto-detect or no OS specified, use detected OS from helper
             const detectedOs = (!opts.os || opts.os === 'auto-detect') ? res?.os : opts.os;
@@ -505,6 +505,22 @@ export default function App() {
             }
             return updated;
           });
+          
+          // Save detected OS back to profile if it was auto-detected
+          if (opts.profileId && (!opts.os || opts.os === 'auto-detect') && res?.os) {
+            try {
+              const { getSshProfiles, saveSshProfile } = await import('@/store/persist');
+              const profiles = await getSshProfiles();
+              const profile = profiles.find(p => p.id === opts.profileId);
+              if (profile) {
+                profile.os = res.os;
+                await saveSshProfile(profile);
+                console.info('[SSH] Saved detected OS to profile:', opts.profileId, res.os);
+              }
+            } catch (e) {
+              console.error('[SSH] Failed to save detected OS to profile:', e);
+            }
+          }
         });
       } catch {}
       const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
@@ -1285,6 +1301,12 @@ export default function App() {
         
         {/* Helper status aligned right with colored indicator */}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+          {active.status.os && (
+            <>
+              <span style={{ color: '#8fe18f' }}>OS: {active.status.os}</span>
+              <span style={{ width: 1, height: 14, background: '#444', display: 'inline-block' }} />
+            </>
+          )}
           <span
             title={active.status.helperOk ? 'Helper OK' : 'Helper not ready'}
             style={{
