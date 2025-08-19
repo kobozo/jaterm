@@ -6,7 +6,7 @@ import RemoteTerminalPane from '@/components/RemoteTerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
 import GitTools from '@/components/GitTools';
 import PortsPanel from '@/components/PortsPanel';
-import Welcome from '@/components/Welcome';
+import Sessions from '@/components/sessions';
 import type { LayoutShape } from '@/store/sessions';
 import ComposeDrawer from '@/components/ComposeDrawer';
 import TabsBar from '@/components/TabsBar';
@@ -44,8 +44,9 @@ export default function App() {
     indicator?: 'activity' | 'bell';
     terminalSettings?: { theme?: string; fontSize?: number; fontFamily?: string };
   };
-  const [tabs, setTabs] = useState<Tab[]>([{ id: crypto.randomUUID(), cwd: null, panes: [], activePane: null, status: {} }]);
-  const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
+  const [sessionsId] = useState<string>(() => crypto.randomUUID());
+  const [tabs, setTabs] = useState<Tab[]>([{ id: sessionsId, cwd: null, panes: [], activePane: null, status: {} }]);
+  const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
   const { show, update, dismiss } = useToasts();
@@ -321,12 +322,12 @@ export default function App() {
   }
 
   function newTab() {
-    const id = crypto.randomUUID();
-    setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
-    setActiveTab(id);
+    // Focus the fixed Sessions tab instead of creating a blank tab
+    setActiveTab(sessionsId);
   }
 
   async function closeTab(id: string) {
+    if (id === sessionsId) return; // fixed Sessions tab cannot be closed
     // record session for the tab if it had a cwd
     const toRecord = tabs.find((t) => t.id === id);
     if (toRecord && toRecord.kind !== 'ssh' && (toRecord.status.cwd || toRecord.cwd)) {
@@ -347,12 +348,11 @@ export default function App() {
       }
     }
     setTabs((prev) => {
-      if (prev.length <= 1) {
-        // last tab being closed: quit the app
-        appQuit();
-        return prev; // will terminate shortly
-      }
       const next = prev.filter((t) => t.id !== id);
+      if (next.length === 0) {
+        appQuit();
+        return prev;
+      }
       if (activeTab === id) {
         const fallback = next[0];
         if (fallback) setActiveTab(fallback.id);
@@ -1009,8 +1009,11 @@ export default function App() {
       <TabsBar
         tabs={tabs.map((t) => {
           const full = t.status.fullPath ?? t.cwd;
-          const title = t.kind === 'ssh' ? (t.title ?? 'SSH') : (t.title ?? (full ?? 'Welcome'));
-          return { id: t.id, title, isWelcome: !full && t.kind !== 'ssh', indicator: t.indicator };
+          const isSessions = t.id === sessionsId;
+          const nonSshBaseTitle = t.title ?? (isSessions ? 'Sessions' : (full ?? ''));
+          const title = t.kind === 'ssh' ? (t.title ?? 'SSH') : (nonSshBaseTitle || '');
+          const icon = isSessions ? '🗂' : (t.kind === 'ssh' ? '🔗' : '⌘');
+          return { id: t.id, title, icon, isWelcome: isSessions, indicator: t.indicator };
         })}
         activeId={activeTab}
         onSelect={(id) => {
@@ -1239,7 +1242,26 @@ export default function App() {
                     </SplitView>
                   )
                 ) : (
-                  <Welcome onOpenFolder={(p) => openFolderFor(t.id, p)} onOpenSession={(s) => openSessionFor(t.id, s)} onOpenSsh={(o) => openSshFor(t.id, o)} />
+                  <Sessions
+                    onOpenFolder={(p) => {
+                      const id = crypto.randomUUID();
+                      setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
+                      setActiveTab(id);
+                      openFolderFor(id, p);
+                    }}
+                    onOpenSession={(s) => {
+                      const id = crypto.randomUUID();
+                      setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
+                      setActiveTab(id);
+                      openSessionFor(id, s);
+                    }}
+                    onOpenSsh={(o) => {
+                      const id = crypto.randomUUID();
+                      setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
+                      setActiveTab(id);
+                      openSshFor(id, o);
+                    }}
+                  />
                 )}
               </div>
             </div>

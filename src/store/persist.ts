@@ -13,6 +13,7 @@ export type AppPersistState = {
     local?: { id: string; name: string; path: string }[];
     ssh?: { id: string; name: string; host: string; port?: number; user: string; auth?: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; path?: string }[];
   };
+  profilesTree?: ProfilesTreeNode;
 };
 
 export async function loadAppState(): Promise<AppPersistState> {
@@ -93,6 +94,50 @@ export type SshProfileStored = {
   shell?: ShellSettings;
   advanced?: SshAdvancedSettings;
 };
+
+// Profiles tree: folders and profile references
+export type ProfilesTreeNode =
+  | { id: string; type: 'folder'; name: string; children: ProfilesTreeNode[] }
+  | { id: string; type: 'profile'; ref: { kind: 'local' | 'ssh'; id: string } };
+
+export async function getProfilesTree(): Promise<ProfilesTreeNode | null> {
+  const s = await loadAppState();
+  return (s.profilesTree as any) || null;
+}
+
+export async function saveProfilesTree(root: ProfilesTreeNode): Promise<void> {
+  await saveAppState({ profilesTree: root } as any);
+}
+
+// Ensure a tree exists; if missing, create one referencing existing profiles
+export async function ensureProfilesTree(): Promise<ProfilesTreeNode> {
+  const existing = await getProfilesTree();
+  if (existing) {
+    // If an early default tree exists with fixed Local/SSH, flatten into root for full user control
+    if (
+      existing.type === 'folder' &&
+      Array.isArray((existing as any).children) &&
+      (existing as any).children.length &&
+      (existing as any).children.every((c: any) => c.type === 'folder' && (c.id === 'folder-local' || c.id === 'folder-ssh'))
+    ) {
+      const flattened = (existing as any).children.flatMap((c: any) => (c.children || []));
+      const root: ProfilesTreeNode = { id: existing.id || 'root', type: 'folder', name: existing.name || 'Profiles', children: flattened };
+      await saveProfilesTree(root);
+      return root;
+    }
+    return existing;
+  }
+  const s = await loadAppState();
+  const local = (s.profiles?.local ?? []) as { id: string; name: string; path: string }[];
+  const ssh = (s.profiles?.ssh ?? []) as { id: string; name: string; host: string; port?: number; user: string; auth?: any; path?: string }[];
+  const children: ProfilesTreeNode[] = [
+    ...local.map((p) => ({ id: `local-${p.id}`, type: 'profile', ref: { kind: 'local', id: p.id } } as ProfilesTreeNode)),
+    ...ssh.map((p) => ({ id: `ssh-${p.id}`, type: 'profile', ref: { kind: 'ssh', id: p.id } } as ProfilesTreeNode)),
+  ];
+  const root: ProfilesTreeNode = { id: 'root', type: 'folder', name: 'Profiles', children };
+  await saveProfilesTree(root);
+  return root;
+}
 
 export async function getLocalProfiles(): Promise<LocalProfile[]> {
   const s = await loadAppState();

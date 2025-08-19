@@ -1,6 +1,6 @@
 import React from 'react';
 
-type Tab = { id: string; title: string; isWelcome?: boolean; indicator?: 'activity' | 'bell' };
+type Tab = { id: string; title: string; icon?: string; isWelcome?: boolean; indicator?: 'activity' | 'bell' };
 
 type Props = {
   tabs: Tab[];
@@ -49,19 +49,26 @@ export default function TabsBar({ tabs, activeId, onSelect, onClose, onAdd }: Pr
               title={t.indicator === 'bell' ? 'Attention (bell)' : 'Activity'}
             />
           )}
+          {t.icon && (
+            <span style={{ opacity: 0.9 }} aria-hidden>
+              {t.icon}
+            </span>
+          )}
           <span style={{ maxWidth: 180, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
             {t.title}
           </span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose(t.id);
-            }}
-            style={{ fontSize: 12 }}
-            title="Close tab"
-          >
-            ×
-          </button>
+          {!t.isWelcome && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(t.id);
+              }}
+              style={{ fontSize: 12 }}
+              title="Close tab"
+            >
+              ×
+            </button>
+          )}
         </div>
       ))}
       <button onClick={onAdd} title="New tab" style={{ marginLeft: 6 }}>＋</button>

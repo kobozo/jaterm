@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
-import { addRecent, getRecents, removeRecent, clearRecents } from '@/store/recents';
+import { addRecent } from '@/store/recents';
 import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
-import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, type LocalProfile, type SshProfileStored } from '@/store/persist';
+import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, ensureProfilesTree, saveProfilesTree, type LocalProfile, type SshProfileStored, type ProfilesTreeNode } from '@/store/persist';
 import { getThemeList, themes } from '@/config/themes';
 import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec } from '@/types/ipc';
 import { ensureHelper } from '@/services/helper';
 import { useToasts } from '@/store/toasts';
 
-import type { RecentSession } from '@/store/sessions';
+import type { RecentSession, RecentSshSession } from '@/store/sessions';
 
 type Props = {
   onOpenFolder: (path: string) => void;
@@ -19,9 +19,12 @@ type Props = {
 
 export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Props) {
   const { show, update, dismiss } = useToasts();
-  const [recents, setRecents] = useState<{ path: string; lastOpenedAt: number }[]>([]);
   const [recentSessions, setRecentSessions] = useState<{ cwd: string; closedAt: number; panes?: number }[]>([]);
-  const [recentSsh, setRecentSsh] = useState<{ profileId: string; path: string; closedAt: number }[]>([]);
+  const [recentSsh, setRecentSsh] = useState<RecentSshSession[]>([]);
+  const [tree, setTree] = useState<ProfilesTreeNode | null>(null);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<null | { x: number; y: number; type: 'folder' | 'profile'; node: any }>(null);
+  const [folderDialog, setFolderDialog] = useState<null | { parentId: string; name: string }>(null);
   const [sshOpen, setSshOpen] = useState(false);
   const [sshForm, setSshForm] = useState<{ host: string; port?: number; user: string; authType: 'password' | 'key' | 'agent'; password?: string; keyPath?: string; passphrase?: string; cwd?: string }>({ host: '', user: '', authType: 'agent' });
   const [localProfiles, setLocalProfiles] = useState<LocalProfile[]>([]);
@@ -52,13 +55,153 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   }>({ name: '', host: '', user: '', authType: 'agent' });
   const [activeTab, setActiveTab] = useState<'basic' | 'environment' | 'forwarding' | 'terminal'>('basic');
   const [browse, setBrowse] = useState<{ sessionId: string; cwd: string; entries: { name: string; path: string; is_dir: boolean }[] } | null>(null);
+  
+  function folderList(n: ProfilesTreeNode | null): { id: string; name: string; path: string }[] {
+    const acc: { id: string; name: string; path: string }[] = [];
+    function walk(node: ProfilesTreeNode, prefix: string, depth: number) {
+      if (node.type === 'folder') {
+        const path = prefix ? `${prefix}/${node.name}` : `/${node.name}`;
+        if (depth > 0) acc.push({ id: node.id, name: node.name, path });
+        node.children.forEach((c) => walk(c, path, depth + 1));
+      }
+    }
+    if (n) walk(n, '', 0);
+    return acc;
+  }
+
+  function updateTree(mut: (n: ProfilesTreeNode) => void) {
+    if (!tree) return;
+    const clone = JSON.parse(JSON.stringify(tree)) as ProfilesTreeNode;
+    mut(clone);
+    setTree(clone);
+    saveProfilesTree(clone);
+  }
+
+  function findFolder(node: ProfilesTreeNode, id: string): (ProfilesTreeNode & { type: 'folder' }) | null {
+    if (node.type === 'folder') {
+      if (node.id === id) return node as any;
+      for (const c of node.children) {
+        const found = findFolder(c, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  function findParentOf(node: ProfilesTreeNode, childId: string): (ProfilesTreeNode & { type: 'folder' }) | null {
+    if (node.type !== 'folder') return null;
+    if (node.children.some((c) => c.id === childId)) return node as any;
+    for (const c of node.children) {
+      const p = findParentOf(c, childId);
+      if (p) return p;
+    }
+    return null;
+  }
+
+  // Breadcrumb trail for explorer navigation
+  function breadcrumbs(root: ProfilesTreeNode, id: string): { id: string; name: string }[] {
+    const path: { id: string; name: string }[] = [];
+    function walk(node: ProfilesTreeNode, trail: { id: string; name: string }[]): boolean {
+      if (node.type === 'folder') {
+        const here = [...trail, { id: node.id, name: node.name }];
+        if (node.id === id) { path.push(...here); return true; }
+        for (const c of node.children) {
+          if (walk(c, here)) return true;
+        }
+      }
+      return false;
+    }
+    walk(root, []);
+    return path;
+  }
+
+  function removeNode(node: ProfilesTreeNode, id: string): boolean {
+    if (node.type !== 'folder') return false;
+    const idx = node.children.findIndex((c) => c.id === id);
+    if (idx >= 0) { node.children.splice(idx, 1); return true; }
+    for (const c of node.children) {
+      if (removeNode(c, id)) return true;
+    }
+    return false;
+  }
+
+  function hasProfileNode(node: ProfilesTreeNode, kind: 'local' | 'ssh', id: string): boolean {
+    if (node.type === 'profile') return node.ref.kind === kind && node.ref.id === id;
+    return node.children.some((c) => hasProfileNode(c, kind, id));
+  }
+  function addProfileNode(root: ProfilesTreeNode, kind: 'local' | 'ssh', id: string) {
+    if (root.type !== 'folder') return;
+    // Default: add to root (user can organize into any folder later)
+    (root as any).children.push({ id: `${kind}-${id}`, type: 'profile', ref: { kind, id } });
+  }
+
+  function profileLabel(n: Extract<ProfilesTreeNode, { type: 'profile' }>): string {
+    if (n.ref.kind === 'local') {
+      const p = localProfiles.find((x) => x.id === n.ref.id);
+      return p ? (p.name || p.path) : '(missing local profile)';
+    } else {
+      const p = sshProfiles.find((x) => x.id === n.ref.id);
+      return p ? (p.name || `${p.user}@${p.host}`) : '(missing ssh profile)';
+    }
+  }
+  function iconFor(n: ProfilesTreeNode): string { return n.type === 'folder' ? '📁' : (n.ref.kind === 'ssh' ? '🔗' : '💻'); }
+  function openProfile(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
+    if (n.ref.kind === 'local') {
+      const p = localProfiles.find((x) => x.id === n.ref.id);
+      if (p) onOpenFolder(p.path);
+    } else {
+      const p = sshProfiles.find((x) => x.id === n.ref.id);
+      if (p && onOpenSsh) onOpenSsh({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: p.path, profileId: p.id, terminal: p.terminal, shell: p.shell, advanced: p.advanced } as any);
+    }
+  }
+  function editProfile(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
+    if (n.ref.kind === 'local') {
+      const p = localProfiles.find((x) => x.id === n.ref.id);
+      if (p) { setLpForm({ id: p.id, name: p.name, path: p.path }); setLpOpen(true); }
+    } else {
+      const p = sshProfiles.find((x) => x.id === n.ref.id);
+      if (p) {
+        const authType = p.auth?.agent ? 'agent' : p.auth?.password ? 'password' : 'key';
+        setSpForm({ id: p.id, name: p.name, host: p.host, port: p.port, user: p.user, authType: authType as any, password: p.auth?.password, keyPath: p.auth?.keyPath, passphrase: p.auth?.passphrase, path: p.path, envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined, initCommands: p.shell?.initCommands, shellOverride: p.shell?.shell, defaultForwards: p.advanced?.defaultForwards, theme: p.terminal?.theme, fontSize: p.terminal?.fontSize, fontFamily: p.terminal?.fontFamily });
+        setSpOpen(true);
+      }
+    }
+  }
+  async function deleteProfileNode(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
+    if (!tree) return;
+    if (!confirm('Remove this profile from list? This also deletes the stored profile.')) return;
+    if (n.ref.kind === 'local') {
+      await deleteLocalProfile(n.ref.id);
+      setLocalProfiles(await getLocalProfiles());
+    } else {
+      await deleteSshProfile(n.ref.id);
+      setSshProfiles(await getSshProfiles());
+    }
+    updateTree((root) => { removeNode(root, n.id); });
+  }
+  function moveProfileNode(n: Extract<ProfilesTreeNode, { type: 'profile' }>) {
+    if (!tree) return;
+    const folders = folderList(tree).filter((f) => f.id !== n.id);
+    const choice = prompt('Move to folder (type exact path):\n' + folders.map((f) => f.path).join('\n'));
+    if (!choice) return;
+    const target = folders.find((f) => f.path === choice);
+    if (!target) { alert('Folder not found'); return; }
+    updateTree((root) => {
+      const fromRemoved = removeNode(root, n.id);
+      const dest = findFolder(root, target.id);
+      if (fromRemoved && dest) dest.children.push(n);
+    });
+  }
+  // Tree renderer removed in favor of an explorer view
   useEffect(() => {
     (async () => {
-      setRecents(await getRecents());
       setRecentSessions(await getRecentSessions());
       setRecentSsh(await getRecentSshSessions());
       setLocalProfiles(await getLocalProfiles());
       setSshProfiles(await getSshProfiles());
+      const root = await ensureProfilesTree();
+      setTree(root);
+      setCurrentFolderId(root.id);
     })();
   }, []);
 
@@ -88,14 +231,180 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     }
   };
 
+  const combinedRecents = React.useMemo(() => {
+    const locals = recentSessions.map((s) => ({ type: 'local' as const, key: `local:${s.cwd}:${s.closedAt}`, closedAt: s.closedAt, s }));
+    const sshs = recentSsh.map((s) => ({ type: 'ssh' as const, key: `ssh:${s.profileId || ''}:${s.path}:${s.closedAt}`, closedAt: s.closedAt, s }));
+    return [...locals, ...sshs].sort((a, b) => b.closedAt - a.closedAt);
+  }, [recentSessions, recentSsh]);
+
   return (
     <div style={{ padding: 24 }}>
-      <h1>Start New Session</h1>
-      <p>Start a local terminal in your home or a specific folder.</p>
-      <div style={{ margin: '16px 0', display: 'flex', gap: 12 }}>
-        <button onClick={handleHome}>Start in Home Folder</button>
-        <button onClick={handlePick}>Start in Specific Folder…</button>
-        <button onClick={() => setSshOpen(true)}>Open SSH Session…</button>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        {/* Left column: quick actions + profiles (60%) */}
+        <div style={{ flex: 6, minWidth: 0 }}>
+          <h1>Start New Session</h1>
+          <p>Start a local terminal in your home or a specific folder.</p>
+          <div style={{ margin: '16px 0', display: 'flex', gap: 12 }}>
+            <button onClick={handleHome}>Start in Home Folder</button>
+            <button onClick={handlePick}>Start in Specific Folder…</button>
+            <button onClick={() => setSshOpen(true)}>Open SSH Session…</button>
+          </div>
+
+          {/* Profiles tree */}
+          <div style={{ marginTop: 24 }}>
+            <h2>Profiles</h2>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 8, alignItems: 'center' }}>
+              <button onClick={() => { setLpForm({ name: '', path: '' }); setLpOpen(true); }}>New Local Profile</button>
+              <button onClick={() => { setSpForm({ name: '', host: '', user: '', authType: 'agent' }); setSpOpen(true); }}>New SSH Profile</button>
+              <span style={{ flex: 1 }} />
+              <button onClick={() => {
+                if (!tree || !currentFolderId) return;
+                setFolderDialog({ parentId: currentFolderId, name: '' });
+              }}>+ Folder</button>
+            </div>
+            <div style={{ border: '1px solid #333', borderRadius: 6, padding: 12 }}>
+              {tree && currentFolderId ? (
+                <>
+                  {/* Breadcrumbs */}
+                  <div style={{ marginBottom: 8, fontSize: 13, color: '#bbb' }}>
+                    {breadcrumbs(tree, currentFolderId).map((seg, i, arr) => (
+                      <span key={seg.id}>
+                        <a href="#" onClick={(e) => { e.preventDefault(); setCurrentFolderId(seg.id); }} style={{ color: '#cbd5e1' }}>{seg.name}</a>
+                        {i < arr.length - 1 ? ' / ' : ''}
+                      </span>
+                    ))}
+                  </div>
+                  {/* Items grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
+                    {(() => {
+                      const folder = findFolder(tree, currentFolderId);
+                      if (!folder) return <div style={{ color: '#888' }}>Folder not found.</div>;
+                      const items = folder.children.slice();
+                      items.sort((a, b) => {
+                        const aIsFolder = (a as any).type === 'folder' ? 0 : 1;
+                        const bIsFolder = (b as any).type === 'folder' ? 0 : 1;
+                        if (aIsFolder !== bIsFolder) return aIsFolder - bIsFolder;
+                        const aName = (a as any).type === 'folder' ? (a as any).name : profileLabel(a as any);
+                        const bName = (b as any).type === 'folder' ? (b as any).name : profileLabel(b as any);
+                        return String(aName).localeCompare(String(bName));
+                      });
+                      return items.map((n: any) => (
+                        n.type === 'folder' ? (
+                          <div
+                            key={n.id}
+                            onDoubleClick={() => setCurrentFolderId(n.id)}
+                            onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'folder', node: n }); }}
+                            style={{ border: '1px solid #333', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'default' }}
+                          >
+                            <div style={{ fontSize: 28 }}>📁</div>
+                            <div style={{ fontSize: 12, textAlign: 'center', wordBreak: 'break-word' }}>{n.name}</div>
+                          </div>
+                        ) : (
+                          <div
+                            key={n.id}
+                            onDoubleClick={() => openProfile(n)}
+                            onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'profile', node: n }); }}
+                            style={{ border: '1px solid #333', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'default' }}
+                          >
+                            <div style={{ fontSize: 28 }}>{iconFor(n)}</div>
+                            <div style={{ fontSize: 12, textAlign: 'center', wordBreak: 'break-word' }}>{profileLabel(n)}</div>
+                          </div>
+                        )
+                      ));
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <div style={{ color: '#888' }}>Loading…</div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right column: Recents (40%) */}
+        <div style={{ flex: 4, minWidth: 0 }}>
+          {/* Recent folders UI removed (functionality persists via addRecent) */}
+          {combinedRecents.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>Recent sessions</span>
+                <button
+                  onClick={async () => {
+                    await clearRecentSessions();
+                    await clearRecentSshSessions();
+                    setRecentSessions(await getRecentSessions());
+                    setRecentSsh(await getRecentSshSessions());
+                  }}
+                  title="Clear all recent sessions"
+                >
+                  Clear
+                </button>
+              </h3>
+              <ul>
+                {combinedRecents.map((r) => (
+                  <li key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {r.type === 'local' ? (
+                      <>
+                        <a
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); (onOpenSession ? onOpenSession(r.s) : onOpenFolder(r.s.cwd)); }}
+                          title={r.s.cwd + ' — ' + new Date(r.s.closedAt).toLocaleString()}
+                        >
+                          {r.s.cwd}
+                        </a>
+                        <button
+                          onClick={async () => {
+                            await removeRecentSession(r.s.cwd);
+                            setRecentSessions(await getRecentSessions());
+                          }}
+                          title="Remove"
+                        >
+                          ×
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <a
+                          href="#"
+                          title={r.s.path + ' — ' + new Date(r.s.closedAt).toLocaleString()}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            (async () => {
+                              const all = await getSshProfiles();
+                              const p = r.s.profileId ? all.find((x) => x.id === r.s.profileId) : undefined;
+                              if (p) {
+                                onOpenSsh?.({ host: p.host, port: p.port, user: p.user, auth: p.auth || { agent: true }, cwd: r.s.path, profileId: p.id, terminal: p.terminal, shell: p.shell, advanced: p.advanced });
+                              } else if (r.s.host && r.s.user) {
+                                onOpenSsh?.({ host: r.s.host, port: r.s.port ?? 22, user: r.s.user, auth: { agent: true } as any, cwd: r.s.path });
+                              } else {
+                                alert('Cannot open SSH recent: profile missing and no host/user stored');
+                              }
+                            })();
+                          }}
+                        >
+                          {r.s.path} {(() => {
+                            const p = r.s.profileId ? sshProfiles.find((x) => x.id === r.s.profileId) : undefined;
+                            const label = p ? (p.name || `${p.user}@${p.host}`) : (r.s.user && r.s.host ? `${r.s.user}@${r.s.host}` : undefined);
+                            return label ? ` [${label}]` : '';
+                          })()}
+                        </a>
+                        <button
+                          onClick={async () => {
+                            await removeRecentSshSession((r.s.profileId || ''), r.s.path);
+                            setRecentSsh(await getRecentSshSessions());
+                          }}
+                          title="Remove"
+                        >
+                          ×
+                        </button>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
       {sshOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
@@ -162,163 +471,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
           </div>
         </div>
       )}
-      {recents.length > 0 && (
-        <div>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>Recent folders</span>
-            <button onClick={async () => { await clearRecents(); setRecents(await getRecents()); }} title="Clear recent folders">Clear</button>
-          </h3>
-          <ul>
-            {recents.map((r) => (
-              <li key={r.path} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <a href="#" onClick={async (e) => { e.preventDefault(); await addRecent(r.path); onOpenFolder(r.path); }}>
-                  {r.path}
-                </a>
-                <button onClick={async () => { await removeRecent(r.path); setRecents(await getRecents()); }} title="Remove">×</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {recentSessions.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>Recent sessions</span>
-            <button onClick={async () => { await clearRecentSessions(); setRecentSessions(await getRecentSessions()); }} title="Clear recent sessions">Clear</button>
-          </h3>
-          <ul>
-            {recentSessions.map((s) => (
-              <li key={`${s.cwd}-${s.closedAt}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <a href="#" onClick={(e) => { e.preventDefault(); (onOpenSession ? onOpenSession(s) : onOpenFolder(s.cwd)); }} title={s.cwd + ' — ' + new Date(s.closedAt).toLocaleString()}>
-                  {s.cwd} {typeof s.panes === 'number' ? `(panes: ${s.panes})` : ''}
-                </a>
-                <button onClick={async () => { await removeRecentSession(s.cwd); setRecentSessions(await getRecentSessions()); }} title="Remove">×</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {recentSsh.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>Recent SSH sessions</span>
-            <button onClick={async () => { await clearRecentSshSessions(); setRecentSsh(await getRecentSshSessions()); }} title="Clear recent SSH sessions">Clear</button>
-          </h3>
-          <ul>
-            {recentSsh.map((s) => (
-              <li key={`${s.profileId}-${s.path}-${s.closedAt}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <a href="#" title={s.path + ' — ' + new Date(s.closedAt).toLocaleString()} onClick={(e) => { e.preventDefault();
-                  // Look up profile
-                  (async () => {
-                    const all = await getSshProfiles();
-                    const p = s.profileId ? all.find((x) => x.id === s.profileId) : undefined;
-                    if (p) {
-                      onOpenSsh?.({ 
-                        host: p.host, 
-                        port: p.port, 
-                        user: p.user, 
-                        auth: p.auth || { agent: true }, 
-                        cwd: s.path, 
-                        profileId: p.id,
-                        terminal: p.terminal,
-                        shell: p.shell,
-                        advanced: p.advanced
-                      });
-                    } else if (s.host && s.user) {
-                      onOpenSsh?.({ host: s.host, port: s.port ?? 22, user: s.user, auth: { agent: true } as any, cwd: s.path });
-                    } else {
-                      alert('Cannot open SSH recent: profile missing and no host/user stored');
-                    }
-                  })();
-                }}>
-                  {s.path}
-                </a>
-                <button onClick={async () => { await removeRecentSshSession((s.profileId || ''), s.path); setRecentSsh(await getRecentSshSessions()); }} title="Remove">×</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div style={{ marginTop: 24 }}>
-        <h2>Profiles</h2>
-        <div style={{ display: 'flex', gap: 24 }}>
-          <div style={{ flex: 1 }}>
-            <h3>Local</h3>
-            <button onClick={() => { setLpForm({ name: '', path: '' }); setLpOpen(true); }}>New Local Profile</button>
-            <ul>
-              {localProfiles.map((p) => (
-                <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <a href="#" onClick={(e) => { e.preventDefault(); onOpenFolder(p.path); }}>{p.name || p.path}</a>
-                  <button onClick={() => { 
-                    setLpForm({ id: p.id, name: p.name, path: p.path }); 
-                    setLpOpen(true); 
-                  }} title="Edit">✎</button>
-                  <button onClick={async () => { await deleteLocalProfile(p.id); setLocalProfiles(await getLocalProfiles()); }} title="Remove">×</button>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div style={{ flex: 1 }}>
-            <h3>SSH</h3>
-            <button onClick={() => { setSpForm({ name: '', host: '', user: '', authType: 'agent' }); setSpOpen(true); }}>New SSH Profile</button>
-            <ul>
-              {sshProfiles.map((p) => (
-                <li key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <a 
-                    href="#" 
-                    onClick={(e) => {
-                      e.preventDefault();
-                      if (!onOpenSsh) return;
-                      onOpenSsh({ 
-                        host: p.host, 
-                        port: p.port, 
-                        user: p.user, 
-                        auth: p.auth || { agent: true }, 
-                        cwd: p.path, 
-                        profileId: p.id,
-                        terminal: p.terminal,
-                        shell: p.shell,
-                        advanced: p.advanced
-                      });
-                    }}
-                    title={(p.name || `${p.user}@${p.host}`) + (p.path ? `: ${p.path}` : '')}
-                  >
-                    {p.name || `${p.user}@${p.host}`}{p.path ? `: ${p.path}` : ''}
-                  </a>
-                  <button onClick={() => {
-                    // Load existing profile data into form
-                    const authType = p.auth?.agent ? 'agent' : p.auth?.password ? 'password' : 'key';
-                    setSpForm({ 
-                      id: p.id,
-                      name: p.name, 
-                      host: p.host, 
-                      port: p.port,
-                      user: p.user, 
-                      authType: authType as any,
-                      password: p.auth?.password,
-                      keyPath: p.auth?.keyPath,
-                      passphrase: p.auth?.passphrase,
-                      path: p.path,
-                      // Load advanced settings
-                      envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined,
-                      initCommands: p.shell?.initCommands,
-                      shellOverride: p.shell?.shell,
-                      defaultForwards: p.advanced?.defaultForwards,
-                      theme: p.terminal?.theme,
-                      fontSize: p.terminal?.fontSize,
-                      fontFamily: p.terminal?.fontFamily
-                    }); 
-                    setSpOpen(true); 
-                  }} title="Edit">✎</button>
-                  <button onClick={async () => { await deleteSshProfile(p.id); setSshProfiles(await getSshProfiles()); }} title="Remove">×</button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
+      
 
       {lpOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
@@ -328,7 +481,15 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             <label>Path<input style={{ width: '100%' }} value={lpForm.path} onChange={(e) => setLpForm({ ...lpForm, path: e.target.value })} placeholder="/absolute/path" /></label>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
               <button onClick={() => setLpOpen(false)}>Cancel</button>
-              <button onClick={async () => { if (!lpForm.id) lpForm.id = crypto.randomUUID(); await saveLocalProfile(lpForm as any); setLocalProfiles(await getLocalProfiles()); setLpOpen(false); }}>Save</button>
+              <button onClick={async () => { 
+                if (!lpForm.id) lpForm.id = crypto.randomUUID(); 
+                await saveLocalProfile(lpForm as any); 
+                setLocalProfiles(await getLocalProfiles()); 
+                if (tree && !hasProfileNode(tree, 'local', lpForm.id)) {
+                  updateTree((root) => addProfileNode(root, 'local', lpForm.id!));
+                }
+                setLpOpen(false); 
+              }}>Save</button>
             </div>
           </div>
         </div>
@@ -716,11 +877,84 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   
                   await saveSshProfile(profile);
                   setSshProfiles(await getSshProfiles());
+                  if (tree && !hasProfileNode(tree, 'ssh', spForm.id!)) {
+                    updateTree((root) => addProfileNode(root, 'ssh', spForm.id!));
+                  }
                   setSpOpen(false);
                   setActiveTab('basic');
                 }}>Save</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Folder dialog */}
+      {folderDialog && (
+        <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)', zIndex: 999 }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 380 }}>
+            <h3 style={{ marginTop: 0 }}>New Folder</h3>
+            <label>
+              Name
+              <input
+                autoFocus
+                style={{ width: '100%' }}
+                value={folderDialog.name}
+                onChange={(e) => setFolderDialog({ ...folderDialog, name: e.target.value })}
+                placeholder="Folder name"
+                onKeyDown={(e) => { if (e.key === 'Enter') (document.getElementById('jtrm-folder-save-btn') as HTMLButtonElement)?.click(); }}
+              />
+            </label>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+              <button onClick={() => setFolderDialog(null)}>Cancel</button>
+              <button
+                id="jtrm-folder-save-btn"
+                onClick={() => {
+                  const name = (folderDialog.name || '').trim();
+                  if (!name) { return; }
+                  const parentId = folderDialog.parentId;
+                  const newId = crypto.randomUUID();
+                  updateTree((root) => {
+                    const dest = findFolder(root, parentId);
+                    if (!dest) return;
+                    dest.children.push({ id: newId, type: 'folder', name, children: [] });
+                  });
+                  setCurrentFolderId(newId);
+                  setFolderDialog(null);
+                }}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <div
+          onClick={() => setCtxMenu(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 9999 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: 'fixed', top: ctxMenu.y, left: ctxMenu.x, background: '#1f1f1f', border: '1px solid #444', borderRadius: 6, minWidth: 160, padding: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }}
+          >
+            {ctxMenu.type === 'folder' ? (
+              <>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { setCurrentFolderId(ctxMenu.node.id); setCtxMenu(null); }}>Open</button>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { const name = prompt('Rename folder', ctxMenu.node.name); if (name) updateTree((root) => { const f = findFolder(root, ctxMenu.node.id); if (f) (f as any).name = name; }); setCtxMenu(null); }}>Rename</button>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { setFolderDialog({ parentId: ctxMenu.node.id, name: '' }); setCtxMenu(null); }}>New subfolder</button>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { if ((ctxMenu.node.children || []).length) { alert('Folder not empty'); return; } updateTree((root) => { removeNode(root, ctxMenu.node.id); }); setCtxMenu(null); }}>Delete</button>
+              </>
+            ) : (
+              <>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { openProfile(ctxMenu.node); setCtxMenu(null); }}>Open</button>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { editProfile(ctxMenu.node); setCtxMenu(null); }}>Edit</button>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={() => { moveProfileNode(ctxMenu.node); setCtxMenu(null); }}>Move</button>
+                <button style={{ width: '100%', textAlign: 'left' }} onClick={async () => { await deleteProfileNode(ctxMenu.node); setCtxMenu(null); }}>Delete</button>
+              </>
+            )}
           </div>
         </div>
       )}
