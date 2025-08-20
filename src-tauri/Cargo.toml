@@ -22,10 +22,10 @@ anyhow = "1"
 thiserror = "1"
 portable-pty = "0.8"
 nanoid = "0.4"
-git2 = { version = "0.18", default-features = false, features = ["https"] }
+git2 = { version = "0.18", default-features = false, features = ["https", "vendored-openssl"] }
 base64 = "0.22"
 dirs = "6"
-ssh2 = "0.9"
+ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 sha2 = "0.10"
 
 [features]

@@ -78,11 +78,7 @@
   },
   "plugins": {
     "shell": {
-      "open": true,
-      "all": false,
-      "execute": [],
-      "sidecar": [],
-      "scope": []
+      "open": true
     },
     "updater": {
       "active": true,
