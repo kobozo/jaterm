@@ -37,12 +37,14 @@ jobs:
             BASE=${GITHUB_REF#refs/heads/release/}
             DOY=$(date +%j)
             HOUR=$(date +%H)
-            VERSION="$BASE-rc.${DOY}${HOUR}"
+            # For MSI, prerelease must be numeric only
+            VERSION="$BASE-${DOY}${HOUR}"
           else
             # CI-only builds for non-release branches
             DOY=$(date +%j)
             HOUR=$(date +%H)
-            VERSION="0.0.0-ci.${DOY}${HOUR}"
+            # For MSI, prerelease must be numeric only
+            VERSION="0.0.0-${DOY}${HOUR}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
