@@ -34,6 +34,28 @@ This directory contains GitHub Actions workflows for JaTerm's continuous integra
 - **Purpose**: Create development builds
 - **Retention**: Artifacts kept for 7 days
 
+## Setup Scripts
+
+Before deploying, run these setup scripts:
+
+1. **Generate Updater Keys**:
+   ```bash
+   ./scripts/generate-updater-keys.sh
+   ```
+   This creates the Ed25519 key pair for update signing.
+
+2. **Setup GitHub Secrets**:
+   ```bash
+   ./scripts/setup-github-secrets.sh
+   ```
+   This helps configure all required GitHub secrets.
+
+3. **Generate Icons**:
+   ```bash
+   ./scripts/generate-icons-full.sh
+   ```
+   This creates all required icon formats from SVG.
+
 ## Required Secrets
 
 For full functionality, configure these GitHub secrets:

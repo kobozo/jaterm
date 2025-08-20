@@ -35,6 +35,28 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
           
+      - name: Generate Release Notes
+        id: release-notes
+        run: |
+          # Get the last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          # Generate changelog
+          if [ -n "$LAST_TAG" ]; then
+            CHANGELOG=$(git log $LAST_TAG..HEAD --pretty=format:"- %s" --no-merges | head -20)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges | head -20)
+          fi
+          
+          # Escape for GitHub Actions
+          CHANGELOG="${CHANGELOG//'%'/'%25'}"
+          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+          
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
       - name: Create Release
         id: create-release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -47,13 +69,36 @@ jobs:
           body: |
             ## JaTerm v${{ steps.get-version.outputs.version }}
             
-            ### Installation
-            - **Windows**: Download and run the `.msi` installer
-            - **macOS**: Download and open the `.dmg` file
-            - **Linux**: Download the `.AppImage` (portable) or `.deb` (Ubuntu/Debian)
+            ### 📦 Installation
             
-            ### Changes
-            See [commits](https://github.com/${{ github.repository }}/commits/main) for details.
+            #### Windows
+            - **Installer**: Download `JaTerm_*.msi` for standard installation
+            - **Portable**: Download `JaTerm_*-setup.exe` for NSIS installer
+            
+            #### macOS
+            - **Intel**: Download `JaTerm_*_macos-intel.dmg`
+            - **Apple Silicon**: Download `JaTerm_*_macos-apple-silicon.dmg`
+            
+            #### Linux
+            - **AppImage**: Download `JaTerm_*.AppImage` (portable, no installation)
+            - **Debian/Ubuntu**: Download `JaTerm_*.deb`
+            
+            ### 🚀 Features
+            - Terminal emulator with multiple panes
+            - SSH client with key/password authentication
+            - SFTP file transfer
+            - Git integration
+            - Port forwarding (local and remote)
+            - Cross-platform (Windows, macOS, Linux)
+            
+            ### 📝 Recent Changes
+            ${{ steps.release-notes.outputs.changelog }}
+            
+            ### 🔄 Auto-Updates
+            The app will automatically check for updates on startup. You can also manually check via the status bar.
+            
+            ---
+            [View all commits](https://github.com/${{ github.repository }}/compare/${{ steps.get-version.outputs.last_tag }}...v${{ steps.get-version.outputs.version }})
           draft: true
           prerelease: false
 
@@ -164,15 +209,22 @@ jobs:
           cargo zigbuild --release --target x86_64-unknown-linux-musl || true
         continue-on-error: true
         
-      - name: Update version in Cargo.toml
+      - name: Update version and inject public key
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
           # Update src-tauri/Cargo.toml
           sed -i.bak "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml || true
           sed -i "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml || true
-          # Update tauri.conf.json
+          # Update tauri.conf.json version
           sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json || true
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json || true
+          # Inject the public key if available
+          if [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+            sed -i.bak "s/PUBKEY_PLACEHOLDER_REPLACE_IN_CI/$TAURI_UPDATER_PUBKEY/" src-tauri/tauri.conf.json || true
+            sed -i "s/PUBKEY_PLACEHOLDER_REPLACE_IN_CI/$TAURI_UPDATER_PUBKEY/" src-tauri/tauri.conf.json || true
+          fi
           
       - name: Build Tauri app
         env:
