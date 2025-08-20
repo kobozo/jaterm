@@ -6,8 +6,8 @@ mod shell;
 mod events;
 mod state;
 mod utils;
+mod menu;
 
-#[cfg(debug_assertions)]
 use tauri::Manager;
 
 fn main() {
@@ -59,10 +59,21 @@ fn main() {
       commands::git::git_status,
       commands::watcher::watch_subscribe
     ])
-    .setup(|_app| {
+    .setup(|app| {
+      // Set up the menu
+      let handle = app.handle().clone();
+      let menu = menu::create_menu(&handle)?;
+      app.set_menu(menu)?;
+      
+      // Handle menu events
+      let handle_clone = handle.clone();
+      app.on_menu_event(move |_app, event| {
+        menu::handle_menu_event(&handle_clone, event.id().as_ref());
+      });
+      
       // Initialize shared state or services here.
       #[cfg(debug_assertions)]
-      if let Some(main) = _app.get_webview_window("main") {
+      if let Some(main) = app.get_webview_window("main") {
         main.open_devtools();
         let _ = main.set_focus();
       }

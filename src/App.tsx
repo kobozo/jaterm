@@ -53,6 +53,7 @@ export default function App() {
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState<null | { version?: string }>(null);
   const { show, update, dismiss } = useToasts();
+  const addToast = show;
   // Simple bell sound using WebAudio
   const audioCtxRef = React.useRef<AudioContext | null>(null);
   function ringBell() {
@@ -1132,6 +1133,105 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [tabs, activeTab]);
+  
+  // Menu event handlers
+  React.useEffect(() => {
+    const unlisteners: (() => void)[] = [];
+    
+    const setupMenuListeners = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      
+      // File menu events
+      unlisteners.push(await listen('menu:new_tab', () => newTab()));
+      unlisteners.push(await listen('menu:close_tab', () => {
+        if (activeTab) closeTab(activeTab);
+      }));
+      unlisteners.push(await listen('menu:open_ssh', () => {
+        // Open sessions tab and focus SSH section
+        setActiveTab(sessionsId);
+      }));
+      
+      // Edit menu events
+      unlisteners.push(await listen('menu:clear_terminal', () => {
+        const t = tabs.find((x) => x.id === activeTab);
+        const pane = t?.activePane ?? (t?.panes[0] || null);
+        if (pane && pane.kind === 'local') {
+          // Send clear command (Ctrl+L)
+          void ptyWrite(pane.id, '\x0c');
+        } else if (pane && pane.kind === 'ssh') {
+          void sshWrite(pane.id, '\x0c');
+        }
+      }));
+      unlisteners.push(await listen('menu:find', () => {
+        // TODO: Implement find functionality
+        addToast('info', 'Find functionality coming soon!');
+      }));
+      
+      // View menu events
+      unlisteners.push(await listen('menu:zoom_in', () => {
+        document.documentElement.style.fontSize = `${parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.1}px`;
+      }));
+      unlisteners.push(await listen('menu:zoom_out', () => {
+        document.documentElement.style.fontSize = `${parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.9}px`;
+      }));
+      unlisteners.push(await listen('menu:reset_zoom', () => {
+        document.documentElement.style.fontSize = '16px';
+      }));
+      unlisteners.push(await listen('menu:toggle_git', () => setGitOpen((prev) => !prev)));
+      unlisteners.push(await listen('menu:toggle_sftp', () => setSftpOpen((prev) => !prev)));
+      unlisteners.push(await listen('menu:toggle_ports', () => setPortsOpen((prev) => !prev)));
+      
+      // Window menu events
+      unlisteners.push(await listen('menu:split_horizontal', () => {
+        const t = tabs.find((x) => x.id === activeTab);
+        const pane = t?.activePane ?? (t?.panes[0] || null);
+        if (pane) void (async () => splitPane(pane, 'row'))();
+      }));
+      unlisteners.push(await listen('menu:split_vertical', () => {
+        const t = tabs.find((x) => x.id === activeTab);
+        const pane = t?.activePane ?? (t?.panes[0] || null);
+        if (pane) void (async () => splitPane(pane, 'column'))();
+      }));
+      unlisteners.push(await listen('menu:next_tab', () => {
+        const idx = tabs.findIndex((t) => t.id === activeTab);
+        const next = (idx + 1) % tabs.length;
+        setActiveTab(tabs[next].id);
+      }));
+      unlisteners.push(await listen('menu:prev_tab', () => {
+        const idx = tabs.findIndex((t) => t.id === activeTab);
+        const prev = (idx - 1 + tabs.length) % tabs.length;
+        setActiveTab(tabs[prev].id);
+      }));
+      unlisteners.push(await listen('menu:next_pane', () => {
+        const t = tabs.find((x) => x.id === activeTab);
+        if (t && t.panes.length > 1) {
+          const idx = t.panes.indexOf(t.activePane || t.panes[0]);
+          const next = (idx + 1) % t.panes.length;
+          setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, activePane: t.panes[next] } : tb)));
+        }
+      }));
+      unlisteners.push(await listen('menu:prev_pane', () => {
+        const t = tabs.find((x) => x.id === activeTab);
+        if (t && t.panes.length > 1) {
+          const idx = t.panes.indexOf(t.activePane || t.panes[0]);
+          const prev = (idx - 1 + t.panes.length) % t.panes.length;
+          setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, activePane: t.panes[prev] } : tb)));
+        }
+      }));
+      
+      // Help menu events
+      unlisteners.push(await listen('menu:about', () => {
+        addToast('info', 'JaTerm v0.1.0\nA modern terminal emulator with SSH support\n© 2025 Kobozo');
+      }));
+    };
+    
+    setupMenuListeners();
+    
+    return () => {
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [tabs, activeTab, sessionsId]);
+  
   return (
     <div className="app-root">
       <TabsBar
