@@ -154,6 +154,9 @@ fn generate_helper_module() {
   
   let rust_code = format!(
     r#"pub const HELPER_VERSION: &str = "{}";
+#[cfg(windows)]
+pub const HELPER_NAME: &str = "jaterm-agent.exe";
+#[cfg(not(windows))]
 pub const HELPER_NAME: &str = "jaterm-agent";
 pub const HELPER_REL_DIR: &str = ".jaterm-helper";
 pub const HELPER_BINARY: &[u8] = &{:?};
