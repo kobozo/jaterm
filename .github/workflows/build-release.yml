@@ -34,7 +34,9 @@ jobs:
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
           else
-            VERSION=$(date +%Y.%m.%d)-${GITHUB_SHA::8}
+            # Generate a valid semver version for automatic builds
+            # Use 0.0.0-dev.YYYYMMDD.HHMMSS format for dev builds
+            VERSION="0.0.0-dev.$(date +%Y%m%d).$(date +%H%M%S)"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
@@ -239,15 +241,28 @@ jobs:
         shell: pwsh
         run: |
           $VERSION = "${{ needs.create-release.outputs.version }}"
+          Write-Host "Setting version to: $VERSION"
+          
           # Update src-tauri/Cargo.toml
-          (Get-Content src-tauri/Cargo.toml) -replace '^version = .*', "version = `"$VERSION`"" | Set-Content src-tauri/Cargo.toml
+          $cargoContent = Get-Content src-tauri/Cargo.toml -Raw
+          $cargoContent = $cargoContent -replace '(?m)^version = ".*"', "version = `"$VERSION`""
+          Set-Content -Path src-tauri/Cargo.toml -Value $cargoContent -NoNewline
+          
           # Update tauri.conf.json
-          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $configPath = "src-tauri/tauri.conf.json"
+          $json = Get-Content $configPath -Raw
+          $config = $json | ConvertFrom-Json
           $config.version = $VERSION
+          
+          # Update pubkey if available
           if ($env:TAURI_UPDATER_PUBKEY) {
+            if (-not $config.plugins) { $config | Add-Member -NotePropertyName plugins -NotePropertyValue @{} }
+            if (-not $config.plugins.updater) { $config.plugins | Add-Member -NotePropertyName updater -NotePropertyValue @{} }
             $config.plugins.updater.pubkey = $env:TAURI_UPDATER_PUBKEY
           }
-          $config | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+          
+          $newJson = $config | ConvertTo-Json -Depth 10
+          Set-Content -Path $configPath -Value $newJson -NoNewline
           
       - name: Build Tauri app
         env:

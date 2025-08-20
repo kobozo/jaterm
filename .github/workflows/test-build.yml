@@ -1,0 +1,114 @@
+name: Test Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  test-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            
+          - os: macos-latest  
+            target: aarch64-apple-darwin
+            
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+          
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libssl-dev
+          # Try to install appindicator
+          sudo apt-get install -y libayatana-appindicator3-dev || sudo apt-get install -y libappindicator3-dev
+            
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            src-helper
+            
+      - name: Install frontend dependencies
+        run: pnpm install
+        
+      - name: Build helper
+        run: |
+          cd src-helper
+          cargo build --release
+          
+      - name: Set test version
+        run: |
+          # Use a simple test version
+          echo "Setting version to 0.1.0-test"
+        
+      - name: Set test version in configs (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          # Set a valid semver version for testing
+          sed -i.bak 's/"version": ".*"/"version": "0.1.0"/' src-tauri/tauri.conf.json || true
+          sed -i 's/"version": ".*"/"version": "0.1.0"/' src-tauri/tauri.conf.json || true
+          sed -i.bak 's/^version = ".*"/version = "0.1.0"/' src-tauri/Cargo.toml || true
+          sed -i 's/^version = ".*"/version = "0.1.0"/' src-tauri/Cargo.toml || true
+          
+      - name: Set test version in configs (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # Set a valid semver version for testing
+          $cargoContent = Get-Content src-tauri/Cargo.toml -Raw
+          $cargoContent = $cargoContent -replace '(?m)^version = ".*"', 'version = "0.1.0"'
+          Set-Content -Path src-tauri/Cargo.toml -Value $cargoContent -NoNewline
+          
+          $json = Get-Content src-tauri/tauri.conf.json -Raw
+          $config = $json | ConvertFrom-Json
+          $config.version = "0.1.0"
+          $newJson = $config | ConvertTo-Json -Depth 10
+          Set-Content -Path src-tauri/tauri.conf.json -Value $newJson -NoNewline
+          
+      - name: Build Tauri app
+        run: pnpm tauri build --target ${{ matrix.target }}
+        
+      - name: List build artifacts
+        if: always()
+        run: |
+          echo "Build artifacts:"
+          ls -la src-tauri/target/*/release/bundle/ || true
+          ls -la src-tauri/target/release/bundle/ || true
