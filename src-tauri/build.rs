@@ -152,29 +152,21 @@ fn generate_helper_module() {
   let out_dir = env::var("OUT_DIR").unwrap();
   let dest_path = Path::new(&out_dir).join("helper_generated.rs");
   
-  let rust_code = if let Some(linux_bin) = linux_binary {
-    format!(
-      r#"pub const HELPER_VERSION: &str = "{}";
+  let rust_code = format!(
+    r#"pub const HELPER_VERSION: &str = "{}";
 pub const HELPER_NAME: &str = "jaterm-agent";
 pub const HELPER_REL_DIR: &str = ".jaterm-helper";
 pub const HELPER_BINARY: &[u8] = &{:?};
-pub const HELPER_BINARY_LINUX: &[u8] = &{:?};
+pub const HELPER_BINARY_LINUX: Option<&[u8]> = {};
 "#,
-      version,
-      helper_binary,
-      linux_bin
-    )
-  } else {
-    format!(
-      r#"pub const HELPER_VERSION: &str = "{}";
-pub const HELPER_NAME: &str = "jaterm-agent";
-pub const HELPER_REL_DIR: &str = ".jaterm-helper";
-pub const HELPER_BINARY: &[u8] = &{:?};
-"#,
-      version,
-      helper_binary
-    )
-  };
+    version,
+    helper_binary,
+    if let Some(linux_bin) = linux_binary {
+      format!("Some(&{:?})", linux_bin)
+    } else {
+      "None".to_string()
+    }
+  );
   
   fs::write(&dest_path, rust_code)
     .expect("Failed to write generated helper module");

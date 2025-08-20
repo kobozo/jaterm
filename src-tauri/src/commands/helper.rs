@@ -14,10 +14,9 @@ pub fn get_helper_binary() -> &'static [u8] {
 
 // Function to get the Linux helper binary for SSH deployment (if available)
 pub fn get_linux_helper_binary() -> Option<&'static [u8]> {
-  // HELPER_BINARY_LINUX is conditionally defined by build.rs
-  // If it exists, return it; otherwise return None
-  // The build.rs script only defines this constant when the Linux binary is available
-  Some(HELPER_BINARY_LINUX)
+  // HELPER_BINARY_LINUX is now an Option<&[u8]> defined by build.rs
+  // It's Some(&[...]) when Linux binary is available, None otherwise
+  HELPER_BINARY_LINUX
 }
 
 #[derive(Serialize)]
