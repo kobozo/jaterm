@@ -61,6 +61,24 @@ jobs:
             src-tauri
             src-helper
             
+      - name: Set nightly version
+        run: |
+          # Generate nightly version
+          VERSION="0.0.0-nightly$(date +%Y%m%d%H%M%S)"
+          echo "Setting nightly version to: $VERSION"
+          
+          # Update package.json
+          sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json || true
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json || true
+          
+          # Update Cargo.toml
+          sed -i.bak "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml || true
+          sed -i "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml || true
+          
+          # Update tauri.conf.json
+          sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json || true
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json || true
+          
       - name: Install frontend dependencies
         run: pnpm install
         
