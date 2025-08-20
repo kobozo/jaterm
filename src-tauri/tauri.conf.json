@@ -56,7 +56,8 @@
       "signingIdentity": null,
       "providerShortName": null,
       "entitlements": null,
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "hardenedRuntime": false
     },
     "linux": {
       "deb": {

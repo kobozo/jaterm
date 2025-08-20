@@ -25,3 +25,9 @@ src-tauri/gen/
 # Tests
 coverage/
 
+# GitHub Tools and Secrets (NEVER COMMIT THESE!)
+github_tools/github_secrets.txt
+github_tools/*.p12
+github_tools/*.cer
+github_tools/*.key
+
