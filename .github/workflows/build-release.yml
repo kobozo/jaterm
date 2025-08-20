@@ -297,6 +297,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Package helper (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $helper = "src-helper/target/${{ matrix.target }}/release/jaterm-agent.exe"
+          if (Test-Path $helper) { Copy-Item $helper -Destination "dist/jaterm-agent_windows_x64.exe" }
           
       - name: Fix macOS signatures and recreate DMG
         if: matrix.os == 'macos-latest'
@@ -333,8 +341,18 @@ jobs:
           mkdir -p dist
           if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
             cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.dmg || true
+            # Copy helper (Apple Silicon)
+            if [[ -f "src-helper/target/${{ matrix.target }}/release/jaterm-agent" ]]; then
+              cp "src-helper/target/${{ matrix.target }}/release/jaterm-agent" "dist/jaterm-agent_macos_aarch64"
+              chmod +x dist/jaterm-agent_macos_aarch64 || true
+            fi
           else
             cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.dmg || true
+            # Copy helper (Intel)
+            if [[ -f "src-helper/target/${{ matrix.target }}/release/jaterm-agent" ]]; then
+              cp "src-helper/target/${{ matrix.target }}/release/jaterm-agent" "dist/jaterm-agent_macos_x64"
+              chmod +x dist/jaterm-agent_macos_x64 || true
+            fi
           fi
           
       - name: Prepare artifacts (Linux)
@@ -346,6 +364,16 @@ jobs:
           cp src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.deb || true
           # Make AppImage executable
           chmod +x dist/*.AppImage || true
+          # Copy helper (gnu)
+          if [[ -f "src-helper/target/${{ matrix.target }}/release/jaterm-agent" ]]; then
+            cp "src-helper/target/${{ matrix.target }}/release/jaterm-agent" "dist/jaterm-agent_linux_x86_64"
+            chmod +x dist/jaterm-agent_linux_x86_64 || true
+          fi
+          # Copy helper (musl) if built via zigbuild
+          if [[ -f "src-helper/target/x86_64-unknown-linux-musl/release/jaterm-agent" ]]; then
+            cp "src-helper/target/x86_64-unknown-linux-musl/release/jaterm-agent" "dist/jaterm-agent_linux_x86_64_musl"
+            chmod +x dist/jaterm-agent_linux_x86_64_musl || true
+          fi
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
