@@ -35,8 +35,8 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/v}
           else
             # Generate a valid semver version for automatic builds
-            # Use 0.0.0-dev.YYYYMMDD.HHMMSS format for dev builds
-            VERSION="0.0.0-dev.$(date +%Y%m%d).$(date +%H%M%S)"
+            # Use 0.0.0-dev.YYYYMMDDHHMMSS format (no dots in prerelease)
+            VERSION="0.0.0-dev$(date +%Y%m%d%H%M%S)"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
@@ -194,40 +194,26 @@ jobs:
           fi
         continue-on-error: true
         
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            src-tauri
-            src-helper
-            
-      - name: Install frontend dependencies
-        run: pnpm install
-        
-      - name: Build helper binary (native)
-        run: |
-          cd src-helper
-          cargo build --release --target ${{ matrix.target }}
-          
-      - name: Build helper binary for Linux (musl)
-        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'
-        run: |
-          cd src-helper
-          cargo zigbuild --release --target x86_64-unknown-linux-musl || true
-        continue-on-error: true
-        
       - name: Update version (Unix)
         if: matrix.os != 'windows-latest'
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
+          echo "Setting version to: $VERSION"
+          
+          # Update package.json
+          sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json || true
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json || true
+          
           # Update src-tauri/Cargo.toml
           sed -i.bak "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml || true
           sed -i "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml || true
+          
           # Update tauri.conf.json version
           sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json || true
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json || true
+          
           # Inject the public key if available
           if [ -n "$TAURI_UPDATER_PUBKEY" ]; then
             sed -i.bak "s/PUBKEY_PLACEHOLDER_REPLACE_IN_CI/$TAURI_UPDATER_PUBKEY/" src-tauri/tauri.conf.json || true
@@ -242,6 +228,11 @@ jobs:
         run: |
           $VERSION = "${{ needs.create-release.outputs.version }}"
           Write-Host "Setting version to: $VERSION"
+          
+          # Update package.json
+          $packageJson = Get-Content package.json -Raw | ConvertFrom-Json
+          $packageJson.version = $VERSION
+          $packageJson | ConvertTo-Json -Depth 10 | Set-Content -Path package.json -NoNewline
           
           # Update src-tauri/Cargo.toml
           $cargoContent = Get-Content src-tauri/Cargo.toml -Raw
@@ -264,6 +255,28 @@ jobs:
           $newJson = $config | ConvertTo-Json -Depth 10
           Set-Content -Path $configPath -Value $newJson -NoNewline
           
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            src-helper
+            
+      - name: Install frontend dependencies
+        run: pnpm install
+        
+      - name: Build helper binary (native)
+        run: |
+          cd src-helper
+          cargo build --release --target ${{ matrix.target }}
+          
+      - name: Build helper binary for Linux (musl)
+        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'
+        run: |
+          cd src-helper
+          cargo zigbuild --release --target x86_64-unknown-linux-musl || true
+        continue-on-error: true
+        
       - name: Build Tauri app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
