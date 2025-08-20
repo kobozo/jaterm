@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "identifier": "com.kobozo.jaterm",
   "productName": "JaTerm",
   "version": "0.1.0",
+  "identifier": "com.kobozo.jaterm",
   "build": {
     "beforeDevCommand": "pnpm vite",
     "beforeBuildCommand": "pnpm vite build",
@@ -20,15 +20,6 @@
       }
     ]
   },
-  "updater": {
-    "active": true,
-    "windows": { "installerArgs": [] },
-    "pubkey": "PUBKEY_PLACEHOLDER_REPLACE_IN_CI",
-    "provider": {
-      "type": "github",
-      "repo": "Kobozo/jaterm"
-    }
-  },
   "bundle": {
     "active": true,
     "icon": [
@@ -38,7 +29,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "identifier": "com.kobozo.jaterm",
     "publisher": "Kobozo",
     "copyright": "© 2024 Kobozo. All rights reserved.",
     "category": "DeveloperTools",
@@ -53,24 +43,9 @@
         "type": "embedBootstrapper"
       },
       "wix": {
-        "language": "en-US",
-        "template": null,
-        "fragmentPaths": [],
-        "componentGroupRefs": [],
-        "componentRefs": [],
-        "featureGroupRefs": [],
-        "featureRefs": [],
-        "mergeRefs": [],
-        "skipWebviewInstall": false,
-        "license": null,
-        "bannerPath": null,
-        "dialogImagePath": null
+        "language": "en-US"
       },
       "nsis": {
-        "license": null,
-        "headerImage": null,
-        "sidebarImage": null,
-        "installerIcon": null,
         "installMode": "perMachine",
         "languages": ["English"],
         "displayLanguageSelector": false
@@ -78,7 +53,6 @@
     },
     "macOS": {
       "frameworks": [],
-      "exceptionDomain": "",
       "signingIdentity": null,
       "providerShortName": null,
       "entitlements": null,
@@ -88,25 +62,18 @@
       "deb": {
         "depends": [
           "libwebkit2gtk-4.1-0",
-          "libgtk-3-0",
-          "libayatana-appindicator3-1"
+          "libgtk-3-0"
         ],
         "section": "utility",
-        "priority": "optional",
-        "files": {}
+        "priority": "optional"
       },
       "appimage": {
-        "bundleMediaFramework": true,
-        "files": {}
+        "bundleMediaFramework": true
       },
       "rpm": {
         "epoch": 0,
-        "files": {},
         "release": "1"
       }
-    },
-    "resources": {
-      "ffmpeg": null
     }
   },
   "plugins": {
@@ -116,6 +83,13 @@
       "execute": [],
       "sidecar": [],
       "scope": []
+    },
+    "updater": {
+      "active": true,
+      "pubkey": "PUBKEY_PLACEHOLDER_REPLACE_IN_CI",
+      "endpoints": [
+        "https://github.com/Kobozo/jaterm/releases/latest/download/latest.json"
+      ]
     }
   }
 }
