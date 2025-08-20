@@ -144,6 +144,7 @@ fn parse_netstat_output(output: &str) -> Result<Vec<u16>> {
     Ok(ports)
 }
 
+#[allow(dead_code)]
 fn parse_netstat_macos(output: &str) -> Result<Vec<u16>> {
     let mut ports = Vec::new();
     
@@ -188,6 +189,7 @@ fn parse_netstat_windows(output: &str) -> Result<Vec<u16>> {
     Ok(ports)
 }
 
+#[allow(dead_code)]
 fn parse_lsof_output(output: &str) -> Result<Vec<u16>> {
     let mut ports = Vec::new();
     
@@ -216,6 +218,7 @@ fn extract_port_from_address(addr: &str) -> Option<u16> {
     None
 }
 
+#[allow(dead_code)]
 fn extract_port_from_macos_address(addr: &str) -> Option<u16> {
     // macOS netstat uses dots as separators (e.g., 127.0.0.1.3000)
     // Also handle IPv6 format with colons

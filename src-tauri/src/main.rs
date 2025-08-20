@@ -7,6 +7,9 @@ mod events;
 mod state;
 mod utils;
 
+#[cfg(debug_assertions)]
+use tauri::Manager;
+
 fn main() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
