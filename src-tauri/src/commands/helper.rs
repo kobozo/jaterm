@@ -1,8 +1,10 @@
 use serde::Serialize;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 // Include the generated helper module from build.rs
 include!(concat!(env!("OUT_DIR"), "/helper_generated.rs"));
@@ -63,9 +65,16 @@ pub async fn helper_local_ensure() -> Result<HelperStatus, String> {
   }
   
   // Set executable permissions
-  let mut perms = fs::metadata(&path).map_err(|e| e.to_string())?.permissions();
-  perms.set_mode(0o755);
-  fs::set_permissions(&path, perms).map_err(|e| e.to_string())?;
+  #[cfg(unix)]
+  {
+    let mut perms = fs::metadata(&path).map_err(|e| e.to_string())?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&path, perms).map_err(|e| e.to_string())?;
+  }
+  #[cfg(windows)]
+  {
+    // Windows doesn't need explicit executable permissions for .exe files
+  }
 
   // Verify health
   let res = helper_local_exec_internal(&path, &["health"]).map_err(|e| e)?;
