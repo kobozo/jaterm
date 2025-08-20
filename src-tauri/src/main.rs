@@ -6,7 +6,6 @@ mod shell;
 mod events;
 mod state;
 mod utils;
-use tauri::Manager;
 
 fn main() {
   tauri::Builder::default()
@@ -53,10 +52,10 @@ fn main() {
       commands::git::git_status,
       commands::watcher::watch_subscribe
     ])
-    .setup(|app| {
+    .setup(|_app| {
       // Initialize shared state or services here.
       #[cfg(debug_assertions)]
-      if let Some(main) = app.get_webview_window("main") {
+      if let Some(main) = _app.get_webview_window("main") {
         main.open_devtools();
         let _ = main.set_focus();
       }
