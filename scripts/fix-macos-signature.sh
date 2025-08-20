@@ -19,10 +19,12 @@ find src-tauri/target/*/release/bundle/macos -name "*.app" -type d 2>/dev/null |
     if [ -d "$app" ]; then
         echo "Processing: $app"
         
-        # Remove any existing signature
+        # Remove any existing signature and extended attributes
         codesign --remove-signature "$app" 2>/dev/null || true
+        xattr -cr "$app" 2>/dev/null || true
         
-        # Sign with ad-hoc signature, deep signing all components
+        # Sign with ad-hoc signature, deep signing all components with sealed resources
+        codesign --force --deep --sign - --options runtime "$app" 2>/dev/null || \
         codesign --force --deep --sign - "$app"
         
         echo "✓ Signed: $app"

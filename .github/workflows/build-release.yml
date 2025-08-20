@@ -265,10 +265,14 @@ jobs:
         run: |
           pnpm tauri build --target ${{ matrix.target }}
           
-      - name: Fix macOS signatures
+      - name: Fix macOS signatures and recreate DMG
         if: matrix.os == 'macos-latest'
         run: |
+          # Fix the app bundle signature
           ./scripts/fix-macos-signature.sh --ci
+          
+          # Recreate the DMG with the properly signed app
+          ./scripts/recreate-dmg.sh ${{ matrix.target }} ${{ needs.create-release.outputs.version }}
           
       - name: Prepare artifacts (Windows)
         if: matrix.os == 'windows-latest'
