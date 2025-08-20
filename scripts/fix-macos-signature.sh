@@ -36,30 +36,34 @@ find src-tauri/target/*/release/bundle/macos -name "*.app" -type d 2>/dev/null |
     fi
 done
 
-# Also process DMG contents if they exist
-find src-tauri/target/*/release/bundle/dmg -name "*.dmg" -type f 2>/dev/null | while read -r dmg; do
-    if [ -f "$dmg" ]; then
-        echo "Processing DMG: $dmg"
-        
-        # Create a temporary mount point
-        MOUNT_POINT=$(mktemp -d)
-        
-        # Mount the DMG
-        hdiutil attach "$dmg" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
-        
-        # Find and sign the app inside
-        find "$MOUNT_POINT" -name "*.app" -type d | while read -r app; do
-            echo "Signing app in DMG: $app"
-            codesign --remove-signature "$app" 2>/dev/null || true
-            codesign --force --deep --sign - "$app"
-        done
-        
-        # Unmount
-        hdiutil detach "$MOUNT_POINT" -quiet
-        rmdir "$MOUNT_POINT"
-        
-        echo "✓ DMG processed: $dmg"
-    fi
-done
+# Skip DMG processing in CI - DMG contents are read-only after creation
+# The app bundle inside was already signed before DMG creation
+if [ "$1" != "--ci" ]; then
+    # Also process DMG contents if they exist (local builds only)
+    find src-tauri/target/*/release/bundle/dmg -name "*.dmg" -type f 2>/dev/null | while read -r dmg; do
+        if [ -f "$dmg" ]; then
+            echo "Processing DMG: $dmg"
+            
+            # Create a temporary mount point
+            MOUNT_POINT=$(mktemp -d)
+            
+            # Mount the DMG
+            hdiutil attach "$dmg" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+            
+            # Find and sign the app inside
+            find "$MOUNT_POINT" -name "*.app" -type d | while read -r app; do
+                echo "Signing app in DMG: $app"
+                codesign --remove-signature "$app" 2>/dev/null || true
+                codesign --force --deep --sign - "$app"
+            done
+            
+            # Unmount
+            hdiutil detach "$MOUNT_POINT" -quiet
+            rmdir "$MOUNT_POINT"
+            
+            echo "✓ DMG processed: $dmg"
+        fi
+    done
+fi
 
 echo "macOS signature fix complete!"
