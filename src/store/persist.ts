@@ -1,4 +1,4 @@
-import { loadState, saveState } from '@/types/ipc';
+import { loadState, saveState, loadProfiles, saveProfiles } from '@/types/ipc';
 
 export type AppPersistState = {
   recents?: { path: string; lastOpenedAt: number }[];
@@ -18,8 +18,15 @@ export type AppPersistState = {
 
 export async function loadAppState(): Promise<AppPersistState> {
   try {
-    const data = (await loadState('jaterm')) || {};
-    return (data || {}) as AppPersistState;
+    const [stateData, profilesData] = await Promise.all([
+      loadState('jaterm'),
+      loadProfiles('jaterm'),
+    ]);
+    const merged: AppPersistState = {
+      ...(stateData || {}),
+      ...(profilesData || {}),
+    } as AppPersistState;
+    return merged;
   } catch {
     return {};
   }
@@ -27,9 +34,32 @@ export async function loadAppState(): Promise<AppPersistState> {
 
 export async function saveAppState(partial: AppPersistState): Promise<void> {
   try {
-    const current = (await loadAppState()) as AppPersistState;
-    const next = { ...current, ...partial };
-    await saveState(next, 'jaterm');
+    // Load current split files
+    const [stateCurrent, profilesCurrent] = await Promise.all([
+      loadState('jaterm'),
+      loadProfiles('jaterm'),
+    ]);
+
+    // Route profiles-related keys
+    const profilesPatch: any = {};
+    if (typeof partial.profiles !== 'undefined') profilesPatch.profiles = partial.profiles;
+    if (typeof partial.profilesTree !== 'undefined') profilesPatch.profilesTree = partial.profilesTree;
+
+    // Route runtime state keys (everything else)
+    const statePatch: any = { ...partial };
+    delete statePatch.profiles;
+    delete statePatch.profilesTree;
+
+    const writes: Promise<any>[] = [];
+    if (Object.keys(profilesPatch).length) {
+      const nextProfiles = { ...(profilesCurrent || {}), ...profilesPatch };
+      writes.push(saveProfiles(nextProfiles, 'jaterm'));
+    }
+    if (Object.keys(statePatch).length) {
+      const nextState = { ...(stateCurrent || {}), ...statePatch };
+      writes.push(saveState(nextState, 'jaterm'));
+    }
+    await Promise.all(writes);
   } catch {
     // ignore
   }

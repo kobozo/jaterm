@@ -253,6 +253,20 @@ export function saveState(state: any, appName?: string): Promise<void> {
   return invoke('save_state', { appName, state } as any);
 }
 
+// Split persistence files
+export function loadProfiles(appName?: string): Promise<any> {
+  return invoke('load_profiles', { appName } as any);
+}
+export function saveProfiles(profiles: any, appName?: string): Promise<void> {
+  return invoke('save_profiles', { appName, profiles } as any);
+}
+export function loadConfig(appName?: string): Promise<any> {
+  return invoke('load_config', { appName } as any);
+}
+export function saveConfig(config: any, appName?: string): Promise<void> {
+  return invoke('save_config', { appName, config } as any);
+}
+
 // Shell helpers
 export function installZshOsc7(): Promise<boolean> {
   return invoke('install_zsh_osc7');
