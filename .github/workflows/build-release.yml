@@ -35,8 +35,11 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/v}
           else
             # Generate a valid semver version for automatic builds
-            # Use 0.0.0-dev.YYYYMMDDHHMMSS format (no dots in prerelease)
-            VERSION="0.0.0-dev$(date +%Y%m%d%H%M%S)"
+            # For Windows MSI, the numeric part must be < 65535
+            # Use day of year (1-366) + HHMM format (max: 3662359 = 36623)
+            DAY_OF_YEAR=$(date +%j)
+            TIME_PART=$(date +%H%M)
+            VERSION="0.0.0-dev${DAY_OF_YEAR}${TIME_PART}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
