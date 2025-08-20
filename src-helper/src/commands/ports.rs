@@ -101,6 +101,7 @@ fn detect_windows() -> Result<Vec<u16>> {
     Ok(vec![])
 }
 
+#[allow(dead_code)]
 fn parse_ss_output(output: &str) -> Result<Vec<u16>> {
     let mut ports = Vec::new();
     
@@ -122,6 +123,7 @@ fn parse_ss_output(output: &str) -> Result<Vec<u16>> {
     Ok(ports)
 }
 
+#[allow(dead_code)]
 fn parse_netstat_output(output: &str) -> Result<Vec<u16>> {
     let mut ports = Vec::new();
     
@@ -165,6 +167,7 @@ fn parse_netstat_macos(output: &str) -> Result<Vec<u16>> {
     Ok(ports)
 }
 
+#[allow(dead_code)]
 fn parse_netstat_windows(output: &str) -> Result<Vec<u16>> {
     let mut ports = Vec::new();
     

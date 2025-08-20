@@ -54,8 +54,8 @@ impl Inner {
 }
 
 pub struct SshSession {
-    pub id: String,
-    pub tcp: TcpStream,
+    #[allow(dead_code)] pub id: String,
+    #[allow(dead_code)] pub tcp: TcpStream,
     pub sess: SshSessionInner,
     // Serialize all libssh2 calls across channels for this session
     pub lock: std::sync::Arc<StdMutex<()>>,
@@ -66,7 +66,7 @@ pub struct SshSession {
 }
 
 pub struct SshChannel {
-    pub id: String,
+    #[allow(dead_code)] pub id: String,
     pub session_id: String,
     pub chan: Arc<StdMutex<Channel>>,
 }
@@ -74,10 +74,11 @@ pub struct SshChannel {
 pub enum ForwardType { Local, Remote }
 
 pub enum ForwardBackend {
-    LocalThread { shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>, thread: Option<std::thread::JoinHandle<()>> },
+    #[allow(dead_code)] LocalThread { shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>, thread: Option<std::thread::JoinHandle<()>> },
     SshProcess { child: Option<std::process::Child> },
 }
 
+#[allow(dead_code)]
 pub struct SshForward {
     pub id: String,
     pub session_id: String,

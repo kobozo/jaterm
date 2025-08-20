@@ -26,7 +26,7 @@ pub struct SshProfile {
   #[serde(default = "default_port")] pub port: u16,
   pub user: String,
   #[serde(default)] pub auth: Option<SshAuth>,
-  #[serde(default)] pub timeout_ms: Option<u64>,
+  #[serde(default)] #[allow(dead_code)] pub timeout_ms: Option<u64>,
   #[serde(default)] pub trust_host: Option<bool>,
 }
 
@@ -826,7 +826,7 @@ pub async fn ssh_open_forward(app: tauri::AppHandle, state: State<'_, crate::sta
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortForward { 
-    pub id: Option<String>, 
+    #[allow(dead_code)] pub id: Option<String>, 
     #[serde(rename="type")] pub r#type: String, 
     pub src_host: String, 
     pub src_port: u16, 
