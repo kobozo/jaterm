@@ -36,10 +36,11 @@ jobs:
           else
             # Generate a valid semver version for automatic builds
             # For Windows MSI, the numeric part must be < 65535
-            # Use day of year (1-366) + HHMM format (max: 3662359 = 36623)
+            # Use day of year (1-366) + hour (00-23) format
+            # Example: Aug 20 at 15:44 = day 232 hour 15 = 23215
             DAY_OF_YEAR=$(date +%j)
-            TIME_PART=$(date +%H%M)
-            VERSION="0.0.0-dev${DAY_OF_YEAR}${TIME_PART}"
+            HOUR=$(date +%H)
+            VERSION="0.0.0-dev${DAY_OF_YEAR}${HOUR}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
