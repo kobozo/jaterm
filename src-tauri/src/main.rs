@@ -45,6 +45,7 @@ fn main() {
       commands::ssh::ssh_open_forward,
       commands::ssh::ssh_close_forward,
       commands::ssh::ssh_home_dir,
+      commands::ssh::scan_ssh_keys,
       commands::ssh::ssh_sftp_list,
       commands::ssh::ssh_sftp_mkdirs,
       commands::ssh::ssh_sftp_read,

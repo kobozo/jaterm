@@ -5,11 +5,133 @@ import { addRecent } from '@/store/recents';
 import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
 import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, ensureProfilesTree, saveProfilesTree, resolveEffectiveSettings, type LocalProfile, type SshProfileStored, type ProfilesTreeNode } from '@/store/persist';
 import { getThemeList, themes } from '@/config/themes';
-import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec } from '@/types/ipc';
+import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec, scanSshKeys, type SshKeyInfo } from '@/types/ipc';
 import { ensureHelper } from '@/services/helper';
 import { useToasts } from '@/store/toasts';
 
 import type { RecentSession, RecentSshSession } from '@/store/sessions';
+
+// SSH Key Selector Component
+function SshKeySelector({ value, onChange }: { value: string; onChange: (path: string) => void }) {
+  const [sshKeys, setSshKeys] = useState<SshKeyInfo[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  // Scan for SSH keys when component mounts or dropdown is opened
+  const loadSshKeys = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
+    try {
+      const keys = await scanSshKeys();
+      setSshKeys(keys);
+    } catch (err) {
+      console.error('Failed to scan SSH keys:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSshKeys();
+  }, []);
+
+  const handleBrowse = async () => {
+    try {
+      const home = await homeDir();
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        defaultPath: `${home}/.ssh`,
+        title: 'Select SSH Private Key',
+      });
+      
+      if (selected && typeof selected === 'string') {
+        onChange(selected);
+      }
+    } catch (err) {
+      console.error('Failed to open file dialog:', err);
+    }
+  };
+
+  return (
+    <div>
+      <label>Key Path</label>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
+        <div style={{ flex: 1, position: 'relative' }}>
+          <input
+            style={{ width: '100%' }}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="~/.ssh/id_ed25519"
+            onFocus={() => setShowDropdown(true)}
+            onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+          />
+          {showDropdown && sshKeys.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              right: 0,
+              background: '#1e1e1e',
+              border: '1px solid #444',
+              borderTop: 'none',
+              maxHeight: 200,
+              overflowY: 'auto',
+              zIndex: 1000,
+            }}>
+              {sshKeys.map((key) => (
+                <div
+                  key={key.path}
+                  style={{
+                    padding: '6px 8px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderBottom: '1px solid #333',
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onChange(key.path);
+                    setShowDropdown(false);
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#2a2a2a';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <span style={{ fontSize: 13 }}>{key.name}</span>
+                  <span style={{ fontSize: 11, color: '#888' }}>{key.key_type}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={handleBrowse}
+          style={{
+            padding: '4px 12px',
+            background: '#2a2a2a',
+            border: '1px solid #444',
+            borderRadius: 4,
+            cursor: 'pointer',
+          }}
+          title="Browse for key file"
+        >
+          Browse...
+        </button>
+      </div>
+      {sshKeys.length > 0 && !showDropdown && (
+        <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+          {sshKeys.length} key{sshKeys.length !== 1 ? 's' : ''} found in ~/.ssh
+        </div>
+      )}
+    </div>
+  );
+}
 
 type Props = {
   onOpenFolder: (arg: string | { path: string; terminal?: any; shell?: any }) => void;
@@ -37,6 +159,13 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     fontFamily?: string;
     // SSH
     defaultForwards?: Array<{ type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number }>;
+    sshHost?: string;
+    sshPort?: number;
+    sshUser?: string;
+    sshAuthType?: 'agent' | 'password' | 'key';
+    sshPassword?: string;
+    sshKeyPath?: string;
+    sshPassphrase?: string;
   } }>(null);
   const [sshOpen, setSshOpen] = useState(false);
   const [sshForm, setSshForm] = useState<{ host: string; port?: number; user: string; authType: 'password' | 'key' | 'agent'; password?: string; keyPath?: string; passphrase?: string; cwd?: string }>({ host: '', user: '', authType: 'agent' });
@@ -701,10 +830,10 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
               )}
               {sshForm.authType === 'key' && (
                 <>
-                  <label>
-                    Key Path
-                    <input style={{ width: '100%' }} value={sshForm.keyPath ?? ''} onChange={(e) => setSshForm((s) => ({ ...s, keyPath: e.target.value }))} placeholder="~/.ssh/id_ed25519" />
-                  </label>
+                  <SshKeySelector
+                    value={sshForm.keyPath ?? ''}
+                    onChange={(keyPath) => setSshForm((s) => ({ ...s, keyPath }))}
+                  />
                   <label>
                     Passphrase (optional)
                     <input style={{ width: '100%' }} type="password" value={sshForm.passphrase ?? ''} onChange={(e) => setSshForm((s) => ({ ...s, passphrase: e.target.value }))} />
@@ -881,7 +1010,25 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     </div>
                   </div>
                   {spForm.authType === 'password' && (<label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} /></label>)}
-                  {spForm.authType === 'key' && (<><label>Key Path<input style={{ width: '100%' }} value={spForm.keyPath ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, keyPath: e.target.value })} placeholder="~/.ssh/id_ed25519" /></label><label>Passphrase<input style={{ width: '100%' }} type="password" value={spForm.passphrase ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, passphrase: e.target.value })} /></label></>)}
+                  {spForm.authType === 'key' && (
+                    <>
+                      {!spInherit.sshAuth ? (
+                        <SshKeySelector
+                          value={spForm.keyPath ?? ''}
+                          onChange={(keyPath) => setSpForm({ ...spForm, keyPath })}
+                        />
+                      ) : (
+                        <label>
+                          Key Path
+                          <input style={{ width: '100%' }} value={spForm.keyPath ?? ''} disabled={true} placeholder="~/.ssh/id_ed25519" />
+                        </label>
+                      )}
+                      <label>
+                        Passphrase
+                        <input style={{ width: '100%' }} type="password" value={spForm.passphrase ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, passphrase: e.target.value })} />
+                      </label>
+                    </>
+                  )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <label style={{ flex: 1 }}>Remote Path<input style={{ width: '100%' }} value={spForm.path ?? ''} onChange={(e) => setSpForm({ ...spForm, path: e.target.value })} placeholder="/home/user" /></label>
                     <button onClick={async () => {
@@ -1541,9 +1688,10 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   {folderSettingsDialog.form.sshAuthType === 'key' && (
                     <>
                       <div style={{ marginBottom: 8 }}>
-                        <label>Key Path
-                          <input style={{ width: '100%' }} value={folderSettingsDialog.form.sshKeyPath || ''} onChange={(e) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshKeyPath: e.target.value || undefined } })} placeholder="~/.ssh/id_ed25519" />
-                        </label>
+                        <SshKeySelector
+                          value={folderSettingsDialog.form.sshKeyPath || ''}
+                          onChange={(keyPath) => setFolderSettingsDialog({ ...folderSettingsDialog, form: { ...folderSettingsDialog.form, sshKeyPath: keyPath || undefined } })}
+                        />
                       </div>
                       <div style={{ marginBottom: 8 }}>
                         <label>Passphrase

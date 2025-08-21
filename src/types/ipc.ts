@@ -136,6 +136,16 @@ export function sshCloseForward(forwardId: string) {
   return invoke('ssh_close_forward', { forwardId } as any);
 }
 
+export interface SshKeyInfo {
+  path: string;
+  name: string;
+  key_type: string;
+}
+
+export function scanSshKeys(): Promise<SshKeyInfo[]> {
+  return invoke('scan_ssh_keys');
+}
+
 export function gitStatus(cwd: string): Promise<GitStatus> {
   return invoke('git_status', { path: cwd } as any);
 }

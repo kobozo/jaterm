@@ -1011,3 +1011,108 @@ pub async fn ssh_close_shell(state: State<'_, crate::state::app_state::AppState>
   }
   Ok(())
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SshKeyInfo {
+    pub path: String,
+    pub name: String,
+    pub key_type: String,
+}
+
+#[tauri::command]
+pub async fn scan_ssh_keys() -> Result<Vec<SshKeyInfo>, String> {
+    let mut keys = Vec::new();
+    
+    // Get the user's home directory
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not find home directory")?;
+    
+    let ssh_dir = std::path::Path::new(&home).join(".ssh");
+    
+    if !ssh_dir.exists() {
+        return Ok(keys); // Return empty list if .ssh doesn't exist
+    }
+    
+    // Common SSH key file patterns
+    let key_patterns = vec![
+        "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+        "identity", "id_rsa_*", "id_dsa_*", "id_ecdsa_*", "id_ed25519_*"
+    ];
+    
+    // Read directory entries
+    if let Ok(entries) = std::fs::read_dir(&ssh_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            
+            // Skip directories
+            if path.is_dir() {
+                continue;
+            }
+            
+            let file_name = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            
+            // Skip .pub files and known non-key files
+            if file_name.ends_with(".pub") || 
+               file_name == "known_hosts" || 
+               file_name == "authorized_keys" ||
+               file_name == "config" ||
+               file_name.starts_with(".") {
+                continue;
+            }
+            
+            // Check if it matches common key patterns or has no extension
+            let is_key = key_patterns.iter().any(|pattern| {
+                if pattern.ends_with("*") {
+                    let prefix = &pattern[..pattern.len()-1];
+                    file_name.starts_with(prefix)
+                } else {
+                    file_name == *pattern
+                }
+            }) || !file_name.contains('.');
+            
+            if is_key {
+                // Try to determine key type by reading first line
+                let key_type = if let Ok(contents) = std::fs::read_to_string(&path) {
+                    if contents.starts_with("-----BEGIN RSA PRIVATE KEY-----") {
+                        "RSA".to_string()
+                    } else if contents.starts_with("-----BEGIN DSA PRIVATE KEY-----") {
+                        "DSA".to_string()
+                    } else if contents.starts_with("-----BEGIN EC PRIVATE KEY-----") {
+                        "ECDSA".to_string()
+                    } else if contents.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----") {
+                        // Could be Ed25519 or other modern key types
+                        if file_name.contains("ed25519") {
+                            "Ed25519".to_string()
+                        } else if file_name.contains("ecdsa") {
+                            "ECDSA".to_string()
+                        } else if file_name.contains("rsa") {
+                            "RSA".to_string()
+                        } else {
+                            "SSH".to_string()
+                        }
+                    } else if contents.starts_with("-----BEGIN PRIVATE KEY-----") {
+                        "Private Key".to_string()
+                    } else {
+                        continue; // Not a private key file
+                    }
+                } else {
+                    continue; // Can't read file, skip it
+                };
+                
+                keys.push(SshKeyInfo {
+                    path: path.to_string_lossy().to_string(),
+                    name: file_name.to_string(),
+                    key_type,
+                });
+            }
+        }
+    }
+    
+    // Sort by name for consistent ordering
+    keys.sort_by(|a, b| a.name.cmp(&b.name));
+    
+    Ok(keys)
+}
