@@ -270,9 +270,15 @@ impl EncryptionManager {
                                     }
                                 }
                             }
+                        } else {
+                            // No encrypted profiles exist yet - password is correct since it matches the hash
+                            // Store the key for future use
+                            eprintln!("No encrypted profiles exist yet, storing verified key");
+                            return Ok(true);
                         }
                     }
                     
+                    // If we can't find the profiles path, assume it's correct
                     return Ok(true);
                 } else {
                     return Ok(false);
@@ -545,10 +551,36 @@ mod tests {
     
     #[test]
     fn test_verify_master_key() {
+        use tempfile::tempdir;
+        use std::env;
+        
+        // Create a temporary directory for the test
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path().to_path_buf();
+        
+        // Override HOME environment variable for this test
+        env::set_var("HOME", &temp_path);
+        
         let manager = EncryptionManager::new();
+        
+        // Set the master key - this will save to the temp directory
         manager.set_master_key("correct_password").unwrap();
         
+        // Clear the in-memory key to force verification from fallback
+        *manager.master_key.lock().unwrap() = None;
+        *manager.salt.lock().unwrap() = None;
+        
+        // Test 1: Correct password should verify successfully
         assert!(manager.verify_master_key("correct_password").unwrap());
+        
+        // Clear again for next test
+        *manager.master_key.lock().unwrap() = None;
+        *manager.salt.lock().unwrap() = None;
+        
+        // Test 2: Wrong password should fail
         assert!(!manager.verify_master_key("wrong_password").unwrap());
+        
+        // Cleanup
+        temp_dir.close().unwrap();
     }
 }

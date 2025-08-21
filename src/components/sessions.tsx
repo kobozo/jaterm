@@ -136,7 +136,7 @@ function SshKeySelector({ value, onChange }: { value: string; onChange: (path: s
 type Props = {
   onOpenFolder: (arg: string | { path: string; terminal?: any; shell?: any }) => void;
   onOpenSession?: (session: RecentSession) => void;
-  onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string; os?: string }) => void;
+  onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string; profileName?: string; os?: string }) => void;
 };
 
 export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Props) {
@@ -297,7 +297,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
               term = eff.terminal; shell = eff.shell; advanced = eff.advanced; ssh = eff.ssh ? { ...ssh, ...eff.ssh } : ssh;
             }
           } catch {}
-          onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.path, profileId: p.id, terminal: term, shell, advanced, os: p.os });
+          onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.path, profileId: p.id, profileName: p.name, terminal: term, shell, advanced, os: p.os });
         }
       } else if (r.user && r.host) {
         onOpenSsh?.({ host: r.host, port: (r as any).port ?? 22, user: r.user, auth: { agent: true } as any, cwd: r.path });
@@ -445,8 +445,13 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
           port: effective.ssh?.port ?? p.port,
           user: effective.ssh?.user ?? p.user,
           auth: effective.ssh?.auth ?? (p.auth || { agent: true }),
-          cwd: p.path, profileId: p.id,
-          terminal: effective.terminal, shell: effective.shell, advanced: effective.advanced, os: p.os
+          cwd: p.path, 
+          profileId: p.id,
+          profileName: p.name,
+          terminal: effective.terminal, 
+          shell: effective.shell, 
+          advanced: effective.advanced, 
+          os: p.os
         } as any);
       }
     }
@@ -881,7 +886,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                                     term = eff.terminal; shell = eff.shell; advanced = eff.advanced; ssh = eff.ssh ? { ...ssh, ...eff.ssh } : ssh;
                                   }
                                 } catch {}
-                                onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.s.path, profileId: p.id, terminal: term, shell, advanced, os: p.os });
+                                onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.s.path, profileId: p.id, profileName: p.name, terminal: term, shell, advanced, os: p.os });
                               } else if (r.s.host && r.s.user) {
                                 onOpenSsh?.({ host: r.s.host, port: r.s.port ?? 22, user: r.s.user, auth: { agent: true } as any, cwd: r.s.path });
                               } else {

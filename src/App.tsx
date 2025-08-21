@@ -614,6 +614,7 @@ export default function App() {
     auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; 
     cwd?: string; 
     profileId?: string;
+    profileName?: string; // Profile name for tab title
     terminal?: any; // Terminal customization settings
     shell?: any; // Shell and environment settings
     advanced?: any; // Advanced SSH settings
@@ -742,6 +743,8 @@ export default function App() {
         sshPort: opts.port ?? 22, 
         openPath: opts.cwd ?? null, 
         cwd: opts.cwd ?? sshHome ?? null, 
+        // Set the title to profile name if available, otherwise use user@host
+        title: opts.profileName || `${opts.user}@${opts.host}`,
         panes: [chanId], 
         activePane: chanId, 
         status: { 
