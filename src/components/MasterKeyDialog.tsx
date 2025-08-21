@@ -109,7 +109,7 @@ export function MasterKeyDialog({ isOpen, onClose, onSuccess, mode, isMigration 
         }}
       >
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <div className="nf-icon" style={{ fontSize: '32px', color: '#3b82f6', marginBottom: '12px' }}>
+          <div className="nf-icon" style={{ fontSize: '32px', color: '#10b981', marginBottom: '12px' }}>
             {'\uf023'}
           </div>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'white', marginBottom: '8px' }}>
@@ -239,7 +239,7 @@ export function MasterKeyDialog({ isOpen, onClose, onSuccess, mode, isMigration 
               style={{
                 flex: 1,
                 padding: '10px',
-                backgroundColor: loading ? '#4b5563' : '#2563eb',
+                backgroundColor: loading ? '#4b5563' : '#059669',
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',

@@ -1790,7 +1790,7 @@ export default function App() {
                   type="submit"
                   style={{
                     padding: '6px 12px',
-                    background: '#4aa3ff',
+                    background: '#10b981',
                     color: '#fff',
                     border: 'none',
                     borderRadius: 4,

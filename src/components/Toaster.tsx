@@ -19,7 +19,7 @@ export default function Toaster() {
                 return (
                   <>
                     <div style={{ height: 6, background: '#333', borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', background: '#4aa3ff' }} />
+                      <div style={{ width: `${pct}%`, height: '100%', background: '#10b981' }} />
                     </div>
                     <div style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>{pct}%</div>
                   </>
@@ -38,7 +38,7 @@ export default function Toaster() {
                   }}
                   style={{
                     padding: '4px 8px',
-                    background: '#4aa3ff',
+                    background: '#10b981',
                     color: '#fff',
                     border: 'none',
                     borderRadius: 4,
