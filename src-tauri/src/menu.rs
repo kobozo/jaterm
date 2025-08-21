@@ -1,8 +1,7 @@
 use tauri::{
-    menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder, PredefinedMenuItem},
-    AppHandle, Manager, Wry,
+    menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
+    AppHandle, Manager, Wry, Emitter,
 };
-use tauri_plugin_shell::ShellExt;
 
 pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     // File menu items
@@ -124,9 +123,15 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .id("report_issue")
         .build(app)?;
     
-    let about = MenuItemBuilder::new("About JaTerm")
-        .id("about")
+    let check_updates = MenuItemBuilder::new("Check for Updates...")
+        .id("check_updates")
         .build(app)?;
+    
+    let release_notes = MenuItemBuilder::new("View Release Notes")
+        .id("release_notes")
+        .build(app)?;
+    
+    // About will be handled differently on macOS (in app menu) vs other platforms
     
     // Build submenus
     let file_menu = SubmenuBuilder::new(app, "File")
@@ -188,19 +193,45 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .maximize()
         .build()?;
     
+    #[cfg(target_os = "macos")]
     let help_menu = SubmenuBuilder::new(app, "Help")
         .item(&documentation)
         .item(&report_issue)
         .separator()
-        .item(&about)
+        .item(&check_updates)
+        .item(&release_notes)
         .build()?;
+    
+    #[cfg(not(target_os = "macos"))]
+    let help_menu = {
+        let about_item = MenuItemBuilder::new("About JaTerm")
+            .id("about")
+            .build(app)?;
+        
+        SubmenuBuilder::new(app, "Help")
+            .item(&documentation)
+            .item(&report_issue)
+            .separator()
+            .item(&check_updates)
+            .item(&release_notes)
+            .separator()
+            .item(&about_item)
+            .build()?
+    };
     
     // Build the complete menu
     #[cfg(target_os = "macos")]
     {
-        // On macOS, create app menu with about and preferences
+        use tauri::menu::AboutMetadata;
+        
+        // On macOS, create app menu with native about dialog
         let app_menu = SubmenuBuilder::new(app, "JaTerm")
-            .item(&about)
+            .about(Some(AboutMetadata {
+                name: Some("JaTerm".to_string()),
+                version: Some("1.1.0".to_string()),
+                copyright: Some("© 2025 Kobozo. All rights reserved.".to_string()),
+                ..Default::default()
+            }))
             .separator()
             .services()
             .separator()
@@ -258,7 +289,8 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event_id: &str) {
             let _ = app.emit("menu:close_tab", ());
         }
         "close_window" => {
-            if let Some(window) = app.get_focused_window() {
+            // Close the first window (usually the main window)
+            if let Some((_, window)) = app.webview_windows().iter().next() {
                 let _ = window.close();
             }
         }
@@ -272,7 +304,7 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event_id: &str) {
             let _ = app.emit("menu:find", ());
         }
         "toggle_fullscreen" => {
-            if let Some(window) = app.get_focused_window() {
+            if let Some((_, window)) = app.webview_windows().iter().next() {
                 let _ = window.set_fullscreen(!window.is_fullscreen().unwrap_or(false));
             }
         }
@@ -296,7 +328,7 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event_id: &str) {
         }
         #[cfg(debug_assertions)]
         "toggle_devtools" => {
-            if let Some(window) = app.get_focused_window() {
+            if let Some((_, window)) = app.webview_windows().iter().next() {
                 if window.is_devtools_open() {
                     window.close_devtools();
                 } else {
@@ -323,15 +355,31 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event_id: &str) {
             let _ = app.emit("menu:prev_pane", ());
         }
         "documentation" => {
-            // Use the shell plugin to open the URL
-            let _ = app.shell().open("https://github.com/kobozo/jaterm/wiki", None);
+            // Emit event to frontend to open URL
+            let _ = app.emit("menu:open_url", "https://github.com/Kobozo/JaTerm/wiki");
         }
         "report_issue" => {
-            // Use the shell plugin to open the URL
-            let _ = app.shell().open("https://github.com/kobozo/jaterm/issues/new", None);
+            // Emit event to frontend to open URL
+            let _ = app.emit("menu:open_url", "https://github.com/Kobozo/JaTerm/issues/new");
         }
+        "check_updates" => {
+            // Emit event to frontend to check for updates
+            let _ = app.emit("menu:check_updates", ());
+        }
+        "release_notes" => {
+            // Emit event to frontend to open release notes
+            let _ = app.emit("menu:open_url", "https://github.com/Kobozo/JaTerm/releases");
+        }
+        #[cfg(not(target_os = "macos"))]
         "about" => {
+            // Only emit about event on non-macOS platforms
+            // macOS uses native AboutMetadata in the app menu
             let _ = app.emit("menu:about", ());
+        }
+        #[cfg(target_os = "macos")]
+        "about" => {
+            // On macOS, the about dialog is handled natively via AboutMetadata
+            // Do nothing here as it's already configured in the app menu
         }
         _ => {}
     }

@@ -85,8 +85,9 @@
       "active": true,
       "pubkey": "PUBKEY_PLACEHOLDER_REPLACE_IN_CI",
       "endpoints": [
-        "https://github.com/Kobozo/jaterm/releases/latest/download/latest.json"
-      ]
+        "https://github.com/Kobozo/JaTerm/releases/latest/download/latest.json"
+      ],
+      "_comment": "Note: latest.json must be generated and uploaded with each release using GitHub Actions"
     }
   }
 }

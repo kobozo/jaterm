@@ -118,23 +118,44 @@ export default function App() {
         setUpdateAvailable({ version: (res as any).version || undefined });
         const tid = show({
           title: `Update available${(res as any).version ? ' ' + (res as any).version : ''}`,
-          message: 'Click to restart and install.',
+          message: 'A new version is ready to install.',
           kind: 'info',
           actions: [
             { label: 'Restart & Update', onClick: async () => {
               try { if (mod.install) await mod.install(); else if (res.downloadAndInstall) await res.downloadAndInstall(); }
               catch (e) { show({ title: 'Update failed', message: String(e), kind: 'error' }); }
+            } },
+            { label: 'View Release Notes', onClick: () => {
+              window.open('https://github.com/Kobozo/JaTerm/releases', '_blank');
             } }
           ]
         });
-        setTimeout(() => dismiss(tid), 15000);
+        setTimeout(() => dismiss(tid), 20000);
       } else {
-        const tid = show({ title: 'Up to date', message: 'No updates available.', kind: 'success' });
-        setTimeout(() => dismiss(tid), 2500);
+        const tid = show({ 
+          title: 'Up to date', 
+          message: 'No updates available.', 
+          kind: 'success',
+          actions: [
+            { label: 'View All Releases', onClick: () => {
+              window.open('https://github.com/Kobozo/JaTerm/releases', '_blank');
+            } }
+          ]
+        });
+        setTimeout(() => dismiss(tid), 5000);
       }
     } catch (e) {
-      const tid = show({ title: 'Update check failed', message: String(e), kind: 'error' });
-      setTimeout(() => dismiss(tid), 3000);
+      const tid = show({ 
+        title: 'Update check failed', 
+        message: 'Unable to check for updates. You can check manually on GitHub.', 
+        kind: 'error',
+        actions: [
+          { label: 'View Releases on GitHub', onClick: () => {
+            window.open('https://github.com/Kobozo/JaTerm/releases', '_blank');
+          } }
+        ]
+      });
+      setTimeout(() => dismiss(tid), 5000);
     } finally {
       setUpdateChecking(false);
     }
@@ -1055,15 +1076,27 @@ export default function App() {
         const s = await loadAppState();
         const ws = s.workspace;
         if (ws && ws.tabs && ws.tabs.length) {
-          // Prepare tabs
-          const newTabs = ws.tabs.map(() => ({ id: crypto.randomUUID(), cwd: null as any, panes: [], activePane: null as any, status: {} as any, title: undefined as any, layout: undefined as any }));
+          // Always keep the sessions tab as the first tab
+          const sessionsTab = { id: sessionsId, cwd: null as any, panes: [], activePane: null as any, status: {} };
+          // Prepare restored tabs (skip any that might be the old sessions tab)
+          const restoredTabs = ws.tabs
+            .filter(t => t.cwd || t.layoutShape) // Only restore tabs that had actual content
+            .map(() => ({ id: crypto.randomUUID(), cwd: null as any, panes: [], activePane: null as any, status: {} as any, title: undefined as any, layout: undefined as any }));
+          
+          // Combine sessions tab with restored tabs
+          const newTabs = [sessionsTab, ...restoredTabs];
           setTabs(newTabs);
-          const targetIndex = Math.min(ws.activeTabIndex ?? 0, ws.tabs.length - 1);
+          
+          // Adjust active tab index (account for sessions tab being at index 0)
+          const targetIndex = Math.min((ws.activeTabIndex ?? 0) + 1, newTabs.length - 1);
           setActiveTab(newTabs[targetIndex].id);
-          // Open each tab sequentially
-          for (let i = 0; i < ws.tabs.length; i++) {
+          
+          // Open each restored tab sequentially (skip sessions tab at index 0)
+          for (let i = 0; i < restoredTabs.length; i++) {
             const entry = ws.tabs[i];
-            await openSessionFor(newTabs[i].id, { cwd: entry.cwd, layoutShape: entry.layoutShape, title: entry.title });
+            if (entry.cwd || entry.layoutShape) {
+              await openSessionFor(restoredTabs[i].id, { cwd: entry.cwd, layoutShape: entry.layoutShape, title: entry.title });
+            }
           }
         }
       } catch (e) {
@@ -1221,7 +1254,17 @@ export default function App() {
       
       // Help menu events
       unlisteners.push(await listen('menu:about', () => {
-        addToast('info', 'JaTerm v0.1.0\nA modern terminal emulator with SSH support\n© 2025 Kobozo');
+        addToast('info', 'JaTerm v1.1.0\nA modern terminal emulator with SSH support\n© 2025 Kobozo');
+      }));
+      
+      // Check for updates handler
+      unlisteners.push(await listen('menu:check_updates', () => {
+        checkForUpdatesInteractive();
+      }));
+      
+      // URL opening handler
+      unlisteners.push(await listen<string>('menu:open_url', (event) => {
+        window.open(event.payload, '_blank');
       }));
     };
     

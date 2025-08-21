@@ -212,7 +212,7 @@ jobs:
       - name: Update version (Unix)
         if: matrix.os != 'windows-latest'
         env:
-          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
           echo "Setting version to: $VERSION"
@@ -238,7 +238,7 @@ jobs:
       - name: Update version (Windows)
         if: matrix.os == 'windows-latest'
         env:
-          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
         shell: pwsh
         run: |
           $VERSION = "${{ needs.create-release.outputs.version }}"
@@ -317,6 +317,8 @@ jobs:
           
       - name: Prepare artifacts (Windows)
         if: matrix.os == 'windows-latest'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         shell: pwsh
         run: |
           # Windows creates MSI installer
@@ -326,6 +328,12 @@ jobs:
           $msiFiles = Get-ChildItem -Path "src-tauri\target\${{ matrix.target }}\release\bundle\msi\*.msi" -ErrorAction SilentlyContinue
           if ($msiFiles) {
             Copy-Item $msiFiles[0] -Destination "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
+            
+            # Copy MSI signature if available
+            $sigFiles = Get-ChildItem -Path "src-tauri\target\${{ matrix.target }}\release\bundle\msi\*.msi.sig" -ErrorAction SilentlyContinue
+            if ($sigFiles) {
+              Copy-Item $sigFiles[0] -Destination "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi.sig"
+            }
           }
           
           # Copy NSIS installer if available
@@ -336,18 +344,58 @@ jobs:
           
       - name: Prepare artifacts (macOS)
         if: matrix.os == 'macos-latest'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          # macOS creates DMG
+          # macOS creates DMG and app.tar.gz for updater
           mkdir -p dist
           if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
+            # Copy DMG for manual installation
             cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.dmg || true
+            
+            # Create app.tar.gz for auto-updater
+            if [[ -d "src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app" ]]; then
+              cd src-tauri/target/${{ matrix.target }}/release/bundle/macos/
+              tar czf JaTerm.app.tar.gz JaTerm.app
+              cd -
+              cp src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app.tar.gz dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.app.tar.gz
+              
+              # Generate signature for app.tar.gz if signing keys are available
+              if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+                echo "Generating signature for aarch64 app.tar.gz..."
+                # Tauri should generate this automatically when built with signing keys
+                if [[ -f "src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app.tar.gz.sig" ]]; then
+                  cp src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app.tar.gz.sig dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.app.tar.gz.sig
+                fi
+              fi
+            fi
+            
             # Copy helper (Apple Silicon)
             if [[ -f "src-helper/target/${{ matrix.target }}/release/jaterm-agent" ]]; then
               cp "src-helper/target/${{ matrix.target }}/release/jaterm-agent" "dist/jaterm-agent_macos_aarch64"
               chmod +x dist/jaterm-agent_macos_aarch64 || true
             fi
           else
+            # Copy DMG for manual installation
             cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.dmg || true
+            
+            # Create app.tar.gz for auto-updater
+            if [[ -d "src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app" ]]; then
+              cd src-tauri/target/${{ matrix.target }}/release/bundle/macos/
+              tar czf JaTerm.app.tar.gz JaTerm.app
+              cd -
+              cp src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app.tar.gz dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.app.tar.gz
+              
+              # Generate signature for app.tar.gz if signing keys are available
+              if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+                echo "Generating signature for x64 app.tar.gz..."
+                # Tauri should generate this automatically when built with signing keys
+                if [[ -f "src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app.tar.gz.sig" ]]; then
+                  cp src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app.tar.gz.sig dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.app.tar.gz.sig
+                fi
+              fi
+            fi
+            
             # Copy helper (Intel)
             if [[ -f "src-helper/target/${{ matrix.target }}/release/jaterm-agent" ]]; then
               cp "src-helper/target/${{ matrix.target }}/release/jaterm-agent" "dist/jaterm-agent_macos_x64"
@@ -357,11 +405,21 @@ jobs:
           
       - name: Prepare artifacts (Linux)
         if: matrix.os == 'ubuntu-latest'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           # Linux creates AppImage and deb
           mkdir -p dist
+          
+          # Copy AppImage and its signature for updater
           cp src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.AppImage || true
+          if [[ -f "src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig" ]]; then
+            cp src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.AppImage.sig || true
+          fi
+          
+          # Copy deb package
           cp src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.deb || true
+          
           # Make AppImage executable
           chmod +x dist/*.AppImage || true
           # Copy helper (gnu)
@@ -388,5 +446,53 @@ jobs:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: dist/*
           fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  generate-latest-json:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          
+      - name: Prepare dist directory
+        run: |
+          mkdir -p dist
+          # Copy all artifacts to dist, flattening the structure
+          find artifacts -type f \( -name "*.msi" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.sig" -o -name "*.tar.gz" \) -exec cp {} dist/ \;
+          ls -la dist/
+          
+      - name: Generate latest.json
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          echo "Generating latest.json for version ${VERSION}"
+          
+          # Make script executable
+          chmod +x scripts/generate-latest-json.sh
+          
+          # Generate latest.json
+          ./scripts/generate-latest-json.sh "${VERSION}" "JaTerm ${VERSION} - Check the release page for details"
+          
+          # Verify it was created
+          if [ -f dist/latest.json ]; then
+            echo "latest.json generated successfully:"
+            cat dist/latest.json
+          else
+            echo "Error: latest.json was not generated!"
+            exit 1
+          fi
+          
+      - name: Upload latest.json to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: dist/latest.json
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
