@@ -125,8 +125,9 @@ export default function App() {
               try { if (mod.install) await mod.install(); else if (res.downloadAndInstall) await res.downloadAndInstall(); }
               catch (e) { show({ title: 'Update failed', message: String(e), kind: 'error' }); }
             } },
-            { label: 'View Release Notes', onClick: () => {
-              window.open('https://github.com/Kobozo/JaTerm/releases', '_blank');
+            { label: 'View Release Notes', onClick: async () => {
+              const { open } = await import('@tauri-apps/plugin-shell');
+              await open('https://github.com/Kobozo/JaTerm/releases');
             } }
           ]
         });
@@ -137,8 +138,9 @@ export default function App() {
           message: 'No updates available.', 
           kind: 'success',
           actions: [
-            { label: 'View All Releases', onClick: () => {
-              window.open('https://github.com/Kobozo/JaTerm/releases', '_blank');
+            { label: 'View All Releases', onClick: async () => {
+              const { open } = await import('@tauri-apps/plugin-shell');
+              await open('https://github.com/Kobozo/JaTerm/releases');
             } }
           ]
         });
@@ -150,8 +152,9 @@ export default function App() {
         message: 'Unable to check for updates. You can check manually on GitHub.', 
         kind: 'error',
         actions: [
-          { label: 'View Releases on GitHub', onClick: () => {
-            window.open('https://github.com/Kobozo/JaTerm/releases', '_blank');
+          { label: 'View Releases on GitHub', onClick: async () => {
+            const { open } = await import('@tauri-apps/plugin-shell');
+            await open('https://github.com/Kobozo/JaTerm/releases');
           } }
         ]
       });
@@ -1263,8 +1266,9 @@ export default function App() {
       }));
       
       // URL opening handler
-      unlisteners.push(await listen<string>('menu:open_url', (event) => {
-        window.open(event.payload, '_blank');
+      unlisteners.push(await listen<string>('menu:open_url', async (event) => {
+        const { open } = await import('@tauri-apps/plugin-shell');
+        await open(event.payload);
       }));
     };
     
