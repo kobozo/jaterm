@@ -608,17 +608,70 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
           </div>
           <p>Start a local terminal in your home or a specific folder.</p>
           <div style={{ margin: '16px 0', display: 'flex', gap: 12 }}>
-            <button onClick={handleHome}>Start in Home Folder</button>
-            <button onClick={handlePick}>Start in Specific Folder…</button>
-            <button onClick={() => setSshOpen(true)}>Open SSH Session…</button>
+            <button 
+              onClick={handleHome}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#059669'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
+            >Start in Home Folder</button>
+            <button 
+              onClick={handlePick}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#059669'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
+            >Start in Specific Folder…</button>
+            <button 
+              onClick={() => setSshOpen(true)}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#059669'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
+            >Open SSH Session…</button>
           </div>
 
           {/* Profiles tree */}
           <div style={{ marginTop: 24 }}>
             <h2>Profiles</h2>
             <div style={{ display: 'flex', gap: 12, marginBottom: 8, alignItems: 'center' }}>
-              <button onClick={() => { setLpForm({ name: '', path: '' }); setLpOpen(true); }}>New Local Profile</button>
-              <button onClick={async () => { 
+              <button 
+                onClick={() => { setLpForm({ name: '', path: '' }); setLpOpen(true); }}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'transparent',
+                  color: '#10b981',
+                  border: '1px solid #10b981',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10b981'; e.currentTarget.style.color = 'white'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#10b981'; }}
+              >New Local Profile</button>
+              <button 
+                onClick={async () => { 
                 setSpForm({ name: '', host: '', user: '', authType: 'agent', os: 'auto-detect' });
                 try {
                   if (tree && currentFolderId) {
@@ -636,12 +689,37 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   } else { setInheritedForSsh(null); setSpInherit({}); setInheritContextFolderId(null); setInheritContextNodeId(null); }
                 } catch { setInheritedForSsh(null); setSpInherit({}); setInheritContextFolderId(null); setInheritContextNodeId(null); }
                 setSpOpen(true);
-              }}>New SSH Profile</button>
+              }}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'transparent',
+                  color: '#10b981',
+                  border: '1px solid #10b981',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10b981'; e.currentTarget.style.color = 'white'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#10b981'; }}
+              >New SSH Profile</button>
               <span style={{ flex: 1 }} />
-              <button onClick={() => {
+              <button 
+                onClick={() => {
                 if (!tree || !currentFolderId) return;
                 setFolderDialog({ parentId: currentFolderId, name: '' });
-              }}>+ Folder</button>
+              }}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'transparent',
+                  color: '#10b981',
+                  border: '1px solid #10b981',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10b981'; e.currentTarget.style.color = 'white'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#10b981'; }}
+              >+ Folder</button>
             </div>
             <div style={{ border: '1px solid #333', borderRadius: 6, padding: 12 }}>
               {tree && currentFolderId ? (
@@ -650,7 +728,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   <div style={{ marginBottom: 8, fontSize: 13, color: '#bbb' }}>
                     {breadcrumbs(tree, currentFolderId).map((seg, i, arr) => (
                       <span key={seg.id}>
-                        <a href="#" onClick={(e) => { e.preventDefault(); setCurrentFolderId(seg.id); }} style={{ color: '#cbd5e1' }}>{seg.name}</a>
+                        <a href="#" onClick={(e) => { e.preventDefault(); setCurrentFolderId(seg.id); }} style={{ color: '#10b981', textDecoration: 'none' }}>{seg.name}</a>
                         {i < arr.length - 1 ? ' / ' : ''}
                       </span>
                     ))}
@@ -722,6 +800,18 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     setRecentSsh(await getRecentSshSessions());
                   }}
                   title="Clear all recent sessions"
+                  style={{
+                    padding: '2px 8px',
+                    backgroundColor: 'transparent',
+                    color: '#9ca3af',
+                    border: '1px solid #4b5563',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#4b5563'; e.currentTarget.style.color = '#9ca3af'; }}
                 >
                   Clear
                 </button>
@@ -735,6 +825,13 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                           href="#"
                           onClick={(e) => { e.preventDefault(); (onOpenSession ? onOpenSession(r.s) : onOpenFolder(r.s.cwd)); }}
                           title={r.s.cwd + ' — ' + new Date(r.s.closedAt).toLocaleString()}
+                          style={{
+                            color: '#10b981',
+                            textDecoration: 'none',
+                            transition: 'color 0.2s',
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.color = '#34d399'}
+                          onMouseLeave={(e) => e.currentTarget.style.color = '#10b981'}
                         >
                           {r.s.cwd}
                         </a>
@@ -753,6 +850,13 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                         <a
                           href="#"
                           title={r.s.path + ' — ' + new Date(r.s.closedAt).toLocaleString()}
+                          style={{
+                            color: '#10b981',
+                            textDecoration: 'none',
+                            transition: 'color 0.2s',
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.color = '#34d399'}
+                          onMouseLeave={(e) => e.currentTarget.style.color = '#10b981'}
                           onClick={(e) => {
                             e.preventDefault();
                             (async () => {
