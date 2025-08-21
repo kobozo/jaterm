@@ -260,10 +260,11 @@ jobs:
           $config = $json | ConvertFrom-Json
           $config.version = $VERSION
           
-          # Update pubkey if available (top-level updater.pubkey)
+          # Update pubkey if available (under plugins.updater.pubkey)
           if ($env:TAURI_UPDATER_PUBKEY) {
-            if (-not $config.updater) { $config | Add-Member -NotePropertyName updater -NotePropertyValue @{} }
-            $config.updater.pubkey = $env:TAURI_UPDATER_PUBKEY
+            if (-not $config.plugins) { $config | Add-Member -NotePropertyName plugins -NotePropertyValue @{} }
+            if (-not $config.plugins.updater) { $config.plugins | Add-Member -NotePropertyName updater -NotePropertyValue @{} }
+            $config.plugins.updater.pubkey = $env:TAURI_UPDATER_PUBKEY
           }
           
           $newJson = $config | ConvertTo-Json -Depth 10
