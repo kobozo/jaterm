@@ -239,7 +239,7 @@ jobs:
           # Debug password (hash it to avoid exposing in logs)
           PASSWORD_MD5=$(echo -n "$APPLE_CERTIFICATE_PASSWORD" | md5)
           echo "Password MD5 hash: $PASSWORD_MD5"
-          echo "Expected password MD5 (for 'TempPassword123!'): e18eab03d91a28262668490dda2c9041"
+          echo "Expected password MD5: e18eab03d91a28262668490dda2c9041"
           
           # Test certificate with openssl before importing
           echo "Testing certificate with openssl..."
