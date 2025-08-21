@@ -229,17 +229,17 @@ jobs:
           # Verify certificate MD5 (should match our local certificate)
           CERT_MD5=$(cat certificate.p12 | base64 | md5)
           echo "Certificate MD5 after decode and re-encode: $CERT_MD5"
-          echo "Expected base64 MD5: 278a0fdb70a4241f46a82810a5a94ee3"
+          echo "Expected base64 MD5: 6d4bfdbcc85360bfa26ec5c55a8f9378"
           
           # Also check the direct MD5 of the p12 file
           P12_MD5=$(md5 -q certificate.p12)
           echo "Direct P12 file MD5: $P12_MD5"
-          echo "Expected P12 MD5: ba0af17a394afc07332fe9176bb2696d"
+          echo "Expected P12 MD5: 2f9240803fe8dad5264f1e8854b6b519"
           
           # Debug password (hash it to avoid exposing in logs)
           PASSWORD_MD5=$(echo -n "$APPLE_CERTIFICATE_PASSWORD" | md5)
           echo "Password MD5 hash: $PASSWORD_MD5"
-          echo "Expected password MD5: e18eab03d91a28262668490dda2c9041"
+          echo "Expected password MD5: 431e6a25010e3b921b58d172e7e6d704"
           
           # Test certificate with openssl before importing
           echo "Testing certificate with openssl..."
