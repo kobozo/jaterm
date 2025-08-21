@@ -73,7 +73,7 @@ fn build_helper_binary() {
   
   // Build the native helper binary
   let output = Command::new("cargo")
-    .args(&["build", "--release"])
+    .args(["build", "--release"])
     .current_dir("../src-helper")
     .output()
     .expect("Failed to build helper binary");
@@ -92,7 +92,7 @@ fn build_helper_binary() {
       if output.status.success() {
         println!("cargo:warning=Building Linux helper binary with cargo-zigbuild...");
         let output = Command::new("cargo")
-          .args(&["zigbuild", "--release", "--target", "x86_64-unknown-linux-musl"])
+          .args(["zigbuild", "--release", "--target", "x86_64-unknown-linux-musl"])
           .current_dir("../src-helper")
           .output()
           .expect("Failed to build Linux helper binary");
