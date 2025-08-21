@@ -37,8 +37,15 @@ export async function loadAppState(): Promise<AppPersistState> {
       ...(profilesData || {}),
     } as AppPersistState;
     return merged;
-  } catch {
-    return {};
+  } catch (err) {
+    console.error('Failed to load app state:', err);
+    // If it's an encryption error, we should still load the non-encrypted state
+    try {
+      const stateData = await loadState('jaterm');
+      return stateData || {};
+    } catch {
+      return {};
+    }
   }
 }
 

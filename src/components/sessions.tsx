@@ -428,31 +428,61 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     if (n.ref.kind === 'local') {
       const p = localProfiles.find((x) => x.id === n.ref.id);
       if (p && p.path) {
-        const effective = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'local', profileSettings: { terminal: p.terminal, shell: p.shell } });
-        const arg: any = { path: p.path };
-        if (effective.shell) arg.shell = effective.shell;
-        if (effective.terminal) arg.terminal = effective.terminal;
-        onOpenFolder(arg);
+        try {
+          const effective = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'local', profileSettings: { terminal: p.terminal, shell: p.shell } });
+          const arg: any = { path: p.path };
+          if (effective.shell) arg.shell = effective.shell;
+          if (effective.terminal) arg.terminal = effective.terminal;
+          onOpenFolder(arg);
+        } catch (err) {
+          console.error('Failed to resolve effective settings for local profile:', err);
+          // Fallback: open without inheritance
+          onOpenFolder({ path: p.path, terminal: p.terminal, shell: p.shell });
+        }
       } else if (p) {
         alert('Local profile has no path configured');
+      } else {
+        console.error('Local profile not found:', n.ref.id);
+        alert('Profile not found. It may be encrypted and requires unlocking.');
       }
     } else {
       const p = sshProfiles.find((x) => x.id === n.ref.id);
       if (p && onOpenSsh) {
-        const effective = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced, ssh: { host: p.host, port: p.port, user: p.user, auth: p.auth } } });
-        onOpenSsh({ 
-          host: effective.ssh?.host ?? p.host,
-          port: effective.ssh?.port ?? p.port,
-          user: effective.ssh?.user ?? p.user,
-          auth: effective.ssh?.auth ?? (p.auth || { agent: true }),
-          cwd: p.path, 
-          profileId: p.id,
-          profileName: p.name,
-          terminal: effective.terminal, 
-          shell: effective.shell, 
-          advanced: effective.advanced, 
-          os: p.os
-        } as any);
+        try {
+          const effective = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'ssh', profileSettings: { terminal: p.terminal, shell: p.shell, advanced: p.advanced, ssh: { host: p.host, port: p.port, user: p.user, auth: p.auth } } });
+          onOpenSsh({ 
+            host: effective.ssh?.host ?? p.host,
+            port: effective.ssh?.port ?? p.port,
+            user: effective.ssh?.user ?? p.user,
+            auth: effective.ssh?.auth ?? (p.auth || { agent: true }),
+            cwd: p.path, 
+            profileId: p.id,
+            profileName: p.name,
+            terminal: effective.terminal, 
+            shell: effective.shell, 
+            advanced: effective.advanced, 
+            os: p.os
+          } as any);
+        } catch (err) {
+          console.error('Failed to resolve effective settings for SSH profile:', err);
+          // Fallback: open without inheritance
+          onOpenSsh({ 
+            host: p.host,
+            port: p.port,
+            user: p.user,
+            auth: p.auth || { agent: true },
+            cwd: p.path, 
+            profileId: p.id,
+            profileName: p.name,
+            terminal: p.terminal, 
+            shell: p.shell, 
+            advanced: p.advanced, 
+            os: p.os
+          } as any);
+        }
+      } else if (!p) {
+        console.error('SSH profile not found:', n.ref.id);
+        alert('Profile not found. It may be encrypted and requires unlocking.');
       }
     }
   }
@@ -512,13 +542,30 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   // Tree renderer removed in favor of an explorer view
   useEffect(() => {
     const loadData = async () => {
-      setRecentSessions(await getRecentSessions());
-      setRecentSsh(await getRecentSshSessions());
-      setLocalProfiles(await getLocalProfiles());
-      setSshProfiles(await getSshProfiles());
-      const root = await ensureProfilesTree();
-      setTree(root);
-      setCurrentFolderId(root.id);
+      try {
+        setRecentSessions(await getRecentSessions());
+        setRecentSsh(await getRecentSshSessions());
+        const localProfs = await getLocalProfiles();
+        const sshProfs = await getSshProfiles();
+        setLocalProfiles(localProfs);
+        setSshProfiles(sshProfs);
+        
+        // Check if profiles loaded successfully
+        if (localProfs.length === 0 && sshProfs.length === 0) {
+          console.warn('No profiles loaded - may need to unlock encryption');
+        }
+        
+        const root = await ensureProfilesTree();
+        setTree(root);
+        setCurrentFolderId(root.id);
+      } catch (err) {
+        console.error('Failed to load session data:', err);
+        // Still try to load what we can
+        try {
+          setRecentSessions(await getRecentSessions());
+          setRecentSsh(await getRecentSshSessions());
+        } catch {}
+      }
     };
     
     loadData();
