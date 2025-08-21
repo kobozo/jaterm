@@ -250,6 +250,55 @@ export function appQuit(): Promise<void> {
   return invoke('app_quit');
 }
 
+// Encryption
+export type EncryptionStatus = {
+  has_master_key: boolean;
+  hardware_security_available: boolean;
+};
+
+export type EncryptedData = {
+  nonce: string;
+  ciphertext: string;
+  salt: string;
+  version: number;
+};
+
+export function encryptionStatus(): Promise<EncryptionStatus> {
+  return invoke('encryption_status');
+}
+
+export function setMasterKey(password: string): Promise<void> {
+  return invoke('set_master_key', { password } as any);
+}
+
+export function verifyMasterKey(password: string): Promise<boolean> {
+  return invoke('verify_master_key', { password } as any);
+}
+
+export function clearMasterKey(): Promise<void> {
+  return invoke('clear_master_key');
+}
+
+export function removeMasterKey(): Promise<void> {
+  return invoke('remove_master_key');
+}
+
+export function loadProfilesEncrypted(appName?: string): Promise<any> {
+  return invoke('load_profiles_encrypted', { appName } as any);
+}
+
+export function saveProfilesEncrypted(profiles: any, appName?: string): Promise<void> {
+  return invoke('save_profiles_encrypted', { appName, profiles } as any);
+}
+
+export function checkProfilesNeedMigration(appName?: string): Promise<boolean> {
+  return invoke('check_profiles_need_migration', { appName } as any);
+}
+
+export function migrateProfilesToEncrypted(password: string, appName?: string): Promise<void> {
+  return invoke('migrate_profiles_to_encrypted', { appName, password } as any);
+}
+
 // Config / State persistence
 export function getConfigDir(appName?: string): Promise<string> {
   return invoke('get_config_dir', { appName } as any);

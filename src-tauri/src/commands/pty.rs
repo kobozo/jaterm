@@ -80,7 +80,7 @@ pub async fn pty_open(
     let master_for_state = pair.master; // move master into state
 
     {
-        let mut inner = state.0.lock().map_err(|_| "lock state")?;
+        let mut inner = state.inner.lock().map_err(|_| "lock state")?;
         inner.insert(crate::state::app_state::PtySession {
             id: id.clone(),
             master: master_for_state,
@@ -121,7 +121,7 @@ pub async fn pty_write(
     pty_id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut inner = state.0.lock().map_err(|_| "lock state")?;
+    let mut inner = state.inner.lock().map_err(|_| "lock state")?;
     if let Some(sess) = inner.get(&pty_id) {
         if let Ok(mut w) = sess.writer.lock() {
             use std::io::Write;
@@ -142,14 +142,14 @@ pub async fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let mut inner = state.0.lock().map_err(|_| "lock state")?;
+    let mut inner = state.inner.lock().map_err(|_| "lock state")?;
     inner.resize(&pty_id, cols, rows);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn pty_kill(state: State<'_, crate::state::app_state::AppState>, pty_id: String) -> Result<(), String> {
-    let mut inner = state.0.lock().map_err(|_| "lock state")?;
+    let mut inner = state.inner.lock().map_err(|_| "lock state")?;
     if let Some(mut sess) = inner.remove(&pty_id) {
         let _ = sess.child.kill();
     }

@@ -1,7 +1,17 @@
-# JATerm (Tauri + React + Rust + xterm.js)
+# JaTerm
 
-Minimal, multi-OS terminal app scaffold using Tauri (Rust backend) and React (xterm.js frontend).
-This repo is structured for PTY, SSH tunnels, Git status, and file watching services.
+A modern, secure terminal emulator with SSH support, built with Tauri (Rust backend) and React (xterm.js frontend).
+
+## Features
+
+- 🖥️ **Cross-platform**: Windows, macOS, Linux
+- 🔐 **Secure**: Master key encryption for passwords and sensitive data
+- 🌐 **SSH Client**: Built-in SSH with port forwarding (local/remote/SOCKS)
+- 📁 **SFTP**: File transfer and browsing
+- 🔑 **SSH Keys**: Support for SSH keys with passphrase
+- 📊 **Git Integration**: Real-time git status in terminal
+- 🚀 **Auto-updates**: Cryptographically signed updates
+- 🎨 **Modern UI**: Split panes, tabs, and customizable themes
 
 ## Quick start
 
@@ -17,10 +27,18 @@ Note: Commands and services are stubs. Fill in Rust services and frontend bindin
 See the folder layout in this README’s sibling files. Frontend code lives in `src/` and the
 Tauri backend in `src-tauri/`.
 
-## Next steps
+## Security
 
-- Choose a license (replace LICENSE placeholder).
-- Wire PTY/SSH/Git/watch services in Rust, then expose commands.
-- Add xterm.js session management and events in the frontend.
-- Harden Tauri allowlist and review docs/SECURITY.md.
+JaTerm prioritizes security for your sensitive data:
+
+- **Encryption**: AES-256-GCM encryption for passwords using a master key
+- **Key Derivation**: Argon2 for secure key derivation from your master password
+- **Secure Storage**: Integration with system keychains (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- **Hardware Security**: Support for TPM and Secure Enclave when available
+
+For detailed security information, see [SECURITY.md](SECURITY.md).
+
+## License
+
+© 2025 Kobozo. All rights reserved.
 

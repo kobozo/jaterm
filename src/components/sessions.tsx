@@ -518,12 +518,22 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     
     loadData();
     
+    // Listen for profiles unlocked event
+    const handleProfilesUnlocked = () => {
+      console.log('Profiles unlocked, reloading...');
+      loadData();
+    };
+    window.addEventListener('profiles-unlocked', handleProfilesUnlocked);
+    
     // Refresh profiles periodically to catch external updates (e.g., OS detection)
     const interval = setInterval(async () => {
       setSshProfiles(await getSshProfiles());
     }, 5000); // Check every 5 seconds
     
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('profiles-unlocked', handleProfilesUnlocked);
+    };
   }, []);
 
   const handleHome = async () => {

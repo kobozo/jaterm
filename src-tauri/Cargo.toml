@@ -28,5 +28,12 @@ dirs = "6"
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 sha2 = "0.10"
 
+# Encryption and secure storage
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+zeroize = { version = "1.8", features = ["derive"] }
+keyring = "3.6"
+
 [features]
 default = []

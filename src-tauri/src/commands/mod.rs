@@ -4,3 +4,4 @@ pub mod git;
 pub mod helper;
 pub mod watcher;
 pub mod app;
+pub mod encryption;

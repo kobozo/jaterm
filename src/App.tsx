@@ -12,10 +12,11 @@ import ComposeDrawer from '@/components/ComposeDrawer';
 import TabsBar from '@/components/TabsBar';
 import SplitTree, { LayoutNode, LayoutSplit, LayoutLeaf } from '@/components/SplitTree';
 import Toaster from '@/components/Toaster';
+import { MasterKeyDialog } from '@/components/MasterKeyDialog';
 import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
-import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite } from '@/types/ipc';
+import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
 import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
 import { gitStatusViaHelper } from '@/services/git';
@@ -49,6 +50,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
+  // Master key dialog state
+  const [masterKeyDialog, setMasterKeyDialog] = useState<{ isOpen: boolean; mode: 'setup' | 'unlock'; isMigration?: boolean }>({ isOpen: false, mode: 'setup' });
   // Updater state
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState<null | { version?: string }>(null);
@@ -616,8 +619,36 @@ export default function App() {
     os?: string; // OS from profile
   }) {
     try {
+      // Ensure we have a usable auth. Some profiles may load with encrypted fields until master key is unlocked.
+      function hasUsableAuth(a: any | undefined): boolean {
+        return !!(a && (a.agent || (a.password && a.password.length) || a.keyPath));
+      }
+      let authToUse = opts.auth;
+      // Always try to get fresh profile data when we have a profileId
+      if (opts.profileId) {
+        try {
+          const { getSshProfiles } = await import('@/store/persist');
+          const profiles = await getSshProfiles();
+          const p = profiles.find(pr => pr.id === opts.profileId);
+          if (p && hasUsableAuth(p.auth as any)) {
+            authToUse = (p.auth as any);
+          } else {
+            const { encryptionStatus } = await import('@/types/ipc');
+            const enc = await encryptionStatus();
+            if (!enc.has_master_key) {
+              // Ask user to unlock master key and abort this attempt
+              setMasterKeyDialog({ isOpen: true, mode: 'unlock' });
+              alert('This profile is encrypted. Please unlock your master key and try again.');
+              return;
+            }
+          }
+        } catch {}
+      }
+      // Final fallback to agent if still no usable auth
+      if (!hasUsableAuth(authToUse)) authToUse = { agent: true } as any;
+
       const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
-      const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: opts.auth.password, key_path: opts.auth.keyPath, passphrase: opts.auth.passphrase, agent: opts.auth.agent } as any, timeout_ms: 15000 });
+      const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: authToUse.password, key_path: (authToUse as any).keyPath, passphrase: authToUse.passphrase, agent: authToUse.agent } as any, timeout_ms: 15000 });
       // Ensure helper in background (non-blocking) and record status in tab
       try {
         (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then(async (res: any) => {
@@ -1072,10 +1103,34 @@ export default function App() {
     void saveAppState({ workspace: ws });
   }, [tabs, activeTab]);
 
-  // Restore workspace on first load
+  // Restore workspace on first load and check encryption status
   React.useEffect(() => {
     (async () => {
       try {
+        // Check encryption status first
+        const encStatus = await encryptionStatus();
+        
+        // Check if profiles need migration from plain text
+        const needsMigration = await checkProfilesNeedMigration('jaterm');
+        
+        if (!encStatus.has_master_key) {
+          if (needsMigration) {
+            // Profiles exist in plain text - need to set up encryption (migration)
+            setMasterKeyDialog({ isOpen: true, mode: 'setup', isMigration: true });
+          } else {
+            // Try to load profiles - if empty, encrypted profiles may exist
+            const profiles = await loadAppState();
+            const hasProfiles = profiles.profiles && Object.keys(profiles.profiles).length > 0;
+            
+            // If no profiles loaded but migration not needed, encrypted file must exist
+            if (!hasProfiles && !needsMigration) {
+              // Encrypted profiles exist but no key loaded - need to unlock
+              setMasterKeyDialog({ isOpen: true, mode: 'unlock' });
+            }
+            // If no profiles at all, don't show dialog
+          }
+        }
+        
         const s = await loadAppState();
         const ws = s.workspace;
         if (ws && ws.tabs && ws.tabs.length) {
@@ -1749,6 +1804,28 @@ export default function App() {
           </div>
         </div>
       )}
+      <MasterKeyDialog
+        isOpen={masterKeyDialog.isOpen}
+        mode={masterKeyDialog.mode}
+        isMigration={masterKeyDialog.isMigration}
+        onClose={() => setMasterKeyDialog({ ...masterKeyDialog, isOpen: false })}
+        onSuccess={async () => {
+          setMasterKeyDialog({ ...masterKeyDialog, isOpen: false });
+          addToast({ message: masterKeyDialog.isMigration ? 'Profiles encrypted successfully' : 'Master key unlocked successfully', type: 'success' });
+          
+          // Emit a custom event to notify components to reload profiles
+          window.dispatchEvent(new CustomEvent('profiles-unlocked'));
+          
+          // Also reload the app state to update tabs
+          try {
+            const freshState = await loadAppState();
+            // If we're on the sessions tab, it will reload via the event listener
+            console.log('Profiles reloaded after unlock');
+          } catch (e) {
+            console.error('Failed to reload profiles:', e);
+          }
+        }}
+      />
       <Toaster />
     </div>
   );

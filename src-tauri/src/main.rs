@@ -2,11 +2,13 @@
 
 mod commands;
 mod config;
+mod config_encrypted;
 mod shell;
 mod events;
 mod state;
 mod utils;
 mod menu;
+mod encryption;
 
 use tauri::Manager;
 
@@ -26,6 +28,10 @@ fn main() {
       config::save_profiles,
       config::load_config,
       config::save_config,
+      config_encrypted::load_profiles_encrypted,
+      config_encrypted::save_profiles_encrypted,
+      config_encrypted::check_profiles_need_migration,
+      config_encrypted::migrate_profiles_to_encrypted,
       config::resolve_path_absolute,
       config::open_path_system,
       shell::install_zsh_osc7,
@@ -58,7 +64,13 @@ fn main() {
       commands::helper::helper_local_exec,
       commands::helper::helper_get_version,
       commands::git::git_status,
-      commands::watcher::watch_subscribe
+      commands::watcher::watch_subscribe,
+      commands::encryption::encryption_status,
+      commands::encryption::set_master_key,
+      commands::encryption::verify_master_key,
+      commands::encryption::clear_master_key,
+      commands::encryption::remove_master_key,
+      commands::encryption::test_encryption
     ])
     .setup(|app| {
       // Set up the menu

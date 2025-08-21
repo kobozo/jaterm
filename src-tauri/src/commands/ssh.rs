@@ -167,6 +167,8 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
   }
   // Auth
   if let Some(auth) = &profile.auth {
+    eprintln!("Auth provided - agent: {}, has_password: {}, has_key: {}", 
+             auth.agent, auth.password.is_some(), auth.key_path.is_some());
     if auth.agent {
       let mut agent = sess.agent().map_err(|e| e.to_string())?;
       agent.connect().map_err(|e| e.to_string())?;
@@ -177,6 +179,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
       }
       if !ok { return Err("agent auth failed".into()); }
     } else if let Some(pw) = &auth.password {
+      eprintln!("Using password auth");
       sess.userauth_password(&profile.user, pw).map_err(|e| format!("auth pw: {e}"))?;
     } else if let Some(key) = &auth.key_path {
       sess.userauth_pubkey_file(&profile.user, None, std::path::Path::new(key), auth.passphrase.as_deref()).map_err(|e| format!("auth key: {e}"))?;
@@ -242,7 +245,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
   
   let id = session_id_for_watchdog;
   {
-    let mut inner = state.0.lock().map_err(|_| "lock state")?;
+    let mut inner = state.inner.lock().map_err(|_| "lock state")?;
     inner.ssh.insert(
       id.clone(),
       crate::state::app_state::SshSession {
@@ -261,7 +264,7 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
 
 #[tauri::command]
 pub async fn ssh_home_dir(state: State<'_, crate::state::app_state::AppState>, session_id: String) -> Result<String, String> {
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop {
     match s.sess.sftp() {
@@ -292,7 +295,7 @@ use std::time::Duration;
 
 #[tauri::command]
 pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<Vec<SftpEntry>, String> {
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop {
     match s.sess.sftp() {
@@ -331,7 +334,7 @@ pub async fn ssh_sftp_list(state: State<'_, crate::state::app_state::AppState>, 
 #[tauri::command]
 pub async fn ssh_sftp_download(state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String, local_path: String) -> Result<(), String> {
   eprintln!("[ssh] sftp_download session={} remote={} local={}", session_id, remote_path, local_path);
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
   // Ensure local parent directory exists
@@ -363,7 +366,7 @@ pub async fn ssh_sftp_download(state: State<'_, crate::state::app_state::AppStat
 #[tauri::command]
 pub async fn ssh_sftp_download_dir(state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_dir: String, local_dir: String) -> Result<(), String> {
   eprintln!("[ssh] sftp_download_dir session={} remote_dir={} local_dir={}", session_id, remote_dir, local_dir);
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
   let remote_root = Path::new(&remote_dir).to_path_buf();
@@ -421,7 +424,7 @@ pub async fn ssh_sftp_download_dir(state: State<'_, crate::state::app_state::App
 #[tauri::command]
 pub async fn ssh_sftp_read(state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String) -> Result<String, String> {
   eprintln!("[ssh] sftp_read session={} path={}", session_id, remote_path);
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
   let mut file = loop { match sftp.open(Path::new(&remote_path)) { Ok(f) => break f, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
@@ -444,7 +447,7 @@ pub async fn ssh_sftp_read(state: State<'_, crate::state::app_state::AppState>, 
 #[tauri::command]
 pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>, session_id: String, path: String) -> Result<(), String> {
   eprintln!("[ssh] mkdirs session={} path={}", session_id, path);
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop {
     match s.sess.sftp() {
@@ -505,7 +508,7 @@ pub async fn ssh_deploy_helper(app: tauri::AppHandle, state: State<'_, crate::st
   };
   
   // Now open SFTP connection and deploy the binary
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop { 
     match s.sess.sftp() { 
@@ -564,7 +567,7 @@ pub async fn ssh_deploy_helper(app: tauri::AppHandle, state: State<'_, crate::st
 #[tauri::command]
 pub async fn ssh_sftp_write(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, remote_path: String, data_b64: String) -> Result<(), String> {
   eprintln!("[ssh] sftp_write session={} path={} size={}B", session_id, remote_path, data_b64.len());
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
   let bytes = base64::engine::general_purpose::STANDARD.decode(data_b64).map_err(|e| e.to_string())?;
@@ -596,7 +599,7 @@ pub struct ExecResult { pub stdout: String, pub stderr: String, pub exit_code: i
 #[tauri::command]
 pub async fn ssh_exec(state: State<'_, crate::state::app_state::AppState>, session_id: String, command: String) -> Result<ExecResult, String> {
   eprintln!("[ssh] exec session={} cmd={}", session_id, command);
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sess_lock = s.lock.clone();
   let mut chan = loop {
@@ -670,7 +673,7 @@ pub async fn ssh_exec(state: State<'_, crate::state::app_state::AppState>, sessi
 pub async fn ssh_detect_ports(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String) -> Result<Vec<u16>, String> {
   // Get SSH session info
   let (host, port, user) = {
-    let inner = state.0.lock().map_err(|_| "lock")?;
+    let inner = state.inner.lock().map_err(|_| "lock")?;
     let session = inner.ssh.get(&session_id).ok_or("ssh session not found")?;
     (session.host.clone(), session.port, session.user.clone())
   };
@@ -707,7 +710,7 @@ pub async fn ssh_detect_ports(app: tauri::AppHandle, state: State<'_, crate::sta
 
 #[tauri::command]
 pub async fn ssh_disconnect(state: State<'_, crate::state::app_state::AppState>, session_id: String) -> Result<(), String> {
-  let mut inner = state.0.lock().map_err(|_| "lock state")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock state")?;
   if let Some(s) = inner.ssh.remove(&session_id) {
     let _ = s.sess.disconnect(None, "bye", None);
   }
@@ -717,7 +720,7 @@ pub async fn ssh_disconnect(state: State<'_, crate::state::app_state::AppState>,
 #[tauri::command]
 pub async fn ssh_open_forward(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, forward: PortForward) -> Result<String, String> {
   let fid = format!("fwd_{}", nanoid::nanoid!(8));
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   
   // Get SSH session info
   let (host, port, user) = {
@@ -836,7 +839,7 @@ pub struct PortForward {
 
 #[tauri::command]
 pub async fn ssh_close_forward(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, forward_id: String) -> Result<(), String> {
-  let mut inner = state.0.lock().map_err(|_| "lock")?;
+  let mut inner = state.inner.lock().map_err(|_| "lock")?;
   if let Some(f) = inner.forwards.remove(&forward_id) {
     match f.backend {
       crate::state::app_state::ForwardBackend::LocalThread { shutdown, mut thread } => {
@@ -859,7 +862,7 @@ pub async fn ssh_close_forward(app: tauri::AppHandle, state: State<'_, crate::st
 pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, cwd: Option<String>, cols: Option<u16>, rows: Option<u16>) -> Result<String, String> {
   // Access the session and create the channel (blocking)
   let mut chan = {
-    let mut inner = state.0.lock().map_err(|_| "lock")?;
+    let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
     s.sess.channel_session().map_err(|e| format!("channel_session: {e}"))?
   };
@@ -883,7 +886,7 @@ pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state
   // Channel is ready; start a command-processing thread that also reads output
   let id = format!("chan_{}", nanoid::nanoid!(8));
   {
-    let mut inner = state.0.lock().map_err(|_| "lock")?;
+    let mut inner = state.inner.lock().map_err(|_| "lock")?;
     inner.ssh_channels.insert(
       id.clone(),
       crate::state::app_state::SshChannel { id: id.clone(), session_id: session_id.clone(), chan: std::sync::Arc::new(std::sync::Mutex::new(chan)) }
@@ -891,7 +894,7 @@ pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state
   }
   // Switch the underlying session to non-blocking so reads return WouldBlock
   {
-    let mut inner = state.0.lock().map_err(|_| "lock")?;
+    let mut inner = state.inner.lock().map_err(|_| "lock")?;
     if let Some(sess) = inner.ssh.get_mut(&session_id) {
       let _ = sess.sess.set_blocking(false);
     }
@@ -907,14 +910,14 @@ pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state
         let n = {
           // Fetch channel Arc and session lock
           let inner = app.state::<crate::state::app_state::AppState>();
-          let st1 = inner.0.lock();
+          let st1 = inner.inner.lock();
           if st1.is_err() { break; }
           let st = st1.unwrap();
           let ch = match st.ssh_channels.get(&sid) { Some(c) => c, None => break };
           let session_id = ch.session_id.clone();
           let arc = ch.chan.clone();
           drop(st);
-          let st2 = inner.0.lock();
+          let st2 = inner.inner.lock();
           if st2.is_err() { break; }
           let st = st2.unwrap();
           let sess_lock = match st.ssh.get(&session_id) { Some(s) => s.lock.clone(), None => break };
@@ -922,7 +925,8 @@ pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state
           // Serialize read with session lock
           let _g = sess_lock.lock().unwrap();
           let mut guard = arc.lock().unwrap();
-          match guard.read(&mut buf) {
+          let read_result: Result<usize, std::io::Error> = guard.read(&mut buf);
+          match read_result {
             Ok(0) => { eprintln!("[ssh] EOF channel {}", sid); let _ = app.emit(crate::events::SSH_EXIT, &serde_json::json!({"channelId": sid})); break; }
             Ok(n) => { eprintln!("[ssh] read {} bytes channel {}", n, sid); n },
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { std::thread::sleep(std::time::Duration::from_millis(10)); continue; }
@@ -941,7 +945,7 @@ pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state
 pub async fn ssh_write(state: State<'_, crate::state::app_state::AppState>, channel_id: String, data: String) -> Result<(), String> {
   // Acquire channel arc and session id
   let (session_id, chan_arc) = {
-    let inner = state.0.lock().map_err(|_| "lock")?;
+    let inner = state.inner.lock().map_err(|_| "lock")?;
     let st = inner;
     match st.ssh_channels.get(&channel_id) {
       Some(ch) => (ch.session_id.clone(), ch.chan.clone()),
@@ -950,7 +954,7 @@ pub async fn ssh_write(state: State<'_, crate::state::app_state::AppState>, chan
   };
   // Acquire session lock separately
   let sess_lock = {
-    let inner = state.0.lock().map_err(|_| "lock")?;
+    let inner = state.inner.lock().map_err(|_| "lock")?;
     match inner.ssh.get(&session_id) { Some(s) => s.lock.clone(), None => return Err("ssh session not found".into()) }
   };
   // Perform write under session lock
@@ -965,7 +969,7 @@ pub async fn ssh_write(state: State<'_, crate::state::app_state::AppState>, chan
 pub async fn ssh_resize(state: State<'_, crate::state::app_state::AppState>, channel_id: String, cols: u16, rows: u16) -> Result<(), String> {
   // Acquire channel arc and session id
   let (session_id, chan_arc) = {
-    let inner = state.0.lock().map_err(|_| "lock")?;
+    let inner = state.inner.lock().map_err(|_| "lock")?;
     match inner.ssh_channels.get(&channel_id) {
       Some(ch) => (ch.session_id.clone(), ch.chan.clone()),
       None => return Err("channel not found".into()),
@@ -973,7 +977,7 @@ pub async fn ssh_resize(state: State<'_, crate::state::app_state::AppState>, cha
   };
   // Acquire session lock separately
   let sess_lock = {
-    let inner = state.0.lock().map_err(|_| "lock")?;
+    let inner = state.inner.lock().map_err(|_| "lock")?;
     match inner.ssh.get(&session_id) { Some(s) => s.lock.clone(), None => return Err("ssh session not found".into()) }
   };
   // Perform resize under session lock
@@ -988,7 +992,7 @@ pub async fn ssh_resize(state: State<'_, crate::state::app_state::AppState>, cha
 pub async fn ssh_close_shell(state: State<'_, crate::state::app_state::AppState>, channel_id: String) -> Result<(), String> {
   // Acquire channel arc and session id without removing yet
   let (session_id, chan_arc) = {
-    let inner = state.0.lock().map_err(|_| "lock")?;
+    let inner = state.inner.lock().map_err(|_| "lock")?;
     match inner.ssh_channels.get(&channel_id) {
       Some(ch) => (ch.session_id.clone(), ch.chan.clone()),
       None => return Err("channel not found".into()),
@@ -996,7 +1000,7 @@ pub async fn ssh_close_shell(state: State<'_, crate::state::app_state::AppState>
   };
   // Acquire session lock
   let sess_lock = {
-    let inner = state.0.lock().map_err(|_| "lock")?;
+    let inner = state.inner.lock().map_err(|_| "lock")?;
     match inner.ssh.get(&session_id) { Some(s) => s.lock.clone(), None => return Err("ssh session not found".into()) }
   };
   // Close channel under session lock
@@ -1006,7 +1010,7 @@ pub async fn ssh_close_shell(state: State<'_, crate::state::app_state::AppState>
   }
   // Now remove the channel from state
   {
-    let mut inner = state.0.lock().map_err(|_| "lock")?;
+    let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let _ = inner.ssh_channels.remove(&channel_id);
   }
   Ok(())
