@@ -3,12 +3,14 @@
 mod commands;
 mod config;
 mod config_encrypted;
+mod config_encrypted_v2;
 mod shell;
 mod events;
 mod state;
 mod utils;
 mod menu;
 mod encryption;
+mod encryption_v2;
 
 use tauri::Manager;
 

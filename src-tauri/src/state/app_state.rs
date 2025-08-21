@@ -7,6 +7,7 @@ use ssh2::{Session as SshSessionInner, Channel};
 use std::net::TcpStream;
 use std::sync::Mutex as StdMutex;
 use crate::encryption::EncryptionManager;
+use crate::encryption_v2::EncryptionManager as EncryptionManagerV2;
 
 pub struct PtySession {
     pub id: String,
@@ -20,6 +21,7 @@ pub type Shared<T> = Arc<Mutex<T>>;
 pub struct AppState {
     pub inner: Shared<Inner>,
     pub encryption: Arc<EncryptionManager>,
+    pub encryption_v2: Arc<EncryptionManagerV2>,
 }
 
 pub struct Inner {
@@ -32,8 +34,12 @@ pub struct Inner {
 impl Default for AppState {
     fn default() -> Self {
         let encryption = Arc::new(EncryptionManager::new());
-        // Try to initialize encryption from saved keys
+        // Try to initialize old encryption from saved keys
         let _ = encryption.init();
+        
+        let encryption_v2 = Arc::new(EncryptionManagerV2::new());
+        // Initialize new encryption system
+        let _ = encryption_v2.initialize();
         
         Self {
             inner: Arc::new(Mutex::new(Inner { 
@@ -43,6 +49,7 @@ impl Default for AppState {
                 forwards: HashMap::new() 
             })),
             encryption,
+            encryption_v2,
         }
     }
 }
