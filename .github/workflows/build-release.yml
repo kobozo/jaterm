@@ -272,9 +272,11 @@ jobs:
           echo "Method 4: Import without -T flag"
           security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" || true
           
-          # List keychains
-          echo "Listing keychains:"
-          security list-keychain -d user -s $KEYCHAIN_PATH
+          # List keychains and add to search list
+          echo "Adding keychain to search list:"
+          security list-keychain -d user -s $KEYCHAIN_PATH login.keychain-db
+          echo "Current keychain list:"
+          security list-keychain -d user
           
           # Check what was imported
           echo "Checking imported identities:"
@@ -288,8 +290,23 @@ jobs:
           echo "Checking identities after partition list:"
           security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "Still no identities found"
           
-          # Export for Tauri
-          echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> $GITHUB_ENV
+          # Find the actual signing identity string
+          echo "Finding actual signing identity..."
+          ACTUAL_IDENTITY=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "JaTerm" | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "")
+          
+          if [ -z "$ACTUAL_IDENTITY" ]; then
+            echo "Warning: Could not find JaTerm identity, using provided identity"
+            ACTUAL_IDENTITY="$APPLE_SIGNING_IDENTITY"
+          else
+            echo "Found actual identity: $ACTUAL_IDENTITY"
+          fi
+          
+          # Also check default keychain
+          echo "Checking default keychain for identities:"
+          security find-identity -v -p codesigning || echo "No identities in default keychain"
+          
+          # Export for Tauri - use the actual found identity
+          echo "APPLE_SIGNING_IDENTITY=$ACTUAL_IDENTITY" >> $GITHUB_ENV
         
       - name: Update version (Unix)
         if: matrix.os != 'windows-latest'
@@ -379,6 +396,23 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          # On macOS, ensure keychain is available for signing
+          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            echo "Ensuring keychain is accessible for build..."
+            # Re-export the keychain path if it was set
+            if [ -n "$RUNNER_TEMP" ]; then
+              export KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+              if [ -f "$KEYCHAIN_PATH" ]; then
+                echo "Keychain exists at: $KEYCHAIN_PATH"
+                # Make sure it's in the search list
+                security list-keychain -d user -s $KEYCHAIN_PATH login.keychain-db
+                # Verify the identity is still there
+                echo "Verifying signing identity..."
+                security find-identity -v -p codesigning $KEYCHAIN_PATH | grep -i jaterm || echo "Warning: JaTerm identity not found"
+              fi
+            fi
+          fi
+          
           pnpm tauri build --target ${{ matrix.target }}
 
       - name: Package helper (Windows)
