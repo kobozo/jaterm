@@ -79,45 +79,90 @@ impl EncryptionManager {
     
     /// Initialize encryption on app startup - loads or creates DEK
     pub fn initialize(&self) -> Result<bool, EncryptionError> {
+        eprintln!("=== ENCRYPTION INITIALIZE CALLED ===");
+        eprintln!("Attempting to load DEK from keychain...");
+        eprintln!("Service: {}, Account: {}", KEYRING_SERVICE, DEK_ACCOUNT);
+        
         // Try to load DEK from OS keychain
         match Entry::new(KEYRING_SERVICE, DEK_ACCOUNT) {
             Ok(entry) => {
+                eprintln!("✅ Successfully created keychain Entry object");
                 match entry.get_password() {
                     Ok(b64_key) => {
+                        eprintln!("✅ Successfully retrieved password from keychain");
+                        eprintln!("DEK length (base64): {}", b64_key.len());
+                        
                         // Decode and store the DEK
-                        let key_bytes = B64.decode(&b64_key)
-                            .map_err(|e| EncryptionError::KeyringError(e.to_string()))?;
-                        
-                        if key_bytes.len() != 32 {
-                            return Err(EncryptionError::KeyringError("Invalid key size".into()));
+                        match B64.decode(&b64_key) {
+                            Ok(key_bytes) => {
+                                eprintln!("✅ Successfully decoded DEK, byte length: {}", key_bytes.len());
+                                
+                                if key_bytes.len() != 32 {
+                                    eprintln!("❌ Invalid key size: {} (expected 32)", key_bytes.len());
+                                    return Err(EncryptionError::KeyringError("Invalid key size".into()));
+                                }
+                                
+                                *self.dek.lock().unwrap() = Some(DataEncryptionKey { 
+                                    key: key_bytes 
+                                });
+                                
+                                eprintln!("✅✅✅ Successfully loaded DEK from keychain!");
+                                return Ok(true);
+                            }
+                            Err(e) => {
+                                eprintln!("❌ Failed to decode DEK from base64: {}", e);
+                                return Err(EncryptionError::KeyringError(e.to_string()));
+                            }
                         }
-                        
-                        *self.dek.lock().unwrap() = Some(DataEncryptionKey { 
-                            key: key_bytes 
-                        });
-                        
-                        eprintln!("Successfully loaded DEK from keychain");
-                        return Ok(true);
                     }
-                    Err(_) => {
-                        eprintln!("No DEK found in keychain, will need to create one");
+                    Err(e) => {
+                        eprintln!("❌ No DEK found in keychain: {}", e);
+                        eprintln!("Will need to create one with master key");
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Keychain access error: {}, will need master key", e);
+                eprintln!("❌ Keychain Entry creation error: {}", e);
+                eprintln!("Will need master key for setup");
             }
         }
         
+        // Fallback: Try to load DEK from dev cache if in development mode
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("DEBUG MODE: Checking for cached DEK...");
+            if let Ok(dek_cache_path) = self.dev_dek_cache_path() {
+                if dek_cache_path.exists() {
+                    eprintln!("Found DEK cache file: {}", dek_cache_path.display());
+                    if let Ok(cached_dek) = fs::read_to_string(&dek_cache_path) {
+                        if let Ok(key_bytes) = B64.decode(cached_dek.trim()) {
+                            if key_bytes.len() == 32 {
+                                *self.dek.lock().unwrap() = Some(DataEncryptionKey { 
+                                    key: key_bytes 
+                                });
+                                eprintln!("✅ Successfully loaded DEK from dev cache!");
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        eprintln!("No DEK in keychain or cache - initialization incomplete");
         // No DEK found - need to create one with master key
         Ok(false)
     }
     
     /// Set up encryption with a master key (first time setup)
     pub fn setup_with_master_key(&self, password: &str) -> Result<(), EncryptionError> {
+        eprintln!("=== SETUP_WITH_MASTER_KEY CALLED ===");
+        eprintln!("Password length: {}", password.len());
+        
         // Generate a new random DEK
         let mut dek_bytes = vec![0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut dek_bytes);
+        eprintln!("Generated new DEK of {} bytes", dek_bytes.len());
         
         // Generate salt for master key derivation
         let salt = SaltString::generate(&mut OsRng);
@@ -139,11 +184,52 @@ impl EncryptionManager {
             .map_err(|e| EncryptionError::EncryptionFailed(e.to_string()))?;
         
         // Store the DEK in OS keychain for automatic access
-        let dek_entry = Entry::new(KEYRING_SERVICE, DEK_ACCOUNT)
-            .map_err(|e| EncryptionError::KeyringError(e.to_string()))?;
-        dek_entry
-            .set_password(&B64.encode(&dek_bytes))
-            .map_err(|e| EncryptionError::KeyringError(format!("Failed to store DEK: {}", e)))?;
+        eprintln!("Attempting to store DEK in keychain...");
+        eprintln!("Creating Entry with Service: {}, Account: {}", KEYRING_SERVICE, DEK_ACCOUNT);
+        
+        let dek_b64 = B64.encode(&dek_bytes);
+        eprintln!("DEK base64 length: {}", dek_b64.len());
+        
+        // Try to store in keychain
+        let keychain_result = Entry::new(KEYRING_SERVICE, DEK_ACCOUNT)
+            .and_then(|entry| entry.set_password(&dek_b64));
+        
+        match keychain_result {
+            Ok(_) => {
+                eprintln!("✅✅✅ Successfully stored DEK in keychain during setup!");
+                
+                // In dev mode, ALWAYS save to cache file as backup
+                #[cfg(debug_assertions)]
+                {
+                    eprintln!("DEBUG MODE: Also saving DEK to cache file for next restart...");
+                    if let Ok(cache_path) = self.dev_dek_cache_path() {
+                        match fs::write(&cache_path, &dek_b64) {
+                            Ok(_) => eprintln!("✅ Saved DEK to dev cache: {}", cache_path.display()),
+                            Err(e) => eprintln!("❌ Failed to save DEK to dev cache: {}", e),
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to store DEK in keychain: {}", e);
+                eprintln!("Error details: {:?}", e);
+                
+                // In dev mode, save to cache file as fallback
+                #[cfg(debug_assertions)]
+                {
+                    eprintln!("DEBUG MODE: Saving DEK to cache file as fallback...");
+                    if let Ok(cache_path) = self.dev_dek_cache_path() {
+                        match fs::write(&cache_path, &dek_b64) {
+                            Ok(_) => eprintln!("✅ Saved DEK to dev cache: {}", cache_path.display()),
+                            Err(e) => eprintln!("❌ Failed to save DEK to dev cache: {}", e),
+                        }
+                    }
+                }
+                
+                // Don't fail the entire setup if keychain storage fails
+                eprintln!("Continuing despite keychain storage failure...");
+            }
+        }
         
         // Store the encrypted DEK for recovery/export
         let encrypted_dek_data = EncryptedDek {
@@ -180,8 +266,12 @@ impl EncryptionManager {
     
     /// Recover DEK using master key (when keychain is unavailable)
     pub fn recover_with_master_key(&self, password: &str) -> Result<(), EncryptionError> {
+        eprintln!("=== RECOVER_WITH_MASTER_KEY CALLED ===");
+        eprintln!("Password length: {}", password.len());
+        
         // Load the encrypted DEK and metadata
         let encrypted_dek_data = self.load_encrypted_dek()?;
+        eprintln!("Loaded encrypted DEK data");
         
         // Parse salt and derive key from password
         let salt = SaltString::from_b64(&encrypted_dek_data.salt)
@@ -218,8 +308,65 @@ impl EncryptionManager {
             .map_err(|_| EncryptionError::InvalidMasterKey)?;
         
         // Try to store in keychain for next time
-        if let Ok(entry) = Entry::new(KEYRING_SERVICE, DEK_ACCOUNT) {
-            let _ = entry.set_password(&B64.encode(&dek_bytes));
+        eprintln!("Attempting to restore DEK to keychain after recovery...");
+        eprintln!("Creating Entry with Service: {}, Account: {}", KEYRING_SERVICE, DEK_ACCOUNT);
+        
+        let dek_b64 = B64.encode(&dek_bytes);
+        
+        match Entry::new(KEYRING_SERVICE, DEK_ACCOUNT) {
+            Ok(entry) => {
+                eprintln!("DEK base64 length for storage: {}", dek_b64.len());
+                
+                match entry.set_password(&dek_b64) {
+                    Ok(_) => {
+                        eprintln!("✅✅✅ Successfully restored DEK to keychain!");
+                        
+                        // In dev mode, ALWAYS save to cache file as backup
+                        #[cfg(debug_assertions)]
+                        {
+                            eprintln!("DEBUG MODE: Also saving DEK to cache file for next restart...");
+                            if let Ok(cache_path) = self.dev_dek_cache_path() {
+                                match fs::write(&cache_path, &dek_b64) {
+                                    Ok(_) => eprintln!("✅ Saved DEK to dev cache: {}", cache_path.display()),
+                                    Err(e) => eprintln!("❌ Failed to save DEK to dev cache: {}", e),
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("❌ Failed to store DEK in keychain: {}", e);
+                        eprintln!("Error details: {:?}", e);
+                        
+                        // In dev mode, save to cache file as fallback
+                        #[cfg(debug_assertions)]
+                        {
+                            eprintln!("DEBUG MODE: Saving DEK to cache file as fallback...");
+                            if let Ok(cache_path) = self.dev_dek_cache_path() {
+                                match fs::write(&cache_path, &dek_b64) {
+                                    Ok(_) => eprintln!("✅ Saved DEK to dev cache: {}", cache_path.display()),
+                                    Err(e) => eprintln!("❌ Failed to save DEK to dev cache: {}", e),
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to create keychain Entry for DEK restoration: {}", e);
+                eprintln!("Error details: {:?}", e);
+                
+                // In dev mode, save to cache file as fallback
+                #[cfg(debug_assertions)]
+                {
+                    eprintln!("DEBUG MODE: Saving DEK to cache file as fallback...");
+                    if let Ok(cache_path) = self.dev_dek_cache_path() {
+                        match fs::write(&cache_path, &dek_b64) {
+                            Ok(_) => eprintln!("✅ Saved DEK to dev cache: {}", cache_path.display()),
+                            Err(e) => eprintln!("❌ Failed to save DEK to dev cache: {}", e),
+                        }
+                    }
+                }
+            }
         }
         
         // Store in memory
@@ -427,6 +574,12 @@ impl EncryptionManager {
         let config_dir = crate::config::ensure_config_dir(Some("jaterm"))
             .map_err(|e| EncryptionError::IoError(format!("Failed to get config dir: {}", e)))?;
         Ok(config_dir.join(".encryption_recovery"))
+    }
+    
+    fn dev_dek_cache_path(&self) -> Result<PathBuf, EncryptionError> {
+        let config_dir = crate::config::ensure_config_dir(Some("jaterm"))
+            .map_err(|e| EncryptionError::IoError(format!("Failed to get config dir: {}", e)))?;
+        Ok(config_dir.join(".dek_cache_dev"))
     }
     
     fn save_recovery_file(&self, encrypted_dek: &EncryptedDek, master_key_hash: &str) -> Result<(), EncryptionError> {

@@ -72,7 +72,19 @@ fn main() {
       commands::encryption::verify_master_key,
       commands::encryption::clear_master_key,
       commands::encryption::remove_master_key,
-      commands::encryption::test_encryption
+      commands::encryption::test_encryption,
+      // New encryption v2 commands
+      config_encrypted_v2::init_encryption,
+      config_encrypted_v2::encryption_needs_setup,
+      config_encrypted_v2::setup_encryption,
+      config_encrypted_v2::verify_master_key_v2,
+      config_encrypted_v2::recover_encryption,
+      config_encrypted_v2::load_profiles_v2,
+      config_encrypted_v2::save_profiles_v2,
+      config_encrypted_v2::check_profiles_need_migration_v2,
+      config_encrypted_v2::migrate_profiles_v2,
+      config_encrypted_v2::export_encryption_key,
+      config_encrypted_v2::import_encryption_key
     ])
     .setup(|app| {
       // Set up the menu

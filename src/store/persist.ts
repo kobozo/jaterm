@@ -5,6 +5,10 @@ import {
   saveProfilesEncrypted,
   encryptionStatus 
 } from '@/types/ipc';
+import { 
+  loadProfilesV2, 
+  saveProfilesV2 
+} from '@/services/api/encryption_v2';
 
 export type AppPersistState = {
   recents?: { path: string; lastOpenedAt: number }[];
@@ -26,7 +30,7 @@ export async function loadAppState(): Promise<AppPersistState> {
   try {
     const [stateData, profilesData] = await Promise.all([
       loadState('jaterm'),
-      loadProfilesEncrypted('jaterm'),
+      loadProfilesV2('jaterm'),  // Use new encryption system
     ]);
     const merged: AppPersistState = {
       ...(stateData || {}),
@@ -43,7 +47,7 @@ export async function saveAppState(partial: AppPersistState): Promise<void> {
     // Load current split files
     const [stateCurrent, profilesCurrent] = await Promise.all([
       loadState('jaterm'),
-      loadProfilesEncrypted('jaterm'),
+      loadProfilesV2('jaterm'),  // Use new encryption system
     ]);
 
     // Route profiles-related keys
@@ -59,7 +63,7 @@ export async function saveAppState(partial: AppPersistState): Promise<void> {
     const writes: Promise<any>[] = [];
     if (Object.keys(profilesPatch).length) {
       const nextProfiles = { ...(profilesCurrent || {}), ...profilesPatch };
-      writes.push(saveProfilesEncrypted(nextProfiles, 'jaterm'));
+      writes.push(saveProfilesV2(nextProfiles, 'jaterm'));  // Use new encryption system
     }
     if (Object.keys(statePatch).length) {
       const nextState = { ...(stateCurrent || {}), ...statePatch };

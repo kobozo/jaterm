@@ -4,6 +4,7 @@ version = "1.2.0"
 description = "JATerm Tauri backend"
 authors = ["you"]
 edition = "2021"
+default-run = "jaterm"
 
 [build-dependencies]
 tauri = { version = "2.7.0", features = [] }

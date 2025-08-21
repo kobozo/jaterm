@@ -6,6 +6,12 @@ import {
   migrateProfilesToEncrypted,
   EncryptionStatus,
 } from '../types/ipc';
+import {
+  setupEncryption,
+  verifyMasterKeyV2,
+  recoverEncryption,
+  migrateProfilesV2,
+} from '../services/api/encryption_v2';
 
 interface MasterKeyDialogProps {
   isOpen: boolean;
@@ -56,24 +62,29 @@ export function MasterKeyDialog({ isOpen, onClose, onSuccess, mode, isMigration 
           return;
         }
 
-        // Set the master key or migrate
+        // Set up new encryption system
+        await setupEncryption(password);
+        
+        // Migrate plain text profiles if needed
         if (isMigration) {
-          // Migrate plain text profiles to encrypted
-          await migrateProfilesToEncrypted(password, 'jaterm');
-        } else {
-          // Just set the master key
-          await setMasterKey(password);
+          await migrateProfilesV2('jaterm');
         }
+        
         onSuccess();
       } else {
-        // Verify the master key (this also loads it into memory)
-        const valid = await verifyMasterKey(password);
-        if (valid) {
-          // No need to call setMasterKey - verify already loaded the key
+        // Unlock mode - recover with master password
+        try {
+          await recoverEncryption(password);
           onSuccess();
-        } else {
-          setError('Invalid master key. Please check your password and try again.');
-          setPassword(''); // Clear the password field for retry
+        } catch {
+          // Fallback to verification for validation
+          const valid = await verifyMasterKeyV2(password);
+          if (valid) {
+            onSuccess();
+          } else {
+            setError('Invalid master key. Please check your password and try again.');
+            setPassword(''); // Clear the password field for retry
+          }
         }
       }
     } catch (err) {

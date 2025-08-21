@@ -29,6 +29,7 @@ pub async fn setup_encryption(
     password: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    eprintln!("=== TAURI COMMAND: setup_encryption ===");
     state.encryption_v2.setup_with_master_key(&password)
         .map_err(|e| e.to_string())
 }
@@ -49,6 +50,7 @@ pub async fn recover_encryption(
     password: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    eprintln!("=== TAURI COMMAND: recover_encryption ===");
     state.encryption_v2.recover_with_master_key(&password)
         .map_err(|e| e.to_string())
 }

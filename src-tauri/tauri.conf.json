@@ -53,7 +53,7 @@
     },
     "macOS": {
       "frameworks": [],
-      "signingIdentity": null,
+      "signingIdentity": "-",
       "providerShortName": null,
       "entitlements": null,
       "minimumSystemVersion": "10.15",

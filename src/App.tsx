@@ -17,6 +17,7 @@ import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
 import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
+import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
 import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
 import { gitStatusViaHelper } from '@/services/git';
@@ -1107,27 +1108,29 @@ export default function App() {
   React.useEffect(() => {
     (async () => {
       try {
-        // Check encryption status first
-        const encStatus = await encryptionStatus();
+        // Initialize new encryption system
+        const initialized = await initEncryption();
         
-        // Check if profiles need migration from plain text
-        const needsMigration = await checkProfilesNeedMigration('jaterm');
-        
-        if (!encStatus.has_master_key) {
-          if (needsMigration) {
-            // Profiles exist in plain text - need to set up encryption (migration)
-            setMasterKeyDialog({ isOpen: true, mode: 'setup', isMigration: true });
+        if (!initialized) {
+          // DEK not found in keychain, check what we need to do
+          const needsSetup = await encryptionNeedsSetup();
+          const needsMigration = await checkProfilesNeedMigrationV2('jaterm');
+          
+          if (needsSetup) {
+            // First time setup - need to create master password
+            setMasterKeyDialog({ isOpen: true, mode: 'setup', isMigration: needsMigration });
           } else {
-            // Try to load profiles - if empty, encrypted profiles may exist
-            const profiles = await loadAppState();
-            const hasProfiles = profiles.profiles && Object.keys(profiles.profiles).length > 0;
-            
-            // If no profiles loaded but migration not needed, encrypted file must exist
-            if (!hasProfiles && !needsMigration) {
-              // Encrypted profiles exist but no key loaded - need to unlock
-              setMasterKeyDialog({ isOpen: true, mode: 'unlock' });
-            }
-            // If no profiles at all, don't show dialog
+            // Have encrypted DEK but no keychain access - need master password to recover
+            setMasterKeyDialog({ isOpen: true, mode: 'unlock' });
+          }
+        } else {
+          // Encryption initialized successfully
+          // Check if we need to migrate plain text profiles
+          const needsMigration = await checkProfilesNeedMigrationV2('jaterm');
+          if (needsMigration) {
+            // Auto-migrate plain text profiles
+            await migrateProfilesV2('jaterm');
+            addToast({ message: 'Profiles migrated to encrypted format', type: 'success' });
           }
         }
         
