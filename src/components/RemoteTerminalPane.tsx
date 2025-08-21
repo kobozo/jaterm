@@ -23,7 +23,11 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   const { attach, dispose, term } = useTerminal(id, terminalSettings);
   const fitRef = useRef<FitAddon | null>(null);
   const correctedRef = useRef(false);
-  useEffect(() => { correctedRef.current = false; }, [id, desiredCwd]);
+  const openedAtRef = useRef<number>(Date.now());
+  const decoderRef = useRef<TextDecoder | null>(null);
+  const IS_DEV = import.meta.env.DEV;
+  // Only allow a single correction per pane (on open), do not reset on cwd changes
+  useEffect(() => { correctedRef.current = false; openedAtRef.current = Date.now(); }, [id]);
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
   React.useEffect(() => {
     const onCloseMenu = () => setMenu(null);
@@ -68,7 +72,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
 
   useEffect(() => {
     if (!containerRef.current) return;
-    console.info('[ssh] attach terminal', id);
+    if (IS_DEV) console.info('[ssh] attach terminal', id);
     attach(containerRef.current);
     const fit = new FitAddon();
     fitRef.current = fit;
@@ -124,7 +128,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     elem?.addEventListener('mousedown', handleFocus);
     const resizeSub = term.onResize(({ cols, rows }) => { if (id) sshResize({ channelId: id, cols, rows }).catch(() => {}); });
     const titleSub = term.onTitleChange?.((title: string) => {
-      console.info('[ssh][title] raw=', title);
+      if (IS_DEV) console.info('[ssh][title] raw=', title);
       onTitle?.(id, title);
       try {
         let candidate: string | null = null;
@@ -141,13 +145,13 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
           if (matches && matches.length) candidate = matches[matches.length - 1];
         }
         if (candidate) {
-          console.info('[ssh][title] candidate=', candidate);
+          if (IS_DEV) console.info('[ssh][title] candidate=', candidate);
           if (candidate.startsWith('~')) {
             const rest = candidate.slice(1);
             if (sessionId) {
               sshHomeDir(sessionId).then((hd) => {
                 const abs = hd.replace(/\/$/, '') + rest;
-                console.info('[ssh][title] cwd=', abs);
+                if (IS_DEV) console.info('[ssh][title] cwd=', abs);
                 onCwd?.(id, abs);
               }).catch(() => {});
             }
@@ -161,14 +165,14 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
               if (!candidate.startsWith(home) && !looksRooted) {
                 abs = home + candidate.replace(/^\//, '');
               }
-              console.info('[ssh][title] cwd=', abs);
+              if (IS_DEV) console.info('[ssh][title] cwd=', abs);
               onCwd?.(id, abs);
             }).catch(() => {
-              console.info('[ssh][title] cwd=', candidate);
+              if (IS_DEV) console.info('[ssh][title] cwd=', candidate);
               onCwd?.(id, candidate);
             });
           } else {
-            console.info('[ssh][title] cwd=', candidate);
+            if (IS_DEV) console.info('[ssh][title] cwd=', candidate);
             onCwd?.(id, candidate);
           }
         }
@@ -177,31 +181,36 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     let unlisten: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
     onSshOutput((e) => {
-      // console debug to verify event flow
-      // console.debug('[ssh] output event', e.channelId, e.dataBytes?.length ?? e.data?.length);
       if (e.channelId !== id) return;
       if (e.dataBytes) {
         const bytes = b64ToUint8Array(e.dataBytes);
         try {
-          const dataStr = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+          if (!decoderRef.current) decoderRef.current = new TextDecoder('utf-8', { fatal: false });
+          const dataStr = decoderRef.current.decode(bytes);
           const cwds = parseOsc7Cwds(dataStr);
           cwds.forEach((p) => {
             onCwd?.(id, p);
-            if (!correctedRef.current && desiredCwd && p !== desiredCwd) {
+            const withinWindow = Date.now() - openedAtRef.current < 2500;
+            if (!correctedRef.current && withinWindow && desiredCwd && p !== desiredCwd) {
               sshWrite({ channelId: id, data: `cd '${desiredCwd.replace(/'/g, "'\\''")}'\n` });
               correctedRef.current = true;
             }
           });
         } catch {}
         term.write(bytes);
-        // Feed output to event detector
-        onTerminalEvent?.(id, { type: 'output', data: new TextDecoder('utf-8', { fatal: false }).decode(bytes) });
+        // Feed output to event detector using the same decoded string
+        try {
+          if (!decoderRef.current) decoderRef.current = new TextDecoder('utf-8', { fatal: false });
+          const dataStr = decoderRef.current.decode(bytes);
+          onTerminalEvent?.(id, { type: 'output', data: dataStr });
+        } catch {}
       } else if (e.data) {
         const data = e.data as string;
         const cwds = parseOsc7Cwds(data);
         cwds.forEach((p) => {
           onCwd?.(id, p);
-          if (!correctedRef.current && desiredCwd && p !== desiredCwd) {
+          const withinWindow = Date.now() - openedAtRef.current < 2500;
+          if (!correctedRef.current && withinWindow && desiredCwd && p !== desiredCwd) {
             sshWrite({ channelId: id, data: `cd '${desiredCwd.replace(/'/g, "'\\''")}'\n` });
             correctedRef.current = true;
           }
@@ -211,7 +220,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
         onTerminalEvent?.(id, { type: 'output', data });
       }
     }).then((u) => (unlisten = u));
-    onSshExit((e) => { if (e.channelId === id) { console.info('[ssh] exit', id); onClose?.(id); } }).then((u) => (unlistenExit = u));
+    onSshExit((e) => { if (e.channelId === id) { if (IS_DEV) console.info('[ssh] exit', id); onClose?.(id); } }).then((u) => (unlistenExit = u));
     return () => {
       sub.dispose();
       keySub.dispose();

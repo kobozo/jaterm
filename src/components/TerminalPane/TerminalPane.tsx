@@ -12,7 +12,11 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
   const { attach, dispose, term } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
   const correctedRef = useRef(false);
-  useEffect(() => { correctedRef.current = false; }, [id, desiredCwd]);
+  const openedAtRef = useRef<number>(Date.now());
+  const decoderRef = useRef<TextDecoder | null>(null);
+  const IS_DEV = import.meta.env.DEV;
+  // Only allow a single correction per pane (on open), do not reset on cwd changes
+  useEffect(() => { correctedRef.current = false; openedAtRef.current = Date.now(); }, [id]);
 
   function b64ToUint8Array(b64: string): Uint8Array {
     const bin = atob(b64);
@@ -127,7 +131,7 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
     });
     // Title changes via OSC 0/2
     const titleSub = term.onTitleChange?.((title: string) => {
-      console.debug('[title] pane', id, title);
+      if (IS_DEV) console.debug('[title] pane', id, title);
       onTitle?.(id, title);
       // Heuristic: if title looks like an absolute path, treat it as cwd fallback
       try {
@@ -157,26 +161,32 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
           const dataStr = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
           const cwds = parseOsc7Cwds(dataStr);
           cwds.forEach((p) => {
-            console.debug('[osc7] pane', id, 'cwd', p);
+            if (IS_DEV) console.debug('[osc7] pane', id, 'cwd', p);
             onCwd?.(id, p);
-            if (!correctedRef.current && desiredCwd && p !== desiredCwd) {
-              console.debug('[cwd-correct] pane', id, 'expected', desiredCwd, 'got', p);
+            const withinWindow = Date.now() - openedAtRef.current < 2500;
+            if (!correctedRef.current && withinWindow && desiredCwd && p !== desiredCwd) {
+              if (IS_DEV) console.debug('[cwd-correct] pane', id, 'expected', desiredCwd, 'got', p);
               ptyWrite({ ptyId: id, data: `cd '${desiredCwd.replace(/'/g, "'\\''")}'\n` });
               correctedRef.current = true;
             }
           });
         } catch {}
         term.write(bytes);
-        // Feed output to event detector
-        onTerminalEvent?.(id, { type: 'output', data: new TextDecoder('utf-8', { fatal: false }).decode(bytes) });
+        // Feed output to event detector using the same decoded string
+        try {
+          if (!decoderRef.current) decoderRef.current = new TextDecoder('utf-8', { fatal: false });
+          const dataStr = decoderRef.current.decode(bytes);
+          onTerminalEvent?.(id, { type: 'output', data: dataStr });
+        } catch {}
       } else if (e.data) {
         const data = e.data as string;
         const cwds = parseOsc7Cwds(data);
         cwds.forEach((p) => {
-          console.debug('[osc7] pane', id, 'cwd', p);
+          if (IS_DEV) console.debug('[osc7] pane', id, 'cwd', p);
           onCwd?.(id, p);
-          if (!correctedRef.current && desiredCwd && p !== desiredCwd) {
-            console.debug('[cwd-correct] pane', id, 'expected', desiredCwd, 'got', p);
+          const withinWindow = Date.now() - openedAtRef.current < 2500;
+          if (!correctedRef.current && withinWindow && desiredCwd && p !== desiredCwd) {
+            if (IS_DEV) console.debug('[cwd-correct] pane', id, 'expected', desiredCwd, 'got', p);
             ptyWrite({ ptyId: id, data: `cd '${desiredCwd.replace(/'/g, "'\\''")}'\n` });
             correctedRef.current = true;
           }

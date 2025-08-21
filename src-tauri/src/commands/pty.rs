@@ -35,7 +35,29 @@ pub async fn pty_open(
         }
     });
 
-    let mut cmd = CommandBuilder::new(shell);
+    let mut cmd = CommandBuilder::new(shell.clone());
+    // On macOS, start the shell as a login shell so that
+    // user PATH customizations (e.g., Homebrew/Node via .zprofile)
+    // are applied. This mirrors how Terminal.app/iTerm launch shells.
+    #[cfg(target_os = "macos")]
+    {
+        use std::path::Path;
+        let shell_name = Path::new(&shell)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        match shell_name {
+            // zsh and bash accept -l for login shell
+            "zsh" | "bash" => {
+                cmd.arg("-l");
+            }
+            // fish also supports -l/--login
+            "fish" => {
+                cmd.arg("-l");
+            }
+            _ => {}
+        }
+    }
     if let Some(c) = cwd.clone() {
         cmd.cwd(c);
     }
