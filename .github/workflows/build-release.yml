@@ -240,12 +240,25 @@ jobs:
           PASSWORD_MD5=$(echo -n "$APPLE_CERTIFICATE_PASSWORD" | md5)
           echo "Password MD5 hash: $PASSWORD_MD5"
           echo "Expected password MD5: 431e6a25010e3b921b58d172e7e6d704"
+          echo "Password length: ${#APPLE_CERTIFICATE_PASSWORD}"
+          echo "Expected length: 25"
           
           # Test certificate with openssl before importing
           echo "Testing certificate with openssl..."
           openssl pkcs12 -in certificate.p12 -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -noout -info 2>&1 | head -5 || echo "OpenSSL verification failed"
           
-          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          # Try different methods to import the certificate
+          echo "Method 1: Standard import with -P flag"
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign || echo "Method 1 failed"
+          
+          echo "Method 2: Import with -f pkcs12 format specified"
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -f pkcs12 -T /usr/bin/codesign || echo "Method 2 failed"
+          
+          echo "Method 3: Import with passphrase via stdin"
+          echo "$APPLE_CERTIFICATE_PASSWORD" | security import certificate.p12 -k $KEYCHAIN_PATH -P - -T /usr/bin/codesign || echo "Method 3 failed"
+          
+          echo "Method 4: Import without -T flag"
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" || true
           security list-keychain -d user -s $KEYCHAIN_PATH
           
           # Allow codesign to access keychain
