@@ -218,10 +218,22 @@ jobs:
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           
+          echo "Creating keychain at: $KEYCHAIN_PATH"
+          echo "Keychain password length: ${#KEYCHAIN_PASSWORD}"
+          
           # Create keychain
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH || { echo "Failed to create keychain"; exit 1; }
+          echo "Keychain created successfully"
+          
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH || { echo "Failed to set keychain settings"; exit 1; }
+          echo "Keychain settings configured"
+          
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH || { echo "Failed to unlock keychain"; exit 1; }
+          echo "Keychain unlocked successfully"
+          
+          # Verify keychain is accessible
+          security show-keychain-info $KEYCHAIN_PATH || { echo "Cannot access keychain info"; exit 1; }
+          echo "Keychain is accessible"
           
           # Import certificate
           echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
@@ -259,10 +271,22 @@ jobs:
           
           echo "Method 4: Import without -T flag"
           security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" || true
+          
+          # List keychains
+          echo "Listing keychains:"
           security list-keychain -d user -s $KEYCHAIN_PATH
           
+          # Check what was imported
+          echo "Checking imported identities:"
+          security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "No identities found"
+          
           # Allow codesign to access keychain
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          echo "Setting key partition list..."
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH || echo "Failed to set partition list"
+          
+          # Check again after partition list
+          echo "Checking identities after partition list:"
+          security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "Still no identities found"
           
           # Export for Tauri
           echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> $GITHUB_ENV
