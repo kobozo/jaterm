@@ -236,6 +236,15 @@ jobs:
           echo "Direct P12 file MD5: $P12_MD5"
           echo "Expected P12 MD5: ba0af17a394afc07332fe9176bb2696d"
           
+          # Debug password (hash it to avoid exposing in logs)
+          PASSWORD_MD5=$(echo -n "$APPLE_CERTIFICATE_PASSWORD" | md5)
+          echo "Password MD5 hash: $PASSWORD_MD5"
+          echo "Expected password MD5 (for 'TempPassword123!'): e18eab03d91a28262668490dda2c9041"
+          
+          # Test certificate with openssl before importing
+          echo "Testing certificate with openssl..."
+          openssl pkcs12 -in certificate.p12 -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -noout -info 2>&1 | head -5 || echo "OpenSSL verification failed"
+          
           security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security list-keychain -d user -s $KEYCHAIN_PATH
           
