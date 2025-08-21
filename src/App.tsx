@@ -1257,7 +1257,7 @@ export default function App() {
       
       // Help menu events
       unlisteners.push(await listen('menu:about', () => {
-        addToast('info', 'JaTerm v1.1.0\nA modern terminal emulator with SSH support\n© 2025 Kobozo');
+        addToast('info', 'JaTerm v1.2.0\nA modern terminal emulator with SSH support\n© 2025 Kobozo');
       }));
       
       // Check for updates handler
