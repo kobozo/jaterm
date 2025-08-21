@@ -4,6 +4,7 @@ Welcome to the JaTerm wiki. Use the sections below to find focused guidance for 
 
 - Getting started: [[Getting-Started]]
 - Architecture overview: [[Architecture]]
+- JaTerm helper: [[JaTerm-Helper]]
 - Profiles & encryption: [[Profiles-and-Encryption]]
 - Terminal & performance: [[Terminal-and-Performance]]
 - Releases & updater: [[Release-and-Updater]]

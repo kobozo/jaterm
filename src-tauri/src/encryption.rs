@@ -223,7 +223,7 @@ impl EncryptionManager {
     pub fn verify_master_key(&self, password: &str) -> Result<bool, EncryptionError> {
         // First check if we have salt in memory
         let has_salt = self.salt.lock().unwrap().is_some();
-        let has_key = self.master_key.lock().unwrap().is_some();
+        let _has_key = self.master_key.lock().unwrap().is_some();
         
         // If we don't have salt but have a fallback file, load from there
         if !has_salt {

@@ -465,9 +465,15 @@ impl EncryptionManager {
         *self.master_key_hash.lock().unwrap() = None;
         
         // Clear keychain entries
-        let _ = Entry::new(KEYRING_SERVICE, DEK_ACCOUNT).and_then(|e| e.delete_password());
-        let _ = Entry::new(KEYRING_SERVICE, ENCRYPTED_DEK_ACCOUNT).and_then(|e| e.delete_password());
-        let _ = Entry::new(KEYRING_SERVICE, MASTER_KEY_HASH_ACCOUNT).and_then(|e| e.delete_password());
+        if let Ok(entry) = Entry::new(KEYRING_SERVICE, DEK_ACCOUNT) {
+            let _ = entry.delete_credential();
+        }
+        if let Ok(entry) = Entry::new(KEYRING_SERVICE, ENCRYPTED_DEK_ACCOUNT) {
+            let _ = entry.delete_credential();
+        }
+        if let Ok(entry) = Entry::new(KEYRING_SERVICE, MASTER_KEY_HASH_ACCOUNT) {
+            let _ = entry.delete_credential();
+        }
         
         // Remove recovery file
         if let Ok(path) = self.recovery_file_path() {
