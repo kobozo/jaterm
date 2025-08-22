@@ -214,7 +214,7 @@ export default function App() {
         // Set environment variables
         if (opts.shell.env) {
           for (const [key, value] of Object.entries(opts.shell.env)) {
-            const exportCmd = `export ${key}="${value.replace(/"/g, '\\"')}"\n`;
+            const exportCmd = `export ${key}="${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
             await ptyWrite({ ptyId: sid, data: exportCmd });
           }
         }
@@ -733,7 +733,7 @@ export default function App() {
         // Set environment variables
         if (opts.shell.env) {
           for (const [key, value] of Object.entries(opts.shell.env)) {
-            const exportCmd = `export ${key}="${value.replace(/"/g, '\\"')}"\n`;
+            const exportCmd = `export ${key}="${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
             await sshWrite({ channelId: chanId, data: exportCmd });
           }
         }
