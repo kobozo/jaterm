@@ -139,6 +139,18 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
     // About will be handled differently on macOS (in app menu) vs other platforms
     
     // Build submenus
+    #[cfg(target_os = "macos")]
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&new_tab)
+        .item(&new_window)
+        .separator()
+        .item(&close_tab)
+        .item(&close_window)
+        .separator()
+        .item(&open_ssh)
+        .build()?;
+    
+    #[cfg(not(target_os = "macos"))]
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_tab)
         .item(&new_window)
@@ -235,10 +247,12 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         let app_menu = SubmenuBuilder::new(app, "JaTerm")
             .about(Some(AboutMetadata {
                 name: Some("JaTerm".to_string()),
-                version: Some("1.1.0".to_string()),
+                version: Some("1.4.0".to_string()),
                 copyright: Some("© 2025 Kobozo. All rights reserved.".to_string()),
                 ..Default::default()
             }))
+            .separator()
+            .item(&settings)
             .separator()
             .services()
             .separator()

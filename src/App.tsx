@@ -1452,7 +1452,7 @@ export default function App() {
           setActiveTab(existingSettings.id);
         } else {
           const settingsTab: Tab = {
-            id: nanoid(),
+            id: crypto.randomUUID(),
             kind: 'settings',
             cwd: null,
             panes: [],
