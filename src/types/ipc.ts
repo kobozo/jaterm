@@ -102,7 +102,7 @@ export async function sshConnectWithTrustPrompt(profile: JsSshProfile): Promise<
 }
 
 export function sshDisconnect(sessionId: string) {
-  return invoke('ssh_disconnect', { session_id: sessionId } as any);
+  return invoke('ssh_disconnect', { sessionId } as any);
 }
 
 export function sshDetectPorts(sessionId: string): Promise<number[]> {
