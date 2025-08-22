@@ -198,8 +198,8 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
   // Explicitly set NO timeout (0 means infinite) - crucial for channel creation
   sess.set_timeout(0);
   
-  // Keep session in non-blocking mode for better performance
-  sess.set_blocking(false);
+  // Start in blocking mode - functions will switch to non-blocking as needed
+  sess.set_blocking(true);
   
   // Start watchdog for git status and port detection (non-blocking)
   let session_id_for_watchdog = format!("ssh_{}", nanoid::nanoid!(8));
@@ -266,24 +266,13 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
 pub async fn ssh_home_dir(state: State<'_, crate::state::app_state::AppState>, session_id: String) -> Result<String, String> {
   let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
-  let sftp = loop {
-    match s.sess.sftp() {
-      Ok(h) => break h,
-      Err(e) => {
-        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
-        else { return Err(e.to_string()); }
-      }
-    }
-  };
-  let path = loop {
-    match sftp.realpath(Path::new(".")) {
-      Ok(p) => break p,
-      Err(e) => {
-        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
-        else { return Err(e.to_string()); }
-      }
-    }
-  };
+  
+  // Temporarily set to blocking mode for SFTP creation
+  s.sess.set_blocking(true);
+  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+  let path = sftp.realpath(Path::new(".")).map_err(|e| e.to_string())?;
+  // Return to non-blocking mode
+  s.sess.set_blocking(false);
   path.to_str().map(|s| s.to_string()).ok_or_else(|| "non-utf8 path".to_string())
 }
 
@@ -449,34 +438,33 @@ pub async fn ssh_sftp_mkdirs(state: State<'_, crate::state::app_state::AppState>
   eprintln!("[ssh] mkdirs session={} path={}", session_id, path);
   let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
-  let sftp = loop {
-    match s.sess.sftp() {
-      Ok(h) => break h,
-      Err(e) => {
-        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; }
-        else { return Err(e.to_string()); }
-      }
-    }
-  };
+  
+  // Temporarily set to blocking mode for SFTP operations
+  s.sess.set_blocking(true);
+  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
   let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
   let mut cur = if path.starts_with('/') { String::from("/") } else { String::new() };
   for part in parts {
     if cur != "/" && !cur.is_empty() { cur.push('/'); }
     cur.push_str(part);
     let p = Path::new(&cur);
-    // If exists and is dir, continue
-    if let Ok(st) = loop { match sftp.stat(p) { Ok(st) => break Ok(st), Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { break Err(e);} } } } {
+    // If exists and is dir, continue (no retry needed in blocking mode)
+    if let Ok(st) = sftp.stat(p) {
       if st.is_dir() { continue; }
     }
     // Try to create; if it fails, check again if it now exists (race) else error
-    if let Err(e) = loop { match sftp.mkdir(p, 0o755) { Ok(_) => break Ok(()), Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { break Err(e);} } } } {
+    if let Err(e) = sftp.mkdir(p, 0o755) {
       eprintln!("[ssh] mkdir failed: {}", e);
-      if let Ok(st) = loop { match sftp.stat(p) { Ok(st) => break Ok(st), Err(e2) => { if matches!(e2.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { break Err(e2);} } } } {
+      if let Ok(st) = sftp.stat(p) {
         if st.is_dir() { continue; }
       }
+      // Return to non-blocking before returning error
+      s.sess.set_blocking(false);
       return Err(e.to_string());
     }
   }
+  // Return to non-blocking mode
+  s.sess.set_blocking(false);
   Ok(())
 }
 
@@ -510,57 +498,38 @@ pub async fn ssh_deploy_helper(app: tauri::AppHandle, state: State<'_, crate::st
   // Now open SFTP connection and deploy the binary
   let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
-  let sftp = loop { 
-    match s.sess.sftp() { 
-      Ok(h) => break h, 
-      Err(e) => { 
-        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { 
-          std::thread::sleep(Duration::from_millis(10)); 
-          continue; 
-        } else { 
-          return Err(e.to_string()); 
-        } 
-      } 
-    } 
-  };
+  
+  // Temporarily set to blocking mode for SFTP operations
+  s.sess.set_blocking(true);
+  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
   
   let total = helper_binary.len();
   let mut written = 0usize;
-  let mut file = loop { 
-    match sftp.create(Path::new(&remote_path)) { 
-      Ok(f) => break f, 
-      Err(e) => { 
-        eprintln!("[ssh] sftp create failed: {}", e); 
-        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { 
-          std::thread::sleep(Duration::from_millis(10)); 
-          continue; 
-        } else { 
-          return Err(e.to_string()); 
-        } 
-      } 
-    } 
-  };
+  let mut file = sftp.create(Path::new(&remote_path)).map_err(|e| {
+    eprintln!("[ssh] sftp create failed: {}", e);
+    // Return to non-blocking before error
+    s.sess.set_blocking(false);
+    e.to_string()
+  })?;
   
   while written < total {
     let end = usize::min(written + 8192, total);
     let chunk = &helper_binary[written..end];
-    loop {
-      match file.write_all(chunk) {
-        Ok(_) => break,
-        Err(e) => {
-          if e.kind() == std::io::ErrorKind::WouldBlock { 
-            std::thread::sleep(Duration::from_millis(10)); 
-            continue; 
-          } else { 
-            return Err(e.to_string()); 
-          }
-        }
-      }
-    }
+    // In blocking mode, no need for retry loop
+    file.write_all(chunk).map_err(|e| {
+      // Return to non-blocking before error
+      s.sess.set_blocking(false);
+      e.to_string()
+    })?;
     written = end;
     let _ = app.emit(crate::events::SSH_UPLOAD_PROGRESS, &serde_json::json!({ "path": remote_path, "written": written, "total": total }));
     std::thread::sleep(Duration::from_millis(1));
   }
+  
+  // Return to non-blocking mode
+  s.sess.set_blocking(false);
+  
+  eprintln!("[ssh] helper uploaded {} bytes", written);
   Ok(())
 }
 
@@ -569,27 +538,33 @@ pub async fn ssh_sftp_write(app: tauri::AppHandle, state: State<'_, crate::state
   eprintln!("[ssh] sftp_write session={} path={} size={}B", session_id, remote_path, data_b64.len());
   let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
-  let sftp = loop { match s.sess.sftp() { Ok(h) => break h, Err(e) => { if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  
+  // Temporarily set to blocking mode for SFTP operations
+  s.sess.set_blocking(true);
+  let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
   let bytes = base64::engine::general_purpose::STANDARD.decode(data_b64).map_err(|e| e.to_string())?;
   let total = bytes.len();
   let mut written = 0usize;
-  let mut file = loop { match sftp.create(Path::new(&remote_path)) { Ok(f) => break f, Err(e) => { eprintln!("[ssh] sftp create failed: {}", e); if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) { std::thread::sleep(Duration::from_millis(10)); continue; } else { return Err(e.to_string()); } } } };
+  let mut file = sftp.create(Path::new(&remote_path)).map_err(|e| {
+    eprintln!("[ssh] sftp create failed: {}", e);
+    s.sess.set_blocking(false);
+    e.to_string()
+  })?;
   while written < total {
     let end = usize::min(written + 8192, total);
     let chunk = &bytes[written..end];
-    loop {
-      match file.write_all(chunk) {
-        Ok(_) => break,
-        Err(e) => {
-          if e.kind() == std::io::ErrorKind::WouldBlock { std::thread::sleep(Duration::from_millis(10)); continue; }
-          else { return Err(e.to_string()); }
-        }
-      }
-    }
+    // In blocking mode, no need for retry loop
+    file.write_all(chunk).map_err(|e| {
+      s.sess.set_blocking(false);
+      e.to_string()
+    })?;
     written = end;
     let _ = app.emit(crate::events::SSH_UPLOAD_PROGRESS, &serde_json::json!({ "path": remote_path, "written": written, "total": total }));
     std::thread::sleep(Duration::from_millis(1));
   }
+  
+  // Return to non-blocking mode
+  s.sess.set_blocking(false);
   Ok(())
 }
 
@@ -602,38 +577,16 @@ pub async fn ssh_exec(state: State<'_, crate::state::app_state::AppState>, sessi
   let mut inner = state.inner.lock().map_err(|_| "lock")?;
   let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
   let sess_lock = s.lock.clone();
-  let mut chan = loop {
-    let _g = sess_lock.lock().unwrap();
-    match s.sess.channel_session() {
-      Ok(c) => break c,
-      Err(e) => {
-        if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-          std::thread::sleep(Duration::from_millis(10));
-          continue;
-        } else { return Err(e.to_string()); }
-      }
-    }
-  };
+  
+  // Temporarily set to blocking mode for channel creation and exec
+  s.sess.set_blocking(true);
+  let mut chan = s.sess.channel_session().map_err(|e| e.to_string())?;
   // Keep stderr separate
   let _ = chan.handle_extended_data(ssh2::ExtendedData::Normal);
-  // Try exec with retry on WouldBlock
-  {
-    let mut attempts = 0;
-    loop {
-      let _g = sess_lock.lock().unwrap();
-      match chan.exec(&command) {
-        Ok(_) => break,
-        Err(e) => {
-          if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) && attempts < 50 {
-            std::thread::sleep(Duration::from_millis(10));
-            attempts += 1;
-            continue;
-          }
-          return Err(format!("exec: {e}"));
-        }
-      }
-    }
-  }
+  // Execute command in blocking mode (no retry needed)
+  chan.exec(&command).map_err(|e| format!("exec: {e}"))?;
+  // Return to non-blocking mode for reading output
+  s.sess.set_blocking(false);
   let mut out = Vec::new();
   let mut err = Vec::new();
   let mut stdout = chan.stream(0);
@@ -860,34 +813,36 @@ pub async fn ssh_close_forward(app: tauri::AppHandle, state: State<'_, crate::st
 
 #[tauri::command]
 pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, cwd: Option<String>, cols: Option<u16>, rows: Option<u16>) -> Result<String, String> {
-  // Access the session and create the channel with retry for non-blocking mode
-  let mut chan = {
+  // Access the session and create/configure the channel in blocking mode
+  let chan = {
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
-    // Temporarily set to blocking for channel creation
+    // Set to blocking for all channel setup operations
     s.sess.set_blocking(true);
-    let chan = s.sess.channel_session().map_err(|e| format!("channel_session: {e}"))?;
-    // Switch back to non-blocking
+    let mut chan = s.sess.channel_session().map_err(|e| format!("channel_session: {e}"))?;
+    
+    let term = "xterm-256color";
+    let sz_cols = cols.unwrap_or(120);
+    let sz_rows = rows.unwrap_or(30);
+    // Request PTY with the desired initial size (in blocking mode)
+    chan.request_pty(term, None, Some((sz_cols as u32, sz_rows as u32, 0, 0)))
+      .map_err(|e| format!("request_pty: {e}"))?;
+    // Merge STDERR into STDOUT so we don't miss prompts/messages
+    let _ = chan.handle_extended_data(ssh2::ExtendedData::Merge);
+    // Start the shell without echoing pre-commands. If a cwd is provided, exec a login shell after changing dir.
+    if let Some(dir) = cwd {
+      let esc = dir.replace("'", "'\\''");
+      // Use bash -lc to change directory and exec user's login shell without printing pre-commands
+      let cmd = format!("bash -lc 'cd \"{}\"; exec $SHELL -l'", esc);
+      chan.exec(&cmd).map_err(|e| format!("exec(shell): {e}"))?;
+    } else {
+      chan.shell().map_err(|e| format!("shell: {e}"))?;
+    }
+    
+    // Now switch back to non-blocking after all setup is done
     s.sess.set_blocking(false);
     chan
   };
-  let term = "xterm-256color";
-  let sz_cols = cols.unwrap_or(120);
-  let sz_rows = rows.unwrap_or(30);
-  // Request PTY with the desired initial size
-  chan.request_pty(term, None, Some((sz_cols as u32, sz_rows as u32, 0, 0)))
-    .map_err(|e| format!("request_pty: {e}"))?;
-  // Merge STDERR into STDOUT so we don't miss prompts/messages
-  let _ = chan.handle_extended_data(ssh2::ExtendedData::Merge);
-  // Start the shell without echoing pre-commands. If a cwd is provided, exec a login shell after changing dir.
-  if let Some(dir) = cwd {
-    let esc = dir.replace("'", "'\\''");
-    // Use bash -lc to change directory and exec user's login shell without printing pre-commands
-    let cmd = format!("bash -lc 'cd \"{}\"; exec $SHELL -l'", esc);
-    chan.exec(&cmd).map_err(|e| format!("exec(shell): {e}"))?;
-  } else {
-    chan.shell().map_err(|e| format!("shell: {e}"))?;
-  }
   // Channel is ready; start a command-processing thread that also reads output
   let id = format!("chan_{}", nanoid::nanoid!(8));
   {
