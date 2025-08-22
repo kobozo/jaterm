@@ -1590,8 +1590,9 @@ export default function App() {
       {tabs.map((t) => (
         <div key={t.id} style={{ display: t.id === activeTab ? 'block' : 'none', height: '100%' }}>
           <div style={{ display: 'flex', height: '100%', width: '100%' }}>
-            {/* Sidebar */}
-            <div style={{ width: 44, borderRight: '1px solid #333', display: 'flex', flexDirection: 'column', gap: 6, padding: 6, boxSizing: 'border-box' }}>
+            {/* Sidebar - only show for terminal views (local and SSH) */}
+            {t.cwd && t.kind !== 'settings' && (
+              <div style={{ width: 44, borderRight: '1px solid #333', display: 'flex', flexDirection: 'column', gap: 6, padding: 6, boxSizing: 'border-box' }}>
               <button
                 className="nf-icon"
                 style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: (t.view ?? 'terminal') === 'terminal' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
@@ -1637,7 +1638,8 @@ export default function App() {
                   ≣
                 </button>
               )}
-            </div>
+              </div>
+            )}
             {/* Content: render both views and toggle visibility to preserve terminal DOM */}
             <div style={{ flex: 1, minWidth: 0, height: '100%', position: 'relative' }}>
               {/* Git view */}
