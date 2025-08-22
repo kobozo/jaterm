@@ -141,6 +141,8 @@ export type SshProfileStored = {
   shell?: ShellSettings;
   advanced?: SshAdvancedSettings;
   os?: string; // auto-detected or user-selected OS
+  helperConsent?: 'yes' | 'no'; // User consent for helper deployment
+  skipKeyGeneration?: boolean; // Skip offering SSH key generation for password auth
 };
 
 // Profiles tree: folders and profile references
@@ -155,6 +157,7 @@ export type FolderSettings = {
     user?: string;
     auth?: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean };
     advanced?: SshAdvancedSettings;
+    helperConsent?: 'yes' | 'no'; // Default helper consent for child profiles
   };
 };
 
