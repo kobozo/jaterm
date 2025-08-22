@@ -5,3 +5,4 @@ pub mod helper;
 pub mod watcher;
 pub mod app;
 pub mod encryption;
+pub mod keygen;

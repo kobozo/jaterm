@@ -102,7 +102,7 @@ export async function sshConnectWithTrustPrompt(profile: JsSshProfile): Promise<
 }
 
 export function sshDisconnect(sessionId: string) {
-  return invoke('ssh_disconnect', { session_id: sessionId } as any);
+  return invoke('ssh_disconnect', { sessionId } as any);
 }
 
 export function sshDetectPorts(sessionId: string): Promise<number[]> {
@@ -149,6 +149,23 @@ export function scanSshKeys(): Promise<SshKeyInfo[]> {
 export function gitStatus(cwd: string): Promise<GitStatus> {
   return invoke('git_status', { path: cwd } as any);
 }
+
+// ----- SSH Key Generation -----
+export interface GeneratedKey {
+  private_key_path: string;
+  public_key_path: string;
+  public_key_string: string;
+  fingerprint: string;
+}
+
+export const generateSshKey = (algorithm: 'ed25519' | 'rsa', passphrase: string | null, profileName: string): Promise<GeneratedKey> =>
+  invoke('generate_ssh_key', { algorithm, passphrase, profileName });
+
+export const deployPublicKey = (sessionId: string, publicKey: string): Promise<void> =>
+  invoke('deploy_public_key', { sessionId, publicKey });
+
+export const testKeyAuth = (host: string, port: number, user: string, keyPath: string, passphrase: string | null): Promise<boolean> =>
+  invoke('test_key_auth', { host, port, user, keyPath, passphrase });
 
 export function watchSubscribe(paths: string[]): Promise<{ subscriptionId: string } | void> {
   return invoke('watch_subscribe', { paths } as any);

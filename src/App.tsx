@@ -23,6 +23,7 @@ import { ensureHelper, ensureLocalHelper } from '@/services/helper';
 import { gitStatusViaHelper } from '@/services/git';
 import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
 import HelperConsentModal from '@/components/HelperConsentModal';
+import KeyGenerationModal from '@/components/KeyGenerationModal';
 
 export default function App() {
   // imported above
@@ -63,6 +64,17 @@ export default function App() {
     tabId: string;
     opts: any;
   } | null>(null);
+  
+  // SSH key generation modal state
+  const [keyGenerationModal, setKeyGenerationModal] = useState<{
+    sessionId: string;
+    profileId: string;
+    profileName: string;
+    host: string;
+    port: number;
+    user: string;
+  } | null>(null);
+  
   // Updater state
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState<null | { version?: string }>(null);
@@ -843,6 +855,32 @@ export default function App() {
 
       const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
       const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: authToUse.password, key_path: (authToUse as any).keyPath, passphrase: authToUse.passphrase, agent: authToUse.agent } as any, timeout_ms: 15000 });
+      
+      // Check if password auth was used and we have a profile that could be upgraded
+      if (authToUse.password && opts.profileId && opts.profileName) {
+        // Check if we should offer key generation (only if not already offered)
+        try {
+          const { getSshProfiles } = await import('@/store/persist');
+          const profiles = await getSshProfiles();
+          const profile = profiles.find(p => p.id === opts.profileId);
+          
+          // Only offer if profile doesn't have a "skipKeyGeneration" flag
+          if (profile && !profile.skipKeyGeneration) {
+            // Show key generation modal
+            setKeyGenerationModal({
+              sessionId,
+              profileId: opts.profileId,
+              profileName: opts.profileName,
+              host: opts.host,
+              port: opts.port ?? 22,
+              user: opts.user
+            });
+            // Continue with the connection but modal will be shown
+          }
+        } catch (e) {
+          console.error('Failed to check key generation status:', e);
+        }
+      }
       
       // Check helper consent
       const consent = await resolveHelperConsent(opts.profileId);
@@ -1971,6 +2009,59 @@ export default function App() {
             setHelperConsentModal(null);
             sshDisconnect(sessionId).catch(() => {});
             addToast({ title: 'SSH Connection Cancelled', message: 'Helper deployment was declined', kind: 'info' });
+          }}
+        />
+      )}
+      {keyGenerationModal && (
+        <KeyGenerationModal
+          sessionId={keyGenerationModal.sessionId}
+          profileName={keyGenerationModal.profileName}
+          host={keyGenerationModal.host}
+          port={keyGenerationModal.port}
+          user={keyGenerationModal.user}
+          onSuccess={async (keyPath, passphrase) => {
+            // Update the profile to use the new key
+            try {
+              const { getSshProfiles, saveSshProfile } = await import('@/store/persist');
+              const profiles = await getSshProfiles();
+              const profile = profiles.find(p => p.id === keyGenerationModal.profileId);
+              if (profile) {
+                // Replace password auth with key auth
+                profile.auth = {
+                  keyPath,
+                  passphrase: passphrase || undefined,
+                  agent: false
+                };
+                await saveSshProfile(profile);
+                addToast({ 
+                  title: 'SSH Key Deployed', 
+                  message: `Profile "${profile.name}" now uses key authentication`, 
+                  kind: 'success' 
+                });
+              }
+            } catch (e) {
+              console.error('Failed to update profile with key:', e);
+            }
+            setKeyGenerationModal(null);
+          }}
+          onCancel={() => {
+            // User cancelled - don't disconnect, just close modal
+            setKeyGenerationModal(null);
+          }}
+          onSkip={async () => {
+            // User wants to keep using password - mark profile to not ask again
+            try {
+              const { getSshProfiles, saveSshProfile } = await import('@/store/persist');
+              const profiles = await getSshProfiles();
+              const profile = profiles.find(p => p.id === keyGenerationModal.profileId);
+              if (profile) {
+                profile.skipKeyGeneration = true;
+                await saveSshProfile(profile);
+              }
+            } catch (e) {
+              console.error('Failed to update profile skip flag:', e);
+            }
+            setKeyGenerationModal(null);
           }}
         />
       )}

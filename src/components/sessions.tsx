@@ -1178,7 +1178,80 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       )}
                     </div>
                   </div>
-                  {spForm.authType === 'password' && (<label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} /></label>)}
+                  {spForm.authType === 'password' && (
+                    <div>
+                      <label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} /></label>
+                      <button 
+                        type="button"
+                        style={{ 
+                          marginTop: 8, 
+                          padding: '6px 12px', 
+                          background: '#0078d4', 
+                          color: 'white', 
+                          border: 'none', 
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 13
+                        }}
+                        onClick={async () => {
+                          if (!spForm.name || !spForm.host || !spForm.user || !spForm.password) {
+                            alert('Please fill in name, host, user, and password before generating a key');
+                            return;
+                          }
+                          try {
+                            const { generateSshKey, sshConnectWithTrustPrompt, deployPublicKey, testKeyAuth, sshDisconnect } = await import('@/types/ipc');
+                            
+                            // Generate key
+                            const key = await generateSshKey('ed25519', null, spForm.name);
+                            
+                            // Connect with password to deploy key
+                            const effHost = spForm.host || inheritedForSsh?.ssh?.host || '';
+                            const effPort = spForm.port ?? inheritedForSsh?.ssh?.port ?? 22;
+                            const effUser = spInherit.sshUser ? (inheritedForSsh?.ssh?.user || spForm.user) : spForm.user;
+                            
+                            const sessionId = await sshConnectWithTrustPrompt({ 
+                              host: effHost, 
+                              port: effPort, 
+                              user: effUser, 
+                              auth: { password: spForm.password }, 
+                              timeout_ms: 15000 
+                            });
+                            
+                            // Deploy the public key
+                            await deployPublicKey(sessionId, key.public_key_string);
+                            
+                            // Test the key
+                            const success = await testKeyAuth(effHost, effPort, effUser, key.private_key_path, null);
+                            
+                            // Disconnect
+                            await sshDisconnect(sessionId);
+                            
+                            if (success) {
+                              // Update form to use the new key
+                              setSpForm({ 
+                                ...spForm, 
+                                authType: 'key', 
+                                keyPath: key.private_key_path,
+                                password: undefined,
+                                passphrase: undefined 
+                              });
+                              alert(`SSH key generated and deployed successfully!\n\nFingerprint: ${key.fingerprint}`);
+                            } else {
+                              alert('Key was deployed but authentication test failed. Please check server configuration.');
+                            }
+                          } catch (e) {
+                            alert('Failed to generate and deploy key: ' + e);
+                          }
+                        }}
+                        disabled={!!spInherit.sshAuth}
+                      >
+                        🔑 Generate & Deploy SSH Key
+                      </button>
+                      <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>
+                        Generate a secure SSH key and automatically deploy it to the server
+                      </div>
+                    </div>
+                  )}
                   {spForm.authType === 'key' && (
                     <>
                       {!spInherit.sshAuth ? (
