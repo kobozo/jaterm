@@ -46,6 +46,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           
+      - name: Install macOS build tools
+        if: matrix.os == 'macos-latest'
+        run: |
+          # Install create-dmg for DMG bundling
+          brew install create-dmg || true
+          
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -103,7 +109,17 @@ jobs:
           $newJson = $config | ConvertTo-Json -Depth 10
           Set-Content -Path src-tauri/tauri.conf.json -Value $newJson -NoNewline
           
-      - name: Build Tauri app
+      - name: Build Tauri app (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          # For test builds, only create .app bundle, skip DMG
+          pnpm tauri build --target ${{ matrix.target }} --bundles app
+        env:
+          # Skip code signing for test builds
+          APPLE_SIGNING_IDENTITY: "-"
+          
+      - name: Build Tauri app (non-macOS)
+        if: matrix.os != 'macos-latest'
         run: pnpm tauri build --target ${{ matrix.target }}
         
       - name: List build artifacts (Unix)
