@@ -12,7 +12,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'add your linter'"
+    "lint": "echo 'add your linter'",
+    "release:notes": "node tools/generate-release-notes.mjs --since-tag"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.7.0",
