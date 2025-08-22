@@ -410,11 +410,16 @@ jobs:
               security find-identity -v -p codesigning || echo "No identities in default"
             fi
           fi
+          
+          # Remove test binary that shouldn't be signed in release builds
+          echo "Removing test_keyring binary from release build..."
+          rm -f src-tauri/src/bin/test_keyring.rs
       
       - name: Build Tauri app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
         run: |
           pnpm tauri build --target ${{ matrix.target }}
 
