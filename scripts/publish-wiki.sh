@@ -41,7 +41,22 @@ fi
 tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t 'wiki')
 trap 'rm -rf "$tmp_dir"' EXIT
 
-echo "Cloning wiki repo: $wiki_url"
+echo "Checking if wiki repo exists: $wiki_url"
+if ! git ls-remote "$wiki_url" HEAD 2>/dev/null; then
+  echo "WARNING: Wiki repository does not exist yet."
+  echo "GitHub wikis must be created manually first."
+  echo ""
+  echo "To create the wiki:"
+  echo "1. Go to https://github.com/kobozo/jaterm/wiki"
+  echo "2. Click 'Create the first page'"
+  echo "3. Save any content (it will be replaced by this script)"
+  echo "4. Re-run this workflow"
+  echo ""
+  echo "Skipping wiki publish for now."
+  exit 0
+fi
+
+echo "Cloning wiki repo..."
 git clone "$wiki_url" "$tmp_dir"
 
 cd "$tmp_dir"
