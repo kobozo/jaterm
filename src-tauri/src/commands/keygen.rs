@@ -3,6 +3,7 @@ use ssh_key::{Algorithm, LineEnding, PrivateKey};
 use ssh_key::private::{KeypairData, RsaKeypair};
 use std::fs;
 use std::path::Path;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use rand_core::OsRng;
 
