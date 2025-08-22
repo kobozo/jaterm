@@ -29,6 +29,11 @@ dirs = "6"
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 sha2 = "0.10"
 
+# SSH key generation
+ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption", "std"] }
+rand_core = "0.6"
+chrono = "0.4"
+
 # Encryption and secure storage
 aes-gcm = "0.10"
 argon2 = "0.5"

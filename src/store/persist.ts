@@ -142,6 +142,7 @@ export type SshProfileStored = {
   advanced?: SshAdvancedSettings;
   os?: string; // auto-detected or user-selected OS
   helperConsent?: 'yes' | 'no'; // User consent for helper deployment
+  skipKeyGeneration?: boolean; // Skip offering SSH key generation for password auth
 };
 
 // Profiles tree: folders and profile references
