@@ -391,28 +391,31 @@ jobs:
           cargo zigbuild --release --target x86_64-unknown-linux-musl || true
         continue-on-error: true
         
+      - name: Prepare keychain for build (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "Ensuring keychain is accessible for build..."
+          # Re-export the keychain path if it was set
+          if [ -n "$RUNNER_TEMP" ]; then
+            export KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+            if [ -f "$KEYCHAIN_PATH" ]; then
+              echo "Keychain exists at: $KEYCHAIN_PATH"
+              # Make sure it's in the search list
+              security list-keychain -d user -s $KEYCHAIN_PATH login.keychain-db
+              # Verify the identity is still there
+              echo "Verifying signing identity..."
+              security find-identity -v -p codesigning $KEYCHAIN_PATH | grep -i jaterm || echo "Warning: JaTerm identity not found"
+              # Try to find in default keychain too
+              echo "Checking default keychain:"
+              security find-identity -v -p codesigning || echo "No identities in default"
+            fi
+          fi
+      
       - name: Build Tauri app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          # On macOS, ensure keychain is available for signing
-          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            echo "Ensuring keychain is accessible for build..."
-            # Re-export the keychain path if it was set
-            if [ -n "$RUNNER_TEMP" ]; then
-              export KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-              if [ -f "$KEYCHAIN_PATH" ]; then
-                echo "Keychain exists at: $KEYCHAIN_PATH"
-                # Make sure it's in the search list
-                security list-keychain -d user -s $KEYCHAIN_PATH login.keychain-db
-                # Verify the identity is still there
-                echo "Verifying signing identity..."
-                security find-identity -v -p codesigning $KEYCHAIN_PATH | grep -i jaterm || echo "Warning: JaTerm identity not found"
-              fi
-            fi
-          fi
-          
           pnpm tauri build --target ${{ matrix.target }}
 
       - name: Package helper (Windows)
