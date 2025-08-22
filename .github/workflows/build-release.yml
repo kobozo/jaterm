@@ -259,18 +259,19 @@ jobs:
           echo "Testing certificate with openssl..."
           openssl pkcs12 -in certificate.p12 -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -noout -info 2>&1 | head -5 || echo "OpenSSL verification failed"
           
-          # Try different methods to import the certificate
-          echo "Method 1: Standard import with -P flag"
-          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign || echo "Method 1 failed"
+          # Import the certificate - try the most reliable method
+          echo "Importing certificate to keychain..."
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security || echo "Import failed"
           
-          echo "Method 2: Import with -f pkcs12 format specified"
-          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -f pkcs12 -T /usr/bin/codesign || echo "Method 2 failed"
+          # Extract the certificate for trust operations
+          echo "Extracting certificate from P12..."
+          openssl pkcs12 -in certificate.p12 -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -nokeys -out cert.pem || echo "Failed to extract cert"
           
-          echo "Method 3: Import with passphrase via stdin"
-          echo "$APPLE_CERTIFICATE_PASSWORD" | security import certificate.p12 -k $KEYCHAIN_PATH -P - -T /usr/bin/codesign || echo "Method 3 failed"
-          
-          echo "Method 4: Import without -T flag"
-          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" || true
+          # Trust the certificate for code signing (self-signed certificates need this)
+          if [ -f cert.pem ]; then
+            echo "Adding certificate to trusted list for code signing..."
+            security add-trusted-cert -d -r trustAsRoot -p codeSign -k $KEYCHAIN_PATH cert.pem || echo "Failed to trust cert"
+          fi
           
           # List keychains and add to search list
           echo "Adding keychain to search list:"
@@ -304,22 +305,30 @@ jobs:
           CERT_NAME=$(echo "$IDENTITY_OUTPUT" | grep "1)" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
           
           # Check if we got a valid hash (should be 40 hex characters)
-          if [ -n "$CERT_HASH" ] && [ "${#CERT_HASH}" -eq 40 ] && [[ "$CERT_HASH" =~ ^[A-F0-9]+$ ]]; then
+          if [ -n "$CERT_HASH" ] && [ "${#CERT_HASH}" -eq 40 ] && [[ "$CERT_HASH" =~ ^[A-Fa-f0-9]+$ ]]; then
             echo "Found valid certificate hash: $CERT_HASH"
             echo "Certificate name: $CERT_NAME"
             # Use the hash for signing - most reliable, no spaces
             ACTUAL_IDENTITY="$CERT_HASH"
           else
             echo "Warning: Could not find valid certificate hash (got: '$CERT_HASH')"
-            # Try to extract the name carefully, preserving spaces
-            CERT_NAME=$(echo "$IDENTITY_OUTPUT" | grep "1)" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
-            if [ -n "$CERT_NAME" ]; then
-              echo "Found certificate name: '$CERT_NAME'"
-              # As fallback, use the name
-              ACTUAL_IDENTITY="$CERT_NAME"
+            # Check if there are NO valid identities at all
+            if echo "$IDENTITY_OUTPUT" | grep -q "0 valid identities found"; then
+              echo "ERROR: No valid code signing identities found!"
+              echo "This is likely because the self-signed certificate lacks code signing capability"
+              echo "Using ad-hoc signing as fallback (- means ad-hoc)"
+              ACTUAL_IDENTITY="-"
             else
-              echo "Warning: Could not find any identity, using provided identity"
-              ACTUAL_IDENTITY="$APPLE_SIGNING_IDENTITY"
+              # Try to extract the name carefully, preserving spaces
+              CERT_NAME=$(echo "$IDENTITY_OUTPUT" | grep "1)" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
+              if [ -n "$CERT_NAME" ]; then
+                echo "Found certificate name: '$CERT_NAME'"
+                # As fallback, use the name
+                ACTUAL_IDENTITY="$CERT_NAME"
+              else
+                echo "Warning: Could not find any identity, using ad-hoc signing"
+                ACTUAL_IDENTITY="-"
+              fi
             fi
           fi
           
