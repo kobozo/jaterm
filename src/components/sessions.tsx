@@ -136,7 +136,7 @@ function SshKeySelector({ value, onChange }: { value: string; onChange: (path: s
 type Props = {
   onOpenFolder: (arg: string | { path: string; terminal?: any; shell?: any }) => void;
   onOpenSession?: (session: RecentSession) => void;
-  onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string; profileName?: string; os?: string }) => void;
+  onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string; profileName?: string; os?: string; terminal?: any; shell?: any; advanced?: any; _resolved?: boolean }) => void;
 };
 
 export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Props) {
@@ -144,7 +144,15 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
   const [recentSessions, setRecentSessions] = useState<{ cwd: string; closedAt: number; panes?: number }[]>([]);
   const [recentSsh, setRecentSsh] = useState<RecentSshSession[]>([]);
   const [tree, setTree] = useState<ProfilesTreeNode | null>(null);
-  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(() => {
+    // Restore navigation state from localStorage
+    try {
+      const saved = localStorage.getItem('jaterm.profiles.currentFolderId');
+      return saved || null;
+    } catch {
+      return null;
+    }
+  });
   const [ctxMenu, setCtxMenu] = useState<null | { x: number; y: number; type: 'folder' | 'profile'; node: any }>(null);
   const [folderDialog, setFolderDialog] = useState<null | { parentId: string; name: string }>(null);
   const [moveDialog, setMoveDialog] = useState<null | { node: Extract<ProfilesTreeNode, { type: 'profile' }>; destId: string | null }>(null);
@@ -464,7 +472,9 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             terminal: effective.terminal, 
             shell: effective.shell, 
             advanced: effective.advanced, 
-            os: p.os
+            os: p.os,
+            // Mark that settings are already resolved with inheritance
+            _resolved: true
           } as any);
         } catch (err) {
           console.error('Failed to resolve effective settings for SSH profile:', err);
@@ -480,7 +490,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             terminal: p.terminal, 
             shell: p.shell, 
             advanced: p.advanced, 
-            os: p.os
+            os: p.os,
+            _resolved: true
           } as any);
         }
       } else if (!p) {
@@ -542,6 +553,15 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       if (fromRemoved && dest) dest.children.push(n);
     });
   }
+  // Save navigation state when it changes
+  useEffect(() => {
+    if (currentFolderId) {
+      try {
+        localStorage.setItem('jaterm.profiles.currentFolderId', currentFolderId);
+      } catch {}
+    }
+  }, [currentFolderId]);
+
   // Tree renderer removed in favor of an explorer view
   useEffect(() => {
     const loadData = async () => {
@@ -560,7 +580,11 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
         
         const root = await ensureProfilesTree();
         setTree(root);
-        setCurrentFolderId(root.id);
+        
+        // Only set to root if we don't have a saved folder or the saved folder is invalid
+        if (!currentFolderId || !findFolder(root, currentFolderId)) {
+          setCurrentFolderId(root.id);
+        }
       } catch (err) {
         console.error('Failed to load session data:', err);
         // Still try to load what we can
@@ -574,8 +598,11 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     loadData();
     
     // Listen for profiles unlocked event
-    const handleProfilesUnlocked = () => {
+    const handleProfilesUnlocked = async () => {
       console.log('Profiles unlocked, reloading...');
+      // Force reload from disk to get decrypted data
+      const { reloadProfilesFromDisk } = await import('@/store/persist');
+      await reloadProfilesFromDisk();
       loadData();
     };
     window.addEventListener('profiles-unlocked', handleProfilesUnlocked);

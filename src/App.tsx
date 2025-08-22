@@ -833,6 +833,7 @@ export default function App() {
     shell?: any; // Shell and environment settings
     advanced?: any; // Advanced SSH settings
     os?: string; // OS from profile
+    _resolved?: boolean; // Flag indicating settings are already resolved with inheritance
   }) {
     try {
       // Ensure we have a usable auth. Some profiles may load with encrypted fields until master key is unlocked.
@@ -840,8 +841,9 @@ export default function App() {
         return !!(a && (a.agent || (a.password && a.password.length) || a.keyPath));
       }
       let authToUse = opts.auth;
-      // Always try to get fresh profile data when we have a profileId
-      if (opts.profileId) {
+      
+      // Skip re-fetching if settings are already resolved (from openProfile with inheritance)
+      if (!opts._resolved && opts.profileId) {
         try {
           const { getSshProfiles } = await import('@/store/persist');
           const profiles = await getSshProfiles();
