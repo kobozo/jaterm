@@ -26,6 +26,36 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   const openedAtRef = useRef<number>(Date.now());
   const decoderRef = useRef<TextDecoder | null>(null);
   const IS_DEV = import.meta.env.DEV;
+  
+  // Keystroke buffering for better performance
+  const writeBufferRef = useRef<string>('');
+  const writeTimerRef = useRef<number | null>(null);
+  
+  // Buffered write function to batch rapid keystrokes
+  const bufferedWrite = useRef((data: string) => {
+    writeBufferRef.current += data;
+    
+    // Clear any existing timer
+    if (writeTimerRef.current !== null) {
+      clearTimeout(writeTimerRef.current);
+    }
+    
+    // For single characters or short input, use a very short delay
+    // For longer pastes, send immediately
+    const delay = data.length > 10 ? 0 : 5;
+    
+    writeTimerRef.current = window.setTimeout(() => {
+      if (writeBufferRef.current && id) {
+        const toSend = writeBufferRef.current;
+        writeBufferRef.current = '';
+        sshWrite({ channelId: id, data: toSend });
+        // Feed to event detector
+        onTerminalEvent?.(id, { type: 'input', data: toSend });
+      }
+      writeTimerRef.current = null;
+    }, delay);
+  }).current;
+  
   // Only allow a single correction per pane (on open), do not reset on cwd changes
   useEffect(() => { correctedRef.current = false; openedAtRef.current = Date.now(); }, [id]);
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
@@ -107,18 +137,14 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   useEffect(() => {
     const sub = term.onData((data) => { 
       if (id) {
-        sshWrite({ channelId: id, data });
-        // Feed input to event detector
-        onTerminalEvent?.(id, { type: 'input', data });
+        bufferedWrite(data);
       }
     });
     const keySub = term.onKey(({ key, domEvent }) => {
       if ((domEvent.key === 'Enter' || domEvent.code === 'Enter') && domEvent.shiftKey) { 
         domEvent.preventDefault(); 
         if (id) {
-          sshWrite({ channelId: id, data: '\n' });
-          // Also feed to event detector
-          onTerminalEvent?.(id, { type: 'input', data: '\n' });
+          bufferedWrite('\n');
         }
       }
     });
@@ -192,6 +218,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
             onCwd?.(id, p);
             const withinWindow = Date.now() - openedAtRef.current < 2500;
             if (!correctedRef.current && withinWindow && desiredCwd && p !== desiredCwd) {
+              // Use direct write for cd commands to ensure they're sent immediately
               sshWrite({ channelId: id, data: `cd '${desiredCwd.replace(/'/g, "'\\''")}'\n` });
               correctedRef.current = true;
             }
@@ -222,6 +249,13 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     }).then((u) => (unlisten = u));
     onSshExit((e) => { if (e.channelId === id) { if (IS_DEV) console.info('[ssh] exit', id); onClose?.(id); } }).then((u) => (unlistenExit = u));
     return () => {
+      // Flush any pending writes before cleanup
+      if (writeTimerRef.current !== null) {
+        clearTimeout(writeTimerRef.current);
+        if (writeBufferRef.current && id) {
+          sshWrite({ channelId: id, data: writeBufferRef.current });
+        }
+      }
       sub.dispose();
       keySub.dispose();
       resizeSub.dispose();
@@ -251,7 +285,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onCompose?.(); setMenu(null); }}>Compose with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const sel = term.getSelection?.() || ''; if (sel) await navigator.clipboard.writeText(sel); } catch {} setMenu(null); }}>Copy Selection</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const text = await navigator.clipboard.readText(); if (text) sshWrite({ channelId: id, data: text }); } catch {} setMenu(null); }}>Paste</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const text = await navigator.clipboard.readText(); if (text) bufferedWrite(text); } catch {} setMenu(null); }}>Paste</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { try { (term as any).selectAll?.(); } catch {} setMenu(null); }}>Select All</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { try { term.clear?.(); } catch {} setMenu(null); }}>Clear</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />

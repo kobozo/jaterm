@@ -198,8 +198,8 @@ pub async fn ssh_connect(app: tauri::AppHandle, state: State<'_, crate::state::a
   // Explicitly set NO timeout (0 means infinite) - crucial for channel creation
   sess.set_timeout(0);
   
-  // Ensure blocking mode is set initially
-  sess.set_blocking(true);
+  // Keep session in non-blocking mode for better performance
+  sess.set_blocking(false);
   
   // Start watchdog for git status and port detection (non-blocking)
   let session_id_for_watchdog = format!("ssh_{}", nanoid::nanoid!(8));
@@ -860,11 +860,16 @@ pub async fn ssh_close_forward(app: tauri::AppHandle, state: State<'_, crate::st
 
 #[tauri::command]
 pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state::app_state::AppState>, session_id: String, cwd: Option<String>, cols: Option<u16>, rows: Option<u16>) -> Result<String, String> {
-  // Access the session and create the channel (blocking)
+  // Access the session and create the channel with retry for non-blocking mode
   let mut chan = {
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner.ssh.get_mut(&session_id).ok_or("ssh session not found")?;
-    s.sess.channel_session().map_err(|e| format!("channel_session: {e}"))?
+    // Temporarily set to blocking for channel creation
+    s.sess.set_blocking(true);
+    let chan = s.sess.channel_session().map_err(|e| format!("channel_session: {e}"))?;
+    // Switch back to non-blocking
+    s.sess.set_blocking(false);
+    chan
   };
   let term = "xterm-256color";
   let sz_cols = cols.unwrap_or(120);
@@ -892,11 +897,13 @@ pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state
       crate::state::app_state::SshChannel { id: id.clone(), session_id: session_id.clone(), chan: std::sync::Arc::new(std::sync::Mutex::new(chan)) }
     );
   }
-  // Switch the underlying session to non-blocking so reads return WouldBlock
+  // Switch the underlying session to non-blocking for better performance
   {
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     if let Some(sess) = inner.ssh.get_mut(&session_id) {
-      let _ = sess.sess.set_blocking(false);
+      sess.sess.set_blocking(false);
+      // Also set TCP stream to non-blocking for consistency
+      let _ = sess.tcp.set_nonblocking(true);
     }
   }
   let _ = app.emit(crate::events::SSH_OPENED, &serde_json::json!({"channelId": id}));
@@ -943,25 +950,38 @@ pub async fn ssh_open_shell(app: tauri::AppHandle, state: State<'_, crate::state
 
 #[tauri::command]
 pub async fn ssh_write(state: State<'_, crate::state::app_state::AppState>, channel_id: String, data: String) -> Result<(), String> {
-  // Acquire channel arc and session id
-  let (session_id, chan_arc) = {
+  // Acquire both channel arc and session lock in a single lock operation
+  let (chan_arc, sess_lock) = {
     let inner = state.inner.lock().map_err(|_| "lock")?;
-    let st = inner;
-    match st.ssh_channels.get(&channel_id) {
-      Some(ch) => (ch.session_id.clone(), ch.chan.clone()),
-      None => return Err("channel not found".into()),
+    let ch = inner.ssh_channels.get(&channel_id).ok_or("channel not found")?;
+    let session_id = &ch.session_id;
+    let s = inner.ssh.get(session_id).ok_or("ssh session not found")?;
+    (ch.chan.clone(), s.lock.clone())
+  };
+  
+  // Try to acquire locks with timeout to avoid blocking
+  let _sess_guard = match sess_lock.try_lock() {
+    Ok(g) => g,
+    Err(_) => {
+      // If we can't get the lock immediately, wait a tiny bit and try again
+      std::thread::sleep(std::time::Duration::from_micros(100));
+      sess_lock.lock().map_err(|_| "sess lock")?
     }
   };
-  // Acquire session lock separately
-  let sess_lock = {
-    let inner = state.inner.lock().map_err(|_| "lock")?;
-    match inner.ssh.get(&session_id) { Some(s) => s.lock.clone(), None => return Err("ssh session not found".into()) }
+  
+  let mut chan_guard = match chan_arc.try_lock() {
+    Ok(g) => g,
+    Err(_) => {
+      // Brief retry if channel is locked
+      std::thread::sleep(std::time::Duration::from_micros(100));
+      chan_arc.lock().map_err(|_| "channel lock poisoned")?
+    }
   };
-  // Perform write under session lock
-  let _g = sess_lock.lock().map_err(|_| "sess lock")?; // acquire session lock first
-  let lock_res = chan_arc.lock();
-  let mut guard = match lock_res { Ok(g) => g, Err(_) => return Err("channel lock poisoned".into()) };
-  guard.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+  
+  // Perform write - the channel should already be in non-blocking mode
+  // Just use write_all since we're already handling locks efficiently
+  chan_guard.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+  
   Ok(())
 }
 
