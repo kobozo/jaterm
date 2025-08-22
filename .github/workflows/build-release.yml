@@ -291,32 +291,51 @@ jobs:
           security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "Still no identities found"
           
           # Find the actual signing identity - use the hash which is more reliable
-          echo "Finding signing identity hash..."
-          CERT_HASH=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "1)" | awk '{print $2}')
-          CERT_NAME=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "1)" | sed 's/.*"\(.*\)".*/\1/')
+          echo "Finding signing identity..."
           
-          if [ -n "$CERT_HASH" ]; then
-            echo "Found certificate hash: $CERT_HASH"
-            echo "Found certificate name: $CERT_NAME"
-            # Use the hash for signing - more reliable than the name
+          # Get the full output first for debugging
+          IDENTITY_OUTPUT=$(security find-identity -v -p codesigning $KEYCHAIN_PATH)
+          echo "Full identity output:"
+          echo "$IDENTITY_OUTPUT"
+          
+          # Extract just the hash (40 hex characters) - this has no spaces
+          CERT_HASH=$(echo "$IDENTITY_OUTPUT" | grep "1)" | head -1 | awk '{print $2}')
+          # Extract the name for logging
+          CERT_NAME=$(echo "$IDENTITY_OUTPUT" | grep "1)" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
+          
+          # Check if we got a valid hash (should be 40 hex characters)
+          if [ -n "$CERT_HASH" ] && [ "${#CERT_HASH}" -eq 40 ] && [[ "$CERT_HASH" =~ ^[A-F0-9]+$ ]]; then
+            echo "Found valid certificate hash: $CERT_HASH"
+            echo "Certificate name: $CERT_NAME"
+            # Use the hash for signing - most reliable, no spaces
             ACTUAL_IDENTITY="$CERT_HASH"
           else
-            echo "Warning: Could not find certificate hash, trying name search..."
-            ACTUAL_IDENTITY=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "JaTerm" | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "")
-            if [ -z "$ACTUAL_IDENTITY" ]; then
-              echo "Warning: Could not find JaTerm identity, using provided identity"
+            echo "Warning: Could not find valid certificate hash (got: '$CERT_HASH')"
+            # Try to extract the name carefully, preserving spaces
+            CERT_NAME=$(echo "$IDENTITY_OUTPUT" | grep "1)" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
+            if [ -n "$CERT_NAME" ]; then
+              echo "Found certificate name: '$CERT_NAME'"
+              # As fallback, use the name
+              ACTUAL_IDENTITY="$CERT_NAME"
+            else
+              echo "Warning: Could not find any identity, using provided identity"
               ACTUAL_IDENTITY="$APPLE_SIGNING_IDENTITY"
             fi
           fi
           
-          echo "Using signing identity: $ACTUAL_IDENTITY"
+          echo "Using signing identity: '$ACTUAL_IDENTITY'"
+          echo "Identity length: ${#ACTUAL_IDENTITY}"
           
           # Also check default keychain
           echo "Checking default keychain for identities:"
           security find-identity -v -p codesigning || echo "No identities in default keychain"
           
-          # Export for Tauri - use the hash or found identity
+          # Export for Tauri - GITHUB_ENV handles spaces without quotes
+          # The value itself should not have quotes, just the shell assignment
           echo "APPLE_SIGNING_IDENTITY=$ACTUAL_IDENTITY" >> $GITHUB_ENV
+          
+          # Debug what was actually written
+          echo "Exported to GITHUB_ENV: APPLE_SIGNING_IDENTITY='$ACTUAL_IDENTITY'"
           
           # Also export the keychain path for the build
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
@@ -428,12 +447,16 @@ jobs:
             echo "Verifying signing identity..."
             security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "Warning: No identities found in custom keychain"
             
-            # Show what identity we're using
-            echo "APPLE_SIGNING_IDENTITY to be used: $APPLE_SIGNING_IDENTITY"
+            # Show what identity we're using (with quotes to show spaces)
+            echo "APPLE_SIGNING_IDENTITY to be used: '$APPLE_SIGNING_IDENTITY'"
+            echo "Identity length: ${#APPLE_SIGNING_IDENTITY}"
             
-            # Verify the specific identity exists
+            # Verify the specific identity exists - handle both hash and name
             if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
-              security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "$APPLE_SIGNING_IDENTITY" || echo "Warning: Specific identity not found"
+              # Remove quotes if present for grep
+              IDENTITY_TO_CHECK=$(echo "$APPLE_SIGNING_IDENTITY" | sed 's/"//g')
+              echo "Checking for identity: '$IDENTITY_TO_CHECK'"
+              security find-identity -v -p codesigning $KEYCHAIN_PATH | grep -F "$IDENTITY_TO_CHECK" || echo "Warning: Specific identity not found"
             fi
           else
             echo "Warning: KEYCHAIN_PATH not set in environment"
