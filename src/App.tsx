@@ -22,6 +22,7 @@ import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
 import { gitStatusViaHelper } from '@/services/git';
 import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
+import HelperConsentModal from '@/components/HelperConsentModal';
 
 export default function App() {
   // imported above
@@ -53,6 +54,15 @@ export default function App() {
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
   // Master key dialog state
   const [masterKeyDialog, setMasterKeyDialog] = useState<{ isOpen: boolean; mode: 'setup' | 'unlock'; isMigration?: boolean }>({ isOpen: false, mode: 'setup' });
+  // Helper consent modal state
+  const [helperConsentModal, setHelperConsentModal] = useState<{ 
+    sessionId: string; 
+    profileId?: string; 
+    profileName: string; 
+    host: string;
+    tabId: string;
+    opts: any;
+  } | null>(null);
   // Updater state
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState<null | { version?: string }>(null);
@@ -607,6 +617,188 @@ export default function App() {
     }
   }
 
+  // Helper function to resolve helper consent from profile and folder inheritance
+  async function resolveHelperConsent(profileId?: string): Promise<'yes' | 'no' | undefined> {
+    if (!profileId) return undefined;
+    
+    try {
+      const { getSshProfiles, getProfilesTree, findPathToNode, resolveEffectiveSettings } = await import('@/store/persist');
+      const profiles = await getSshProfiles();
+      const profile = profiles.find(p => p.id === profileId);
+      
+      // If profile has explicit consent, use that
+      if (profile?.helperConsent !== undefined) {
+        return profile.helperConsent;
+      }
+      
+      // Otherwise check folder inheritance
+      const tree = await getProfilesTree();
+      if (!tree) return undefined;
+      
+      // Find the profile node in the tree
+      const profileNodes = [];
+      function findProfileNode(node: any, acc: any[] = []): void {
+        if (node.type === 'profile' && node.ref?.kind === 'ssh' && node.ref?.id === profileId) {
+          profileNodes.push(...acc, node);
+        } else if (node.type === 'folder') {
+          for (const child of node.children || []) {
+            findProfileNode(child, [...acc, node]);
+          }
+        }
+      }
+      findProfileNode(tree, []);
+      
+      if (profileNodes.length > 0) {
+        const nodeId = profileNodes[profileNodes.length - 1].id;
+        const effective = resolveEffectiveSettings({ root: tree, nodeId, profileKind: 'ssh' });
+        return (effective as any).ssh?.helperConsent;
+      }
+    } catch (e) {
+      console.error('Failed to resolve helper consent:', e);
+    }
+    
+    return undefined;
+  }
+
+  // Handle helper consent from modal
+  async function handleHelperConsent(consent: 'yes' | 'no') {
+    if (!helperConsentModal) return;
+    
+    const { sessionId, profileId, tabId, opts } = helperConsentModal;
+    
+    // Save consent to profile if we have one
+    if (profileId) {
+      try {
+        const { getSshProfiles, saveSshProfile } = await import('@/store/persist');
+        const profiles = await getSshProfiles();
+        const profile = profiles.find(p => p.id === profileId);
+        if (profile) {
+          profile.helperConsent = consent;
+          await saveSshProfile(profile);
+          console.info('[Helper] Saved consent to profile:', profileId, consent);
+        }
+      } catch (e) {
+        console.error('[Helper] Failed to save consent to profile:', e);
+      }
+    }
+    
+    // Clear modal
+    setHelperConsentModal(null);
+    
+    // Deploy helper if consent is yes
+    if (consent === 'yes') {
+      try {
+        (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then(async (res: any) => {
+          setTabs((prev) => {
+            const detectedOs = (!opts.os || opts.os === 'auto-detect') ? res?.os : opts.os;
+            const updated = prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path, os: detectedOs } } : t));
+            const cur = updated.find((t) => t.id === tabId);
+            if (cur?.status?.fullPath && cur.status.helperOk) {
+              gitStatusViaHelper(sessionId, cur.status.fullPath).then((st) => {
+                setTabs((p) => p.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, gitStatus: st } } : t)));
+              }).catch(() => {});
+              setTimeout(() => {
+                detectPorts(sessionId);
+              }, 200);
+            }
+            return updated;
+          });
+        });
+      } catch {}
+    }
+    
+    // Continue with opening the SSH shell
+    continueOpenSshFor(sessionId, tabId, opts);
+  }
+  
+  // Continue SSH session after consent
+  async function continueOpenSshFor(sessionId: string, tabId: string, opts: any) {
+    try {
+      const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
+      
+      // Apply shell settings if provided
+      if (opts.shell) {
+        // Set environment variables
+        if (opts.shell.env) {
+          for (const [key, value] of Object.entries(opts.shell.env)) {
+            const exportCmd = `export ${key}="${value.replace(/"/g, '\\"')}"\n`;
+            await sshWrite({ channelId: chanId, data: exportCmd });
+          }
+        }
+        
+        // Run initialization commands
+        if (opts.shell.initCommands) {
+          for (const cmd of opts.shell.initCommands) {
+            await sshWrite({ channelId: chanId, data: cmd + '\n' });
+          }
+        }
+        
+        // Override shell if specified
+        if (opts.shell.shell) {
+          await sshWrite({ channelId: chanId, data: `exec ${opts.shell.shell}\n` });
+        }
+      }
+      
+      // Setup default port forwards if provided
+      if (opts.advanced?.defaultForwards) {
+        const { sshOpenForward } = await import('@/types/ipc');
+        for (const f of opts.advanced.defaultForwards) {
+          try {
+            await sshOpenForward({
+              sessionId,
+              forward: {
+                type: f.type,
+                srcHost: f.srcHost || (f.type === 'R' ? '0.0.0.0' : '127.0.0.1'),
+                srcPort: f.srcPort,
+                dstHost: f.dstHost || '127.0.0.1',
+                dstPort: f.dstPort
+              } as any
+            });
+          } catch (e) {
+            console.error('Failed to setup default forward:', e);
+          }
+        }
+      }
+      
+      // Get SSH home directory to set default helper path
+      let sshHome: string | undefined;
+      try {
+        const { sshHomeDir } = await import('@/types/ipc');
+        sshHome = await sshHomeDir(sessionId);
+      } catch {}
+      
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { 
+        ...t, 
+        kind: 'ssh', 
+        sshSessionId: sessionId, 
+        profileId: opts.profileId, 
+        sshHost: opts.host, 
+        sshUser: opts.user, 
+        sshPort: opts.port ?? 22, 
+        openPath: opts.cwd ?? null, 
+        cwd: opts.cwd ?? sshHome ?? null, 
+        // Set the title to profile name if available, otherwise use user@host
+        title: opts.profileName || `${opts.user}@${opts.host}`,
+        panes: [chanId], 
+        activePane: chanId, 
+        status: { 
+          ...t.status,
+          // Set default helper path if we have home directory
+          helperPath: sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : undefined
+        },
+        // Store terminal settings
+        terminalSettings: opts.terminal
+      } : t)));
+      setActiveTab(tabId);
+    } catch (e) {
+      console.error('Failed to continue SSH session:', e);
+      addToast({ title: 'SSH Failed', message: String(e), kind: 'error' });
+      try {
+        await sshDisconnect(sessionId);
+      } catch {}
+    }
+  }
+
   async function openSshFor(tabId: string, opts: { 
     host: string; 
     port?: number; 
@@ -651,9 +843,27 @@ export default function App() {
 
       const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
       const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: authToUse.password, key_path: (authToUse as any).keyPath, passphrase: authToUse.passphrase, agent: authToUse.agent } as any, timeout_ms: 15000 });
+      
+      // Check helper consent
+      const consent = await resolveHelperConsent(opts.profileId);
+      
+      if (consent === undefined) {
+        // No consent recorded, show modal
+        setHelperConsentModal({
+          sessionId,
+          profileId: opts.profileId,
+          profileName: opts.profileName || opts.host,
+          host: opts.host,
+          tabId,
+          opts
+        });
+        return; // Will continue in handleHelperConsent
+      }
+      
       // Ensure helper in background (non-blocking) and record status in tab
-      try {
-        (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then(async (res: any) => {
+      if (consent === 'yes') {
+        try {
+          (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then(async (res: any) => {
           setTabs((prev) => {
             // If auto-detect or no OS specified, use detected OS from helper
             const detectedOs = (!opts.os || opts.os === 'auto-detect') ? res?.os : opts.os;
@@ -690,72 +900,12 @@ export default function App() {
           }
         });
       } catch {}
-      const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
-      
-      // Apply shell settings if provided
-      if (opts.shell) {
-        // Set environment variables
-        if (opts.shell.env) {
-          for (const [key, value] of Object.entries(opts.shell.env)) {
-            const exportCmd = `export ${key}="${value.replace(/"/g, '\\"')}"\n`;
-            await sshWrite({ channelId: chanId, data: exportCmd });
-          }
-        }
-        
-        // Run initialization commands
-        if (opts.shell.initCommands) {
-          for (const cmd of opts.shell.initCommands) {
-            await sshWrite({ channelId: chanId, data: cmd + '\n' });
-          }
-        }
-        
-        // Override shell if specified
-        if (opts.shell.shell) {
-          await sshWrite({ channelId: chanId, data: `exec ${opts.shell.shell}\n` });
-        }
       }
       
-      // Setup default port forwards if provided
-      if (opts.advanced?.defaultForwards) {
-        for (const fwd of opts.advanced.defaultForwards) {
-          try {
-            const { sshOpenForward } = await import('@/types/ipc');
-            await sshOpenForward({ sessionId, forward: fwd as any });
-          } catch (e) {
-            console.error('Failed to setup default forward:', e);
-          }
-        }
+      // If consent is yes or no consent needed, continue immediately
+      if (consent !== undefined) {
+        await continueOpenSshFor(sessionId, tabId, opts);
       }
-      // Get SSH home directory to set default helper path
-      let sshHome: string | undefined;
-      try {
-        const { sshHomeDir } = await import('@/types/ipc');
-        sshHome = await sshHomeDir(sessionId);
-      } catch {}
-      
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { 
-        ...t, 
-        kind: 'ssh', 
-        sshSessionId: sessionId, 
-        profileId: opts.profileId, 
-        sshHost: opts.host, 
-        sshUser: opts.user, 
-        sshPort: opts.port ?? 22, 
-        openPath: opts.cwd ?? null, 
-        cwd: opts.cwd ?? sshHome ?? null, 
-        // Set the title to profile name if available, otherwise use user@host
-        title: opts.profileName || `${opts.user}@${opts.host}`,
-        panes: [chanId], 
-        activePane: chanId, 
-        status: { 
-          ...t.status,
-          // Set default helper path if we have home directory
-          helperPath: sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : undefined
-        },
-        // Store terminal settings
-        terminalSettings: opts.terminal
-      } : t)));
-      setActiveTab(tabId);
     } catch (e) {
       alert('SSH connection failed: ' + (e as any));
       console.error('ssh open failed', e);
@@ -1133,7 +1283,7 @@ export default function App() {
           if (needsMigration) {
             // Auto-migrate plain text profiles
             await migrateProfilesV2('jaterm');
-            addToast({ message: 'Profiles migrated to encrypted format', type: 'success' });
+            addToast({ title: 'Profiles migrated to encrypted format', kind: 'success' } as any);
           }
         }
         
@@ -1810,6 +1960,20 @@ export default function App() {
           </div>
         </div>
       )}
+      {helperConsentModal && (
+        <HelperConsentModal
+          profileName={helperConsentModal.profileName}
+          host={helperConsentModal.host}
+          onConsent={handleHelperConsent}
+          onCancel={() => {
+            // Cancel: disconnect SSH and clear modal
+            const { sessionId } = helperConsentModal;
+            setHelperConsentModal(null);
+            sshDisconnect(sessionId).catch(() => {});
+            addToast({ title: 'SSH Connection Cancelled', message: 'Helper deployment was declined', kind: 'info' });
+          }}
+        />
+      )}
       <MasterKeyDialog
         isOpen={masterKeyDialog.isOpen}
         mode={masterKeyDialog.mode}
@@ -1817,7 +1981,7 @@ export default function App() {
         onClose={() => setMasterKeyDialog({ ...masterKeyDialog, isOpen: false })}
         onSuccess={async () => {
           setMasterKeyDialog({ ...masterKeyDialog, isOpen: false });
-          addToast({ message: masterKeyDialog.isMigration ? 'Profiles encrypted successfully' : 'Master key unlocked successfully', type: 'success' });
+          addToast({ title: masterKeyDialog.isMigration ? 'Profiles encrypted successfully' : 'Master key unlocked successfully', kind: 'success' } as any);
           
           // Emit a custom event to notify components to reload profiles
           window.dispatchEvent(new CustomEvent('profiles-unlocked'));

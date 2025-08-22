@@ -166,6 +166,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     sshPassword?: string;
     sshKeyPath?: string;
     sshPassphrase?: string;
+    helperConsent?: 'yes' | 'no';
   } }>(null);
   const [sshOpen, setSshOpen] = useState(false);
   const [sshForm, setSshForm] = useState<{ host: string; port?: number; user: string; authType: 'password' | 'key' | 'agent'; password?: string; keyPath?: string; passphrase?: string; cwd?: string }>({ host: '', user: '', authType: 'agent' });
@@ -196,6 +197,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     fontFamily?: string;
     // OS detection
     os?: string;
+    // Helper consent
+    helperConsent?: 'yes' | 'no' | undefined;
   }>({ name: '', host: '', user: '', authType: 'agent', os: 'auto-detect' });
   // Inheritance helpers for SSH modal
   const [spInherit, setSpInherit] = useState<{ theme?: boolean; fontSize?: boolean; fontFamily?: boolean; sshUser?: boolean; sshAuth?: boolean }>({});
@@ -494,7 +497,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
       const p = sshProfiles.find((x) => x.id === n.ref.id);
       if (p) {
         const authType = p.auth?.agent ? 'agent' : p.auth?.password ? 'password' : 'key';
-        setSpForm({ id: p.id, name: p.name, host: p.host, port: p.port, user: p.user, authType: authType as any, password: p.auth?.password, keyPath: p.auth?.keyPath, passphrase: p.auth?.passphrase, path: p.path, envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined, initCommands: p.shell?.initCommands, shellOverride: p.shell?.shell, defaultForwards: p.advanced?.defaultForwards, theme: p.terminal?.theme, fontSize: p.terminal?.fontSize, fontFamily: p.terminal?.fontFamily, os: p.os || 'auto-detect' });
+        setSpForm({ id: p.id, name: p.name, host: p.host, port: p.port, user: p.user, authType: authType as any, password: p.auth?.password, keyPath: p.auth?.keyPath, passphrase: p.auth?.passphrase, path: p.path, envVars: p.shell?.env ? Object.entries(p.shell.env).map(([key, value]) => ({ key, value: value as string })) : undefined, initCommands: p.shell?.initCommands, shellOverride: p.shell?.shell, defaultForwards: p.advanced?.defaultForwards, theme: p.terminal?.theme, fontSize: p.terminal?.fontSize, fontFamily: p.terminal?.fontFamily, os: p.os || 'auto-detect', helperConsent: p.helperConsent });
         try {
           if (tree) {
             const eff = resolveEffectiveSettings({ root: tree, nodeId: n.id, profileKind: 'ssh' });
@@ -1245,6 +1248,29 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       <option value="netbsd">NetBSD</option>
                     </select>
                   </label>
+                  
+                  {/* Helper Deployment Consent */}
+                  <div style={{ marginTop: 16, padding: 12, background: '#2a2a2a', borderRadius: 4 }}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={spForm.helperConsent === 'yes'}
+                        onChange={(e) => setSpForm({ ...spForm, helperConsent: e.target.checked ? 'yes' : 'no' })}
+                        style={{ marginTop: 2 }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 500 }}>Deploy JaTerm Helper</div>
+                        <div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>
+                          Allow JaTerm to deploy a helper agent to enable Git status, port detection, and enhanced terminal features.
+                          {spForm.helperConsent === undefined && inheritedForSsh?.ssh?.helperConsent && (
+                            <span style={{ display: 'block', marginTop: 4, color: '#0078d4' }}>
+                              (Inherits from folder: {inheritedForSsh.ssh.helperConsent === 'yes' ? 'Deploy' : "Don't deploy"})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               )}
               
@@ -1568,6 +1594,11 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     profile.os = spForm.os;
                   }
                   
+                  // Add helper consent if set
+                  if (spForm.helperConsent !== undefined) {
+                    profile.helperConsent = spForm.helperConsent;
+                  }
+                  
                   await saveSshProfile(profile);
                   setSshProfiles(await getSshProfiles());
                   if (tree && !hasProfileNode(tree, 'ssh', spForm.id!)) {
@@ -1657,6 +1688,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     else if (settings.ssh.auth.password) { form.sshAuthType = 'password'; form.sshPassword = settings.ssh.auth.password; }
                     else if (settings.ssh.auth.keyPath) { form.sshAuthType = 'key'; form.sshKeyPath = settings.ssh.auth.keyPath; form.sshPassphrase = settings.ssh.auth.passphrase; }
                   }
+                  if (settings.ssh?.helperConsent) form.helperConsent = settings.ssh.helperConsent;
                   setFolderSettingsDialog({ folderId: ctxMenu.node.id, form });
                   setCtxMenu(null);
                 }}>Edit settings…</button>
@@ -1866,6 +1898,31 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       </div>
                     </>
                   )}
+                  
+                  {/* Helper Deployment Consent */}
+                  <div style={{ marginTop: 16, padding: 12, background: '#2a2a2a', borderRadius: 4 }}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={folderSettingsDialog.form.helperConsent === 'yes'}
+                        onChange={(e) => setFolderSettingsDialog({ 
+                          ...folderSettingsDialog, 
+                          form: { 
+                            ...folderSettingsDialog.form, 
+                            helperConsent: e.target.checked ? 'yes' : 'no' 
+                          } 
+                        })}
+                        style={{ marginTop: 2 }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 500 }}>Deploy JaTerm Helper (Default for Profiles)</div>
+                        <div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>
+                          Sets the default helper deployment consent for all SSH profiles in this folder.
+                          Individual profiles can override this setting.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               )}
             </div>
@@ -1896,8 +1953,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                     if (form.fontSize) settings.terminal.fontSize = form.fontSize;
                     if (form.fontFamily) settings.terminal.fontFamily = form.fontFamily;
                   }
-                  // SSH overrides: connection + forwarding
-                  if (form.defaultForwards?.length || form.sshUser || form.sshAuthType) {
+                  // SSH overrides: connection + forwarding + helper consent
+                  if (form.defaultForwards?.length || form.sshUser || form.sshAuthType || form.helperConsent !== undefined) {
                     settings.ssh = settings.ssh || {};
                     if (form.defaultForwards?.length) settings.ssh.advanced = { defaultForwards: form.defaultForwards };
                     if (form.sshUser) settings.ssh.user = form.sshUser;
@@ -1906,6 +1963,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       if (form.sshAuthType === 'password' && form.sshPassword) settings.ssh.auth = { password: form.sshPassword };
                       if (form.sshAuthType === 'key' && form.sshKeyPath) settings.ssh.auth = { keyPath: form.sshKeyPath, passphrase: form.sshPassphrase };
                     }
+                    if (form.helperConsent !== undefined) settings.ssh.helperConsent = form.helperConsent;
                   }
                   if (Object.keys(settings).length) (f as any).settings = settings; else delete (f as any).settings;
                 });
