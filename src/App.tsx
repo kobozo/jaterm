@@ -5,6 +5,7 @@ import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import RemoteTerminalPane from '@/components/RemoteTerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
 import GitTools from '@/components/GitTools';
+import { SettingsPane } from '@/components/SettingsPane';
 import PortsPanel from '@/components/PortsPanel';
 import Sessions from '@/components/sessions';
 import type { LayoutShape } from '@/store/sessions';
@@ -32,7 +33,7 @@ export default function App() {
   type LayoutShape = LayoutShapeLeaf | LayoutShapeSplit;
   type Tab = {
     id: string;
-    kind?: 'local' | 'ssh';
+    kind?: 'local' | 'ssh' | 'settings';
     sshSessionId?: string;
     profileId?: string;
     openPath?: string | null;
@@ -103,9 +104,18 @@ export default function App() {
     } catch {}
   }
 
-  // Check updates on startup (non-blocking toast)
+  // Load global settings and check updates on startup
   React.useEffect(() => {
     (async () => {
+      // Load global configuration
+      try {
+        const { loadGlobalConfig } = await import('@/services/settings');
+        await loadGlobalConfig();
+      } catch (error) {
+        console.warn('Failed to load global config:', error);
+      }
+
+      // Check for updates
       try {
         const mod: any = await import('@tauri-apps/plugin-updater');
         const res = await mod.check();
@@ -1435,6 +1445,26 @@ export default function App() {
         // Open sessions tab and focus SSH section
         setActiveTab(sessionsId);
       }));
+      unlisteners.push(await listen('menu:settings', () => {
+        // Open settings tab - check if it already exists
+        const existingSettings = tabs.find(t => t.kind === 'settings');
+        if (existingSettings) {
+          setActiveTab(existingSettings.id);
+        } else {
+          const settingsTab: Tab = {
+            id: nanoid(),
+            kind: 'settings',
+            cwd: null,
+            panes: [],
+            activePane: null,
+            status: {},
+            title: 'Settings',
+            layoutShape: { type: 'leaf' }
+          };
+          setTabs(prev => [...prev, settingsTab]);
+          setActiveTab(settingsTab.id);
+        }
+      }));
       
       // Edit menu events
       unlisteners.push(await listen('menu:clear_terminal', () => {
@@ -1459,8 +1489,16 @@ export default function App() {
       unlisteners.push(await listen('menu:zoom_out', () => {
         document.documentElement.style.fontSize = `${parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.9}px`;
       }));
-      unlisteners.push(await listen('menu:reset_zoom', () => {
-        document.documentElement.style.fontSize = '16px';
+      unlisteners.push(await listen('menu:reset_zoom', async () => {
+        try {
+          const { getCachedConfig } = await import('@/services/settings');
+          const config = getCachedConfig();
+          const baseFontSize = config?.terminal?.fontSize || 14;
+          // Use a slightly larger base for UI elements
+          document.documentElement.style.fontSize = `${baseFontSize + 2}px`;
+        } catch {
+          document.documentElement.style.fontSize = '16px';
+        }
       }));
       unlisteners.push(await listen('menu:toggle_git', () => setGitOpen((prev) => !prev)));
       unlisteners.push(await listen('menu:toggle_sftp', () => setSftpOpen((prev) => !prev)));
@@ -1686,7 +1724,9 @@ export default function App() {
               </div>
               {/* Terminal/Welcome view (kept mounted) */}
               <div style={{ display: (t.view === 'git' || t.view === 'ports') ? 'none' : 'block', height: '100%' }}>
-                {t.kind === 'ssh' ? (
+                {t.kind === 'settings' ? (
+                  <SettingsPane />
+                ) : t.kind === 'ssh' ? (
                   t.layout ? (
                     <SplitTree
                       node={t.layout as any}

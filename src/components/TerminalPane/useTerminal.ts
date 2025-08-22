@@ -1,16 +1,23 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useEffect, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { applyThemeToTerminal } from '@/config/themes';
+import { getCachedConfig } from '@/services/settings';
+import { DEFAULT_CONFIG } from '@/types/settings';
 
 export function useTerminal(id: string, options?: { theme?: string; fontSize?: number; fontFamily?: string }) {
+  // Get global settings or use defaults
+  const globalConfig = getCachedConfig();
+  const terminalDefaults = globalConfig?.terminal || DEFAULT_CONFIG.terminal;
+
   const term = useMemo(() => new Terminal({
-    fontFamily: options?.fontFamily || 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    fontSize: options?.fontSize || 14,
-    cursorBlink: true,
+    fontFamily: options?.fontFamily || terminalDefaults.fontFamily,
+    fontSize: options?.fontSize || terminalDefaults.fontSize,
+    cursorBlink: terminalDefaults.cursorBlink,
+    cursorStyle: terminalDefaults.cursorStyle,
     allowProposedApi: false,
     convertEol: false,
-    scrollback: 5000,
-    bellStyle: 'none',
+    scrollback: terminalDefaults.scrollback,
+    bellStyle: terminalDefaults.bellStyle,
   }), [id]);
 
   const attach = useCallback((el: HTMLDivElement) => {
