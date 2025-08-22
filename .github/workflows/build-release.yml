@@ -290,23 +290,36 @@ jobs:
           echo "Checking identities after partition list:"
           security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "Still no identities found"
           
-          # Find the actual signing identity string
-          echo "Finding actual signing identity..."
-          ACTUAL_IDENTITY=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "JaTerm" | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "")
+          # Find the actual signing identity - use the hash which is more reliable
+          echo "Finding signing identity hash..."
+          CERT_HASH=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "1)" | awk '{print $2}')
+          CERT_NAME=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "1)" | sed 's/.*"\(.*\)".*/\1/')
           
-          if [ -z "$ACTUAL_IDENTITY" ]; then
-            echo "Warning: Could not find JaTerm identity, using provided identity"
-            ACTUAL_IDENTITY="$APPLE_SIGNING_IDENTITY"
+          if [ -n "$CERT_HASH" ]; then
+            echo "Found certificate hash: $CERT_HASH"
+            echo "Found certificate name: $CERT_NAME"
+            # Use the hash for signing - more reliable than the name
+            ACTUAL_IDENTITY="$CERT_HASH"
           else
-            echo "Found actual identity: $ACTUAL_IDENTITY"
+            echo "Warning: Could not find certificate hash, trying name search..."
+            ACTUAL_IDENTITY=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "JaTerm" | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "")
+            if [ -z "$ACTUAL_IDENTITY" ]; then
+              echo "Warning: Could not find JaTerm identity, using provided identity"
+              ACTUAL_IDENTITY="$APPLE_SIGNING_IDENTITY"
+            fi
           fi
+          
+          echo "Using signing identity: $ACTUAL_IDENTITY"
           
           # Also check default keychain
           echo "Checking default keychain for identities:"
           security find-identity -v -p codesigning || echo "No identities in default keychain"
           
-          # Export for Tauri - use the actual found identity
+          # Export for Tauri - use the hash or found identity
           echo "APPLE_SIGNING_IDENTITY=$ACTUAL_IDENTITY" >> $GITHUB_ENV
+          
+          # Also export the keychain path for the build
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
         
       - name: Update version (Unix)
         if: matrix.os != 'windows-latest'
@@ -395,31 +408,35 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           echo "Ensuring keychain is accessible for build..."
-          # Re-export the keychain path if it was set
-          if [ -n "$RUNNER_TEMP" ]; then
-            export KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-            if [ -f "$KEYCHAIN_PATH" ]; then
-              echo "Keychain exists at: $KEYCHAIN_PATH"
-              # Make sure it's the default keychain for this session
-              security default-keychain -s $KEYCHAIN_PATH
-              echo "Set as default keychain"
-              
-              # Make sure it's in the search list
-              security list-keychain -d user -s $KEYCHAIN_PATH login.keychain-db
-              echo "Added to keychain search list"
-              
-              # Unlock it again to be sure
-              KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-              security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH 2>/dev/null || true
-              
-              # Verify the identity is still there
-              echo "Verifying signing identity..."
-              security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "Warning: No identities found in custom keychain"
-              security find-identity -v -p codesigning || echo "Warning: No identities found in default keychain"
-              
-              # Debug: show the actual signing identity being used
-              echo "APPLE_SIGNING_IDENTITY environment variable: $APPLE_SIGNING_IDENTITY"
+          # Use the keychain path from environment
+          if [ -n "$KEYCHAIN_PATH" ]; then
+            echo "Using keychain at: $KEYCHAIN_PATH"
+            
+            # Make sure it's the default keychain for this session
+            security default-keychain -s $KEYCHAIN_PATH
+            echo "Set as default keychain"
+            
+            # Make sure it's in the search list (put it first)
+            security list-keychain -d user -s $KEYCHAIN_PATH login.keychain-db
+            echo "Added to keychain search list"
+            
+            # No need to unlock with wrong password - it's already unlocked
+            # Just verify it's accessible
+            security show-keychain-info $KEYCHAIN_PATH || echo "Warning: Cannot access keychain"
+            
+            # Verify the identity is still there
+            echo "Verifying signing identity..."
+            security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "Warning: No identities found in custom keychain"
+            
+            # Show what identity we're using
+            echo "APPLE_SIGNING_IDENTITY to be used: $APPLE_SIGNING_IDENTITY"
+            
+            # Verify the specific identity exists
+            if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+              security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "$APPLE_SIGNING_IDENTITY" || echo "Warning: Specific identity not found"
             fi
+          else
+            echo "Warning: KEYCHAIN_PATH not set in environment"
           fi
           
           # Remove test binary that shouldn't be signed in release builds
