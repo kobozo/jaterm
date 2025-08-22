@@ -30,6 +30,11 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .accelerator("CmdOrCtrl+Shift+S")
         .build(app)?;
     
+    let settings = MenuItemBuilder::new("Settings...")
+        .id("settings")
+        .accelerator("CmdOrCtrl+,")
+        .build(app)?;
+    
     // Edit menu items
     let clear_terminal = MenuItemBuilder::new("Clear Terminal")
         .id("clear_terminal")
@@ -134,6 +139,7 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
     // About will be handled differently on macOS (in app menu) vs other platforms
     
     // Build submenus
+    #[cfg(target_os = "macos")]
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_tab)
         .item(&new_window)
@@ -142,6 +148,19 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .item(&close_window)
         .separator()
         .item(&open_ssh)
+        .build()?;
+    
+    #[cfg(not(target_os = "macos"))]
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&new_tab)
+        .item(&new_window)
+        .separator()
+        .item(&close_tab)
+        .item(&close_window)
+        .separator()
+        .item(&open_ssh)
+        .separator()
+        .item(&settings)
         .separator()
         .quit()
         .build()?;
@@ -228,10 +247,12 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         let app_menu = SubmenuBuilder::new(app, "JaTerm")
             .about(Some(AboutMetadata {
                 name: Some("JaTerm".to_string()),
-                version: Some("1.1.0".to_string()),
+                version: Some("1.4.0".to_string()),
                 copyright: Some("© 2025 Kobozo. All rights reserved.".to_string()),
                 ..Default::default()
             }))
+            .separator()
+            .item(&settings)
             .separator()
             .services()
             .separator()
@@ -296,6 +317,9 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event_id: &str) {
         }
         "open_ssh" => {
             let _ = app.emit("menu:open_ssh", ());
+        }
+        "settings" => {
+            let _ = app.emit("menu:settings", ());
         }
         "clear_terminal" => {
             let _ = app.emit("menu:clear_terminal", ());
