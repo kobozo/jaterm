@@ -106,9 +106,25 @@ jobs:
       - name: Build Tauri app
         run: pnpm tauri build --target ${{ matrix.target }}
         
-      - name: List build artifacts
-        if: always()
+      - name: List build artifacts (Unix)
+        if: always() && matrix.os != 'windows-latest'
         run: |
           echo "Build artifacts:"
           ls -la src-tauri/target/*/release/bundle/ || true
           ls -la src-tauri/target/release/bundle/ || true
+          
+      - name: List build artifacts (Windows)
+        if: always() && matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Write-Output "Build artifacts:"
+          if (Test-Path "src-tauri/target/release/bundle") {
+            Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse | Format-List
+          }
+          Get-ChildItem -Path "src-tauri/target" -Filter "release" -Recurse -Directory | ForEach-Object {
+            $bundlePath = Join-Path $_.FullName "bundle"
+            if (Test-Path $bundlePath) {
+              Write-Output "Contents of $bundlePath :"
+              Get-ChildItem -Path $bundlePath -Recurse | Format-List
+            }
+          }
