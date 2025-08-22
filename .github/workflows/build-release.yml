@@ -259,20 +259,18 @@ jobs:
           echo "Testing certificate with openssl..."
           openssl pkcs12 -in certificate.p12 -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -noout -info 2>&1 | head -5 || echo "OpenSSL verification failed"
           
-          # Extract the actual certificate CN to use as identity
-          echo "Extracting certificate CN..."
-          CERT_CN=$(openssl pkcs12 -in certificate.p12 -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -noout -info 2>&1 | grep "friendlyName:" | head -1 | sed 's/.*friendlyName: //')
-          echo "Certificate CN/FriendlyName: $CERT_CN"
+          # Try different methods to import the certificate
+          echo "Method 1: Standard import with -P flag"
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign || echo "Method 1 failed"
           
-          # Import certificate with explicit options
-          echo "Importing certificate to keychain..."
-          security import certificate.p12 \
-            -k $KEYCHAIN_PATH \
-            -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign \
-            -T /usr/bin/security \
-            -T /usr/bin/productbuild \
-            || { echo "Certificate import failed"; exit 1; }
+          echo "Method 2: Import with -f pkcs12 format specified"
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -f pkcs12 -T /usr/bin/codesign || echo "Method 2 failed"
+          
+          echo "Method 3: Import with passphrase via stdin"
+          echo "$APPLE_CERTIFICATE_PASSWORD" | security import certificate.p12 -k $KEYCHAIN_PATH -P - -T /usr/bin/codesign || echo "Method 3 failed"
+          
+          echo "Method 4: Import without -T flag"
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" || true
           
           # List keychains and add to search list
           echo "Adding keychain to search list:"
@@ -282,7 +280,7 @@ jobs:
           
           # Check what was imported
           echo "Checking imported identities:"
-          security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "No identities found in custom keychain"
+          security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "No identities found"
           
           # Allow codesign to access keychain
           echo "Setting key partition list..."
@@ -292,27 +290,23 @@ jobs:
           echo "Checking identities after partition list:"
           security find-identity -v -p codesigning $KEYCHAIN_PATH || echo "Still no identities found"
           
-          # Try to find ANY valid identity
-          echo "Looking for any valid codesigning identity..."
-          IDENTITY_OUTPUT=$(security find-identity -v -p codesigning $KEYCHAIN_PATH 2>&1)
-          echo "Identity output: $IDENTITY_OUTPUT"
+          # Find the actual signing identity string
+          echo "Finding actual signing identity..."
+          ACTUAL_IDENTITY=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "JaTerm" | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "")
           
-          # Extract the hash and name of the first valid identity
-          CERT_HASH=$(echo "$IDENTITY_OUTPUT" | grep "1)" | awk '{print $2}')
-          CERT_NAME=$(echo "$IDENTITY_OUTPUT" | grep "1)" | sed 's/.*"\(.*\)".*/\1/')
-          
-          if [ -n "$CERT_HASH" ]; then
-            echo "Found certificate hash: $CERT_HASH"
-            echo "Found certificate name: $CERT_NAME"
-            # Use the hash for signing - more reliable than the name
-            echo "APPLE_SIGNING_IDENTITY=$CERT_HASH" >> $GITHUB_ENV
-          elif [ -n "$CERT_CN" ]; then
-            echo "Using certificate CN from PKCS12: $CERT_CN"
-            echo "APPLE_SIGNING_IDENTITY=$CERT_CN" >> $GITHUB_ENV
+          if [ -z "$ACTUAL_IDENTITY" ]; then
+            echo "Warning: Could not find JaTerm identity, using provided identity"
+            ACTUAL_IDENTITY="$APPLE_SIGNING_IDENTITY"
           else
-            echo "Using provided identity: $APPLE_SIGNING_IDENTITY"
-            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> $GITHUB_ENV
+            echo "Found actual identity: $ACTUAL_IDENTITY"
           fi
+          
+          # Also check default keychain
+          echo "Checking default keychain for identities:"
+          security find-identity -v -p codesigning || echo "No identities in default keychain"
+          
+          # Export for Tauri - use the actual found identity
+          echo "APPLE_SIGNING_IDENTITY=$ACTUAL_IDENTITY" >> $GITHUB_ENV
         
       - name: Update version (Unix)
         if: matrix.os != 'windows-latest'
