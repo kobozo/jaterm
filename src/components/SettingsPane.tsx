@@ -148,7 +148,8 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
     padding: '6px 8px',
     borderRadius: 4,
     fontSize: '14px',
-    width: '100%'
+    width: '100%',
+    maxWidth: '500px'
   };
 
   const labelStyle = {
@@ -239,10 +240,10 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
       <div style={{ 
         flex: 1, 
         overflow: 'auto',
-        padding: '20px'
+        padding: '20px 40px 20px 20px'
       }}>
         {activeTab === 'general' && (
-          <div>
+          <div style={{ maxWidth: '800px' }}>
             <div style={sectionStyle}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <input
@@ -311,7 +312,7 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
         )}
 
         {activeTab === 'terminal' && (
-          <div>
+          <div style={{ maxWidth: '800px' }}>
             <div style={sectionStyle}>
               <label style={labelStyle}>Font Size</label>
               <input
@@ -442,7 +443,7 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
         )}
 
         {activeTab === 'editor' && (
-          <div>
+          <div style={{ maxWidth: '800px' }}>
             <div style={sectionStyle}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <input
@@ -475,7 +476,7 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
         )}
 
         {activeTab === 'ssh' && (
-          <div>
+          <div style={{ maxWidth: '800px' }}>
             <div style={sectionStyle}>
               <label style={labelStyle}>Default Port</label>
               <input
@@ -562,7 +563,7 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
         )}
 
         {activeTab === 'advanced' && (
-          <div>
+          <div style={{ maxWidth: '800px' }}>
             <div style={sectionStyle}>
               <label style={labelStyle}>Log Level</label>
               <select
