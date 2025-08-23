@@ -26,12 +26,48 @@ export type AppPersistState = {
   profilesTree?: ProfilesTreeNode;
 };
 
+// In-memory cache for decrypted profiles
+let profilesCache: {
+  profiles?: AppPersistState['profiles'];
+  profilesTree?: ProfilesTreeNode;
+  isLoaded: boolean;
+} = {
+  isLoaded: false
+};
+
+// Clear cache when profiles are unlocked (will be reloaded with decrypted data)
+if (typeof window !== 'undefined') {
+  window.addEventListener('profiles-unlocked', () => {
+    console.log('[Profile Cache] Clearing cache after unlock');
+    profilesCache = { isLoaded: false };
+  });
+}
+
 export async function loadAppState(): Promise<AppPersistState> {
   try {
-    const [stateData, profilesData] = await Promise.all([
-      loadState('jaterm'),
-      loadProfilesV2('jaterm'),  // Use new encryption system
-    ]);
+    // Load non-profile state data
+    const stateData = await loadState('jaterm');
+    
+    // For profiles, check cache first
+    let profilesData: any;
+    if (profilesCache.isLoaded && profilesCache.profiles) {
+      console.log('[Profile Cache] Using cached profiles');
+      profilesData = {
+        profiles: profilesCache.profiles,
+        profilesTree: profilesCache.profilesTree
+      };
+    } else {
+      console.log('[Profile Cache] Loading profiles from disk');
+      profilesData = await loadProfilesV2('jaterm');  // Use new encryption system
+      
+      // Cache the loaded profiles
+      if (profilesData) {
+        profilesCache.profiles = profilesData.profiles;
+        profilesCache.profilesTree = profilesData.profilesTree;
+        profilesCache.isLoaded = true;
+      }
+    }
+    
     const merged: AppPersistState = {
       ...(stateData || {}),
       ...(profilesData || {}),
@@ -51,11 +87,19 @@ export async function loadAppState(): Promise<AppPersistState> {
 
 export async function saveAppState(partial: AppPersistState): Promise<void> {
   try {
-    // Load current split files
-    const [stateCurrent, profilesCurrent] = await Promise.all([
-      loadState('jaterm'),
-      loadProfilesV2('jaterm'),  // Use new encryption system
-    ]);
+    // Load current split files (use cache for profiles)
+    const stateCurrent = await loadState('jaterm');
+    
+    // For profiles, prefer cache if available
+    let profilesCurrent: any;
+    if (profilesCache.isLoaded && profilesCache.profiles) {
+      profilesCurrent = {
+        profiles: profilesCache.profiles,
+        profilesTree: profilesCache.profilesTree
+      };
+    } else {
+      profilesCurrent = await loadProfilesV2('jaterm');
+    }
 
     // Route profiles-related keys
     const profilesPatch: any = {};
@@ -71,6 +115,15 @@ export async function saveAppState(partial: AppPersistState): Promise<void> {
     if (Object.keys(profilesPatch).length) {
       const nextProfiles = { ...(profilesCurrent || {}), ...profilesPatch };
       writes.push(saveProfilesV2(nextProfiles, 'jaterm'));  // Use new encryption system
+      
+      // Update cache immediately
+      if (profilesPatch.profiles) {
+        profilesCache.profiles = nextProfiles.profiles;
+      }
+      if (profilesPatch.profilesTree) {
+        profilesCache.profilesTree = nextProfiles.profilesTree;
+      }
+      profilesCache.isLoaded = true;
     }
     if (Object.keys(statePatch).length) {
       const nextState = { ...(stateCurrent || {}), ...statePatch };
@@ -202,6 +255,13 @@ export async function ensureProfilesTree(): Promise<ProfilesTreeNode> {
   const root: ProfilesTreeNode = { id: 'root', type: 'folder', name: 'Profiles', children };
   await saveProfilesTree(root);
   return root;
+}
+
+// Force reload profiles from disk (used after unlock)
+export async function reloadProfilesFromDisk(): Promise<void> {
+  console.log('[Profile Cache] Force reloading profiles from disk');
+  profilesCache = { isLoaded: false };
+  await loadAppState(); // This will reload and cache
 }
 
 export async function getLocalProfiles(): Promise<LocalProfile[]> {
