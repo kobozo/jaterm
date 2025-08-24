@@ -65,6 +65,9 @@ function SshKeySelector({ value, onChange }: { value: string; onChange: (path: s
             placeholder="~/.ssh/id_ed25519"
             onFocus={() => setShowDropdown(true)}
             onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
           {showDropdown && sshKeys.length > 0 && (
             <div style={{
@@ -1003,7 +1006,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
             <div style={{ display: 'grid', gap: 8 }}>
               <label>
                 Host
-                <input style={{ width: '100%' }} value={sshForm.host} onChange={(e) => setSshForm((s) => ({ ...s, host: e.target.value }))} placeholder="example.com" />
+                <input style={{ width: '100%' }} value={sshForm.host} onChange={(e) => setSshForm((s) => ({ ...s, host: e.target.value }))} placeholder="example.com" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
               </label>
               <label>
                 Port
@@ -1011,7 +1014,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
               </label>
               <label>
                 User
-                <input style={{ width: '100%' }} value={sshForm.user} onChange={(e) => setSshForm((s) => ({ ...s, user: e.target.value }))} placeholder="root" />
+                <input style={{ width: '100%' }} value={sshForm.user} onChange={(e) => setSshForm((s) => ({ ...s, user: e.target.value }))} placeholder="root" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
               </label>
               <div>
                 <label style={{ marginRight: 8 }}><input type="radio" checked={sshForm.authType === 'agent'} onChange={() => setSshForm((s) => ({ ...s, authType: 'agent' }))} /> SSH Agent</label>
@@ -1021,7 +1024,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
               {sshForm.authType === 'password' && (
                 <label>
                   Password
-                  <input style={{ width: '100%' }} type="password" value={sshForm.password ?? ''} onChange={(e) => setSshForm((s) => ({ ...s, password: e.target.value }))} />
+                  <input style={{ width: '100%' }} type="password" value={sshForm.password ?? ''} onChange={(e) => setSshForm((s) => ({ ...s, password: e.target.value }))} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
                 </label>
               )}
               {sshForm.authType === 'key' && (
@@ -1032,13 +1035,13 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   />
                   <label>
                     Passphrase (optional)
-                    <input style={{ width: '100%' }} type="password" value={sshForm.passphrase ?? ''} onChange={(e) => setSshForm((s) => ({ ...s, passphrase: e.target.value }))} />
+                    <input style={{ width: '100%' }} type="password" value={sshForm.passphrase ?? ''} onChange={(e) => setSshForm((s) => ({ ...s, passphrase: e.target.value }))} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
                   </label>
                 </>
               )}
               <label>
                 Start in path (optional)
-                <input style={{ width: '100%' }} value={sshForm.cwd ?? ''} onChange={(e) => setSshForm((s) => ({ ...s, cwd: e.target.value }))} placeholder="/home/user" />
+                <input style={{ width: '100%' }} value={sshForm.cwd ?? ''} onChange={(e) => setSshForm((s) => ({ ...s, cwd: e.target.value }))} placeholder="/home/user" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
               </label>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button onClick={() => setSshOpen(false)}>Cancel</button>
@@ -1157,7 +1160,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
               {activeTab === 'basic' && (
                 <div style={{ display: 'grid', gap: 8 }}>
                   <label>Name<input style={{ width: '100%' }} value={spForm.name} onChange={(e) => setSpForm({ ...spForm, name: e.target.value })} /></label>
-                  <label>Host<input style={{ width: '100%' }} value={spForm.host} onChange={(e) => setSpForm({ ...spForm, host: e.target.value })} placeholder="example.com" /></label>
+                  <label>Host<input style={{ width: '100%' }} value={spForm.host} onChange={(e) => setSpForm({ ...spForm, host: e.target.value })} placeholder="example.com" autoCapitalize="off" autoCorrect="off" spellCheck={false} /></label>
                   <label>Port<input style={{ width: '100%' }} type="number" value={spForm.port ?? 22} onChange={(e) => setSpForm({ ...spForm, port: Number(e.target.value) || 22 })} /></label>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1168,6 +1171,9 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                           onChange={(e) => setSpForm({ ...spForm, user: e.target.value })}
                           placeholder={inheritedForSsh?.ssh?.user ? `(inherits: ${inheritedForSsh.ssh.user})` : 'root'}
                           disabled={!!spInherit.sshUser}
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          spellCheck={false}
                         />
                       </label>
                       {inheritedForSsh?.ssh?.user && (
@@ -1207,7 +1213,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                   </div>
                   {spForm.authType === 'password' && (
                     <div>
-                      <label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} /></label>
+                      <label>Password<input style={{ width: '100%' }} type="password" value={spForm.password ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, password: e.target.value })} autoCapitalize="off" autoCorrect="off" spellCheck={false} /></label>
                       <button 
                         type="button"
                         style={{ 
@@ -1289,17 +1295,17 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                       ) : (
                         <label>
                           Key Path
-                          <input style={{ width: '100%' }} value={spForm.keyPath ?? ''} disabled={true} placeholder="~/.ssh/id_ed25519" />
+                          <input style={{ width: '100%' }} value={spForm.keyPath ?? ''} disabled={true} placeholder="~/.ssh/id_ed25519" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
                         </label>
                       )}
                       <label>
                         Passphrase
-                        <input style={{ width: '100%' }} type="password" value={spForm.passphrase ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, passphrase: e.target.value })} />
+                        <input style={{ width: '100%' }} type="password" value={spForm.passphrase ?? ''} disabled={!!spInherit.sshAuth} onChange={(e) => setSpForm({ ...spForm, passphrase: e.target.value })} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
                       </label>
                     </>
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <label style={{ flex: 1 }}>Remote Path<input style={{ width: '100%' }} value={spForm.path ?? ''} onChange={(e) => setSpForm({ ...spForm, path: e.target.value })} placeholder="/home/user" /></label>
+                    <label style={{ flex: 1 }}>Remote Path<input style={{ width: '100%' }} value={spForm.path ?? ''} onChange={(e) => setSpForm({ ...spForm, path: e.target.value })} placeholder="/home/user" autoCapitalize="off" autoCorrect="off" spellCheck={false} /></label>
                     <button onClick={async () => {
                       try {
                         const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
