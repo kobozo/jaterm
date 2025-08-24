@@ -63,6 +63,7 @@ export default function PortsPanel({
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editForm, setEditForm] = React.useState<Forward | null>(null);
   const [showSuggestions, setShowSuggestions] = React.useState(true);
+  const [showInactiveSuggestions, setShowInactiveSuggestions] = React.useState(false);
 
   // Create suggested forwards for common ports
   const suggestedForwards = React.useMemo(() => {
@@ -102,6 +103,15 @@ export default function PortsPanel({
     
     return suggested;
   }, [forwards, detectedPorts, suggestedPorts]);
+
+  // Filter suggestions based on whether we're showing inactive ports
+  const visibleSuggestions = React.useMemo(() => {
+    if (showInactiveSuggestions) {
+      return suggestedForwards;
+    }
+    // Only show detected (active) ports by default
+    return suggestedForwards.filter(f => f.status === 'detected');
+  }, [suggestedForwards, showInactiveSuggestions]);
 
   const handleEdit = (f: Forward) => {
     setEditingId(f.id || null);
@@ -187,12 +197,26 @@ export default function PortsPanel({
       {/* Toggle suggestions and refresh */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
         {suggestedForwards.length > 0 && (
-          <button 
-            style={{ fontSize: 12, padding: '2px 8px' }}
-            onClick={() => setShowSuggestions(!showSuggestions)}
-          >
-            {showSuggestions ? '▼' : '▶'} Suggestions ({suggestedForwards.length})
-          </button>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <button 
+              style={{ fontSize: 12, padding: '2px 8px' }}
+              onClick={() => setShowSuggestions(!showSuggestions)}
+              title={showSuggestions ? 'Hide port suggestions' : 'Show port suggestions'}
+            >
+              {showSuggestions ? '▼' : '▶'} 
+              {showInactiveSuggestions ? 'All Ports' : 'Active Ports'} 
+              ({visibleSuggestions.length}/{suggestedForwards.length})
+            </button>
+            {showSuggestions && suggestedForwards.some(f => f.status !== 'detected') && (
+              <button
+                style={{ fontSize: 11, padding: '2px 6px', opacity: 0.8 }}
+                onClick={() => setShowInactiveSuggestions(!showInactiveSuggestions)}
+                title={showInactiveSuggestions ? 'Hide inactive ports' : 'Show all common ports'}
+              >
+                {showInactiveSuggestions ? 'Hide inactive' : 'Show all'}
+              </button>
+            )}
+          </div>
         )}
         {onRefreshPorts && (
           <button 
@@ -208,7 +232,7 @@ export default function PortsPanel({
       {/* Forwards list */}
       <div style={{ flex: 1, overflow: 'auto', borderTop: '1px solid #333', paddingTop: 8 }}>
         {/* Show suggestions first */}
-        {showSuggestions && suggestedForwards.map((f, idx) => (
+        {showSuggestions && visibleSuggestions.map((f, idx) => (
           <div 
             key={`suggest-${f.dstPort}`} 
             style={{ 
@@ -258,8 +282,15 @@ export default function PortsPanel({
         ))}
 
         {/* Active forwards */}
-        {forwards.length === 0 && suggestedForwards.length === 0 && (
+        {forwards.length === 0 && visibleSuggestions.length === 0 && !showSuggestions && (
           <div style={{ opacity: 0.7 }}>No forwards yet.</div>
+        )}
+        {forwards.length === 0 && showSuggestions && visibleSuggestions.length === 0 && (
+          <div style={{ opacity: 0.7 }}>
+            {showInactiveSuggestions 
+              ? 'No port suggestions available.' 
+              : 'No active ports detected. Click "Show all" to see common ports.'}
+          </div>
         )}
         
         {forwards.map((f) => (
