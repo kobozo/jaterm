@@ -10,6 +10,7 @@ import {
 import { GlobalConfig, DEFAULT_CONFIG } from '@/types/settings';
 import { getThemeList, themes } from '@/config/themes';
 import { useToasts } from '@/store/toasts';
+import { getAvailableShells, ShellInfo } from '@/types/ipc';
 
 interface SettingsPaneProps {
   onClose?: () => void;
@@ -21,9 +22,12 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
   const [config, setConfig] = useState<GlobalConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
+  const [availableShells, setAvailableShells] = useState<ShellInfo[]>([]);
+  const [showCustomShell, setShowCustomShell] = useState(false);
 
   useEffect(() => {
     loadSettings();
+    loadShells();
   }, []);
 
   const loadSettings = async () => {
@@ -32,10 +36,25 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
       const loaded = await loadGlobalConfig();
       setConfig(loaded);
       setIsDirty(false);
+      // Check if the current shell is a custom one
+      if (loaded.general.defaultShell && 
+          availableShells.length > 0 &&
+          !availableShells.some(s => s.path === loaded.general.defaultShell)) {
+        setShowCustomShell(true);
+      }
     } catch (error) {
       show({ title: 'Failed to load settings', message: String(error), kind: 'error' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadShells = async () => {
+    try {
+      const shells = await getAvailableShells();
+      setAvailableShells(shells);
+    } catch (error) {
+      console.warn('Failed to load available shells:', error);
     }
   };
 
@@ -255,12 +274,42 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
               </label>
 
               <label style={labelStyle}>Default Shell</label>
-              <input
-                style={{ ...inputStyle, marginBottom: '12px' }}
-                value={config.general.defaultShell || ''}
-                onChange={(e) => updateConfig(c => { c.general.defaultShell = e.target.value || undefined; })}
-                placeholder="Leave empty for system default"
-              />
+              <select
+                style={{ ...inputStyle, marginBottom: showCustomShell ? '8px' : '12px' }}
+                value={showCustomShell ? 'custom' : (config.general.defaultShell || '')}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === 'custom') {
+                    setShowCustomShell(true);
+                  } else {
+                    setShowCustomShell(false);
+                    updateConfig(c => { 
+                      c.general.defaultShell = value || undefined; 
+                    });
+                  }
+                }}
+              >
+                <option value="">System Default</option>
+                {availableShells.map(shell => (
+                  <option key={shell.path} value={shell.path}>
+                    {shell.name}
+                  </option>
+                ))}
+                <option value="custom">Custom...</option>
+              </select>
+              
+              {showCustomShell && (
+                <>
+                  <input
+                    style={{ ...inputStyle, marginBottom: '12px' }}
+                    value={config.general.defaultShell || ''}
+                    onChange={(e) => updateConfig(c => { 
+                      c.general.defaultShell = e.target.value || undefined; 
+                    })}
+                    placeholder="Enter custom shell path (e.g., /usr/local/bin/fish)"
+                  />
+                </>
+              )}
 
               <label style={labelStyle}>Default Working Directory</label>
               <select

@@ -39,6 +39,7 @@ fn main() {
       shell::install_zsh_osc7,
       shell::install_bash_osc7,
       shell::install_fish_osc7,
+      commands::pty::get_available_shells,
       commands::pty::pty_open,
       commands::pty::pty_write,
       commands::pty::pty_resize,
