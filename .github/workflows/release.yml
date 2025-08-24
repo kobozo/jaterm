@@ -38,23 +38,53 @@ jobs:
       
       - name: Generate changelog
         id: changelog
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           # Get the previous tag
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           
-          # Generate changelog
-          echo "## What's Changed" > changelog.md
-          echo "" >> changelog.md
-          
-          if [ -n "$PREV_TAG" ]; then
-            git log $PREV_TAG..HEAD --pretty=format:"- %s (%an)" --no-merges >> changelog.md
+          # Try to generate AI release notes
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "Generating AI release notes..."
+            if node tools/generate-release-notes.mjs --since-tag --out changelog.md; then
+              echo "AI release notes generated successfully"
+              # Add link to full changelog at the end
+              echo "" >> changelog.md
+              echo "---" >> changelog.md
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${{ steps.version.outputs.version }}" >> changelog.md
+            else
+              echo "AI generation failed, falling back to git log"
+              # Fallback to simple changelog
+              echo "## What's Changed" > changelog.md
+              echo "" >> changelog.md
+              
+              if [ -n "$PREV_TAG" ]; then
+                git log $PREV_TAG..HEAD --pretty=format:"- %s (%an)" --no-merges >> changelog.md
+              else
+                git log --pretty=format:"- %s (%an)" --no-merges -20 >> changelog.md
+              fi
+              
+              echo "" >> changelog.md
+              echo "" >> changelog.md
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${{ steps.version.outputs.version }}" >> changelog.md
+            fi
           else
-            git log --pretty=format:"- %s (%an)" --no-merges -20 >> changelog.md
+            echo "OPENAI_API_KEY not set, using git log"
+            # Fallback to simple changelog
+            echo "## What's Changed" > changelog.md
+            echo "" >> changelog.md
+            
+            if [ -n "$PREV_TAG" ]; then
+              git log $PREV_TAG..HEAD --pretty=format:"- %s (%an)" --no-merges >> changelog.md
+            else
+              git log --pretty=format:"- %s (%an)" --no-merges -20 >> changelog.md
+            fi
+            
+            echo "" >> changelog.md
+            echo "" >> changelog.md
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${{ steps.version.outputs.version }}" >> changelog.md
           fi
-          
-          echo "" >> changelog.md
-          echo "" >> changelog.md
-          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${{ steps.version.outputs.version }}" >> changelog.md
       
       - name: Create tag
         run: |
