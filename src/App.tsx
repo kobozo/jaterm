@@ -1079,7 +1079,7 @@ export default function App() {
                       
                       // Trigger the forward activation
                       import('@/types/ipc').then(({ sshOpenForward }) => {
-                        sshOpenForward(sessionId, forward);
+                        sshOpenForward({ sessionId, forward });
                       });
                     }
                   },
@@ -1949,7 +1949,7 @@ export default function App() {
               
               // Trigger the forward activation
               import('@/types/ipc').then(({ sshOpenForward }) => {
-                sshOpenForward(customPortDialog.sessionId, forward);
+                sshOpenForward({ sessionId: customPortDialog.sessionId, forward });
               });
               
               // Show confirmation
