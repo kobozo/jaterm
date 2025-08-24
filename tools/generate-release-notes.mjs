@@ -31,7 +31,7 @@ function parseArgs(argv) {
     includeDiffs: false,
     maxDiffBytes: 120000, // ~120KB
     out: undefined,
-    model: 'gpt-4o-mini',
+    model: 'gpt-5',
     temperature: 0.2,
     dryRun: false,
   };
@@ -72,19 +72,33 @@ function resolveRange(args) {
 }
 
 function getCommits(from, to) {
+  // Use a unique delimiter that won't appear in commit messages
+  const delimiter = '<<<COMMIT_DELIMITER>>>';
   // Format: SHA<TAB>Author<TAB>ISODate<TAB>Subject<TAB>Body
-  const fmt = '%H%x09%an%x09%aI%x09%s%x09%b';
+  const fmt = `%H%x09%an%x09%aI%x09%s%x09%b${delimiter}`;
   const log = run(`git log --no-merges --pretty=format:'${fmt}' ${from}..${to}`);
   if (!log) return [];
-  return log.split('\n').map(line => {
-    const [sha, author, date, subject, body] = line.split('\t');
-    return { sha, author, date, subject, body: (body || '').trim() };
+  
+  // Split by delimiter and filter out empty entries
+  return log.split(delimiter).filter(Boolean).map(entry => {
+    const lines = entry.trim().split('\n');
+    const firstLine = lines[0];
+    const [sha, author, date, subject, ...bodyParts] = firstLine.split('\t');
+    
+    // Reconstruct body from remaining parts and additional lines
+    let body = bodyParts.join('\t');
+    if (lines.length > 1) {
+      body = body + '\n' + lines.slice(1).join('\n');
+    }
+    
+    return { sha, author, date, subject, body: body.trim() };
   });
 }
 
 function getCommitFiles(sha) {
   // name-status: e.g., M\tpath, A\tpath, D\tpath
-  const out = run(`git show --pretty=format:'' --name-status ${sha}`);
+  // Use -- to separate revision from paths to avoid ambiguity
+  const out = run(`git show --pretty=format:'' --name-status "${sha}" --`);
   return out.split('\n').filter(Boolean).map(line => {
     const [status, ...rest] = line.split(/\s+/);
     return { status, path: rest.join(' ') };
@@ -92,7 +106,8 @@ function getCommitFiles(sha) {
 }
 
 function getCommitShortstat(sha) {
-  const out = run(`git show --shortstat --pretty=format:'' ${sha}`);
+  // Use -- to separate revision from paths to avoid ambiguity
+  const out = run(`git show --shortstat --pretty=format:'' "${sha}" --`);
   // e.g., 3 files changed, 20 insertions(+), 5 deletions(-)
   return out.split('\n').filter(Boolean).pop() || '';
 }
@@ -100,7 +115,8 @@ function getCommitShortstat(sha) {
 function getDiffPatch(sha, budget, used) {
   let patch = '';
   try {
-    const full = run(`git show --patch --pretty=format:'' ${sha}`);
+    // Use -- to separate revision from paths to avoid ambiguity
+    const full = run(`git show --patch --pretty=format:'' "${sha}" --`);
     const remaining = Math.max(0, budget - used);
     patch = full.slice(0, remaining);
     return { patch, bytes: patch.length, truncated: full.length > remaining };

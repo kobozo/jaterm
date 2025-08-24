@@ -51,15 +51,36 @@ jobs:
           
       - name: Generate Release Notes
         id: release-notes
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Get the last tag
+          # Get the last tag for fallback
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "last_tag=$LAST_TAG" >> $GITHUB_OUTPUT
           
-          # Generate changelog
-          if [ -n "$LAST_TAG" ]; then
-            CHANGELOG=$(git log $LAST_TAG..HEAD --pretty=format:"- %s" --no-merges | head -20)
+          # Try to generate AI release notes
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "Generating AI release notes..."
+            if node tools/generate-release-notes.mjs --since-tag --out release-notes.md; then
+              echo "AI release notes generated successfully"
+              CHANGELOG=$(cat release-notes.md)
+            else
+              echo "AI generation failed, falling back to git log"
+              # Fallback to simple git log
+              if [ -n "$LAST_TAG" ]; then
+                CHANGELOG=$(git log $LAST_TAG..HEAD --pretty=format:"- %s" --no-merges | head -20)
+              else
+                CHANGELOG=$(git log --pretty=format:"- %s" --no-merges | head -20)
+              fi
+            fi
           else
-            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges | head -20)
+            echo "OPENAI_API_KEY not set, using git log"
+            # Fallback to simple git log
+            if [ -n "$LAST_TAG" ]; then
+              CHANGELOG=$(git log $LAST_TAG..HEAD --pretty=format:"- %s" --no-merges | head -20)
+            else
+              CHANGELOG=$(git log --pretty=format:"- %s" --no-merges | head -20)
+            fi
           fi
           
           # Escape for GitHub Actions
@@ -103,7 +124,7 @@ jobs:
             ${{ steps.release-notes.outputs.changelog }}
             
             ---
-            [View all commits](https://github.com/${{ github.repository }}/compare/${{ steps.get-version.outputs.last_tag }}...v${{ steps.get-version.outputs.version }})
+            [View all commits](https://github.com/${{ github.repository }}/compare/${{ steps.release-notes.outputs.last_tag }}...v${{ steps.get-version.outputs.version }})
           draft: false
           prerelease: true
           generate_release_notes: false
