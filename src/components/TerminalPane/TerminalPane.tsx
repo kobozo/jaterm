@@ -4,6 +4,8 @@ import '@xterm/xterm/css/xterm.css';
 import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
 import { homeDir } from '@tauri-apps/api/path';
 import { FitAddon } from '@xterm/addon-fit';
+import { getCachedConfig } from '@/services/settings';
+import { DEFAULT_CONFIG } from '@/types/settings';
 
 type Props = { id: string; desiredCwd?: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void; onSplit?: (id: string, dir: 'row' | 'column') => void; onCompose?: () => void; onTerminalEvent?: (id: string, event: any) => void };
 
@@ -15,6 +17,10 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
   const openedAtRef = useRef<number>(Date.now());
   const decoderRef = useRef<TextDecoder | null>(null);
   const IS_DEV = import.meta.env.DEV;
+  
+  // Get terminal settings
+  const globalConfig = getCachedConfig();
+  const terminalSettings = globalConfig?.terminal || DEFAULT_CONFIG.terminal;
   // Only allow a single correction per pane (on open), do not reset on cwd changes
   useEffect(() => { correctedRef.current = false; openedAtRef.current = Date.now(); }, [id]);
 
@@ -149,6 +155,17 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
         }
       } catch {}
     });
+    
+    // Copy on select functionality
+    const selectionSub = terminalSettings.copyOnSelect ? term.onSelectionChange(() => {
+      const selection = term.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection).catch(() => {
+          // Silently ignore clipboard errors
+        });
+      }
+    }) : null;
+    
     // Listen for backend PTY output and parse OSC 7 CWD
     let unlisten: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
@@ -209,14 +226,38 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
       keySub.dispose();
       resizeSub.dispose();
       titleSub?.dispose?.();
+      selectionSub?.dispose();
       if (unlisten) unlisten();
       if (unlistenExit) unlistenExit();
     };
-  }, [id, term]);
+  }, [id, term, terminalSettings.copyOnSelect]);
 
   const [menu, setMenu] = React.useState<{x:number;y:number}|null>(null);
   const onCtx = (e: React.MouseEvent) => {
     e.preventDefault();
+    
+    // Right-click selects word if enabled
+    if (terminalSettings.rightClickSelectsWord) {
+      // Get the terminal element's bounding rect
+      const rect = (term as any).element?.getBoundingClientRect();
+      if (rect) {
+        // Calculate the position relative to the terminal
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Convert to cell coordinates
+        const col = Math.floor(x / ((term as any).charMeasure?.width || 9));
+        const row = Math.floor(y / ((term as any).charMeasure?.height || 17));
+        
+        // Select word at position
+        try {
+          (term as any).selectWordAt?.(col, row);
+        } catch (err) {
+          // If the method doesn't exist or fails, silently continue
+        }
+      }
+    }
+    
     setMenu({ x: e.clientX, y: e.clientY });
   };
   React.useEffect(() => {

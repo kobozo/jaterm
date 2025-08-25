@@ -3,6 +3,8 @@ import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { onSshExit, onSshOutput, sshResize, sshWrite, sshHomeDir } from '@/types/ipc';
 import { useTerminal } from './TerminalPane/useTerminal';
+import { getCachedConfig } from '@/services/settings';
+import { DEFAULT_CONFIG } from '@/types/settings';
 
 type Props = {
   id: string; // channelId
@@ -26,6 +28,10 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   const openedAtRef = useRef<number>(Date.now());
   const decoderRef = useRef<TextDecoder | null>(null);
   const IS_DEV = import.meta.env.DEV;
+  
+  // Get terminal settings
+  const globalConfig = getCachedConfig();
+  const termSettings = globalConfig?.terminal || DEFAULT_CONFIG.terminal;
   
   // Keystroke buffering for better performance
   const writeBufferRef = useRef<string>('');
@@ -204,6 +210,16 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
         }
       } catch {}
     });
+    
+    // Copy on select functionality
+    const selectionSub = termSettings.copyOnSelect ? term.onSelectionChange(() => {
+      const selection = term.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection).catch(() => {
+          // Silently ignore clipboard errors
+        });
+      }
+    }) : null;
     let unlisten: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
     onSshOutput((e) => {
@@ -260,18 +276,47 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
       keySub.dispose();
       resizeSub.dispose();
       titleSub?.dispose?.();
+      selectionSub?.dispose();
       elem?.removeEventListener('focusin', handleFocus);
       elem?.removeEventListener('mousedown', handleFocus);
       if (unlisten) unlisten();
       if (unlistenExit) unlistenExit();
     };
-  }, [id, term]);
+  }, [id, term, termSettings.copyOnSelect]);
+
+  const onCtx = (e: React.MouseEvent) => {
+    e.preventDefault();
+    
+    // Right-click selects word if enabled
+    if (termSettings.rightClickSelectsWord) {
+      // Get the terminal element's bounding rect
+      const rect = (term as any).element?.getBoundingClientRect();
+      if (rect) {
+        // Calculate the position relative to the terminal
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Convert to cell coordinates
+        const col = Math.floor(x / ((term as any).charMeasure?.width || 9));
+        const row = Math.floor(y / ((term as any).charMeasure?.height || 17));
+        
+        // Select word at position
+        try {
+          (term as any).selectWordAt?.(col, row);
+        } catch (err) {
+          // If the method doesn't exist or fails, silently continue
+        }
+      }
+    }
+    
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
 
   return (
     <div
       style={{ height: '100%', width: '100%', position: 'relative', boxSizing: 'border-box', border: '1px solid #444', borderRadius: 4, minHeight: 0, overflow: 'hidden' }}
       onMouseDown={() => onFocusPane?.(id)}
-      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+      onContextMenu={onCtx}
     >
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
       {onClose && (

@@ -12,6 +12,7 @@ export function useTerminal(id: string, options?: { theme?: string; fontSize?: n
   const term = useMemo(() => new Terminal({
     fontFamily: options?.fontFamily || terminalDefaults.fontFamily,
     fontSize: options?.fontSize || terminalDefaults.fontSize,
+    lineHeight: terminalDefaults.lineHeight,
     cursorBlink: terminalDefaults.cursorBlink,
     cursorStyle: terminalDefaults.cursorStyle,
     allowProposedApi: false,
