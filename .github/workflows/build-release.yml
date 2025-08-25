@@ -83,14 +83,12 @@ jobs:
             fi
           fi
           
-          # Escape for GitHub Actions
-          CHANGELOG="${CHANGELOG//'%'/'%25'}"
-          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
-          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
-          
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Use heredoc for multi-line output (no escaping needed)
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            echo "$CHANGELOG"
+            echo "CHANGELOG_EOF"
+          } >> $GITHUB_OUTPUT
           
       - name: Create RC Release (release/* branch)
         id: create-release-rc
