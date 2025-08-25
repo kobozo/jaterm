@@ -567,22 +567,15 @@ mod tests {
 
     #[test]
     fn test_verify_master_key() {
-        use std::env;
-        use tempfile::tempdir;
-
-        // Create a temporary directory for the test
-        let temp_dir = tempdir().unwrap();
-        let temp_path = temp_dir.path().to_path_buf();
-
-        // Override HOME environment variable for this test
-        env::set_var("HOME", &temp_path);
-
         let manager = EncryptionManager::new();
 
-        // Set the master key - this will save to the temp directory
+        // Start fresh - remove any existing keys
+        let _ = manager.remove_master_key();
+
+        // Set the master key
         manager.set_master_key("correct_password").unwrap();
 
-        // Clear the in-memory key to force verification from fallback
+        // Clear the in-memory key to force verification from storage
         *manager.master_key.lock().unwrap() = None;
         *manager.salt.lock().unwrap() = None;
 
@@ -596,7 +589,7 @@ mod tests {
         // Test 2: Wrong password should fail
         assert!(!manager.verify_master_key("wrong_password").unwrap());
 
-        // Cleanup
-        temp_dir.close().unwrap();
+        // Cleanup - remove the test key
+        let _ = manager.remove_master_key();
     }
 }

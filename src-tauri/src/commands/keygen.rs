@@ -5,7 +5,6 @@ use ssh_key::{Algorithm, LineEnding, PrivateKey};
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GeneratedKey {
