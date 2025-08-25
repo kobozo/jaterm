@@ -584,15 +584,17 @@ jobs:
           
           Write-Output "====== Keys verification complete ====="
       
-      - name: Build Tauri app
+      - name: Build Tauri app (Unix)
+        if: matrix.os != 'windows-latest'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+        shell: bash
         run: |
           echo "Building with Tauri signing enabled..."
-          echo "Private key is set: $([ -n '$TAURI_SIGNING_PRIVATE_KEY' ] && echo 'YES' || echo 'NO')"
-          echo "Password is set: $([ -n '$TAURI_SIGNING_PRIVATE_KEY_PASSWORD' ] && echo 'YES' || echo 'NO')"
+          echo "Private key is set: $([ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && echo 'YES' || echo 'NO')"
+          echo "Password is set: $([ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] && echo 'YES' || echo 'NO')"
           
           pnpm tauri build --target ${{ matrix.target }}
           
@@ -604,16 +606,39 @@ jobs:
           ls -la src-tauri/target/${{ matrix.target }}/release/bundle/ || true
           
           # Platform-specific signature checks
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            echo "=== Windows MSI directory ==="
-            ls -la src-tauri/target/${{ matrix.target }}/release/bundle/msi/ || true
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
             echo "=== macOS bundle directory ==="
             ls -la src-tauri/target/${{ matrix.target }}/release/bundle/macos/ || true
           elif [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
             echo "=== Linux AppImage directory ==="
             ls -la src-tauri/target/${{ matrix.target }}/release/bundle/appimage/ || true
           fi
+
+      - name: Build Tauri app (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: pwsh
+        run: |
+          Write-Output "Building with Tauri signing enabled..."
+          $keySet = if ($env:TAURI_SIGNING_PRIVATE_KEY) { "YES" } else { "NO" }
+          $passSet = if ($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { "YES" } else { "NO" }
+          Write-Output "Private key is set: $keySet"
+          Write-Output "Password is set: $passSet"
+          
+          pnpm tauri build --target ${{ matrix.target }}
+          
+          Write-Output "Build complete. Looking for signature files..."
+          Write-Output "=== All .sig files in target directory ==="
+          Get-ChildItem -Path "src-tauri\target" -Filter "*.sig" -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          if ($LASTEXITCODE -ne 0) { Write-Output "No .sig files found" }
+          
+          Write-Output "=== Bundle directory contents ==="
+          Get-ChildItem -Path "src-tauri\target\${{ matrix.target }}\release\bundle\" -ErrorAction SilentlyContinue
+          
+          Write-Output "=== Windows MSI directory ==="
+          Get-ChildItem -Path "src-tauri\target\${{ matrix.target }}\release\bundle\msi\" -ErrorAction SilentlyContinue
 
       - name: Package helper (Windows)
         if: matrix.os == 'windows-latest'
