@@ -25,6 +25,9 @@ jobs:
       upload_url: ${{ steps.create-release.outputs.upload_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history and tags
+          fetch-tags: true
       
       - name: Get version
         id: get-version
@@ -54,12 +57,29 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          # Debug: Show available tags
+          echo "=== Available tags (first 10) ==="
+          git tag --sort=-version:refname | head -10 || echo "No tags found"
+          
+          echo "=== Current HEAD ==="
+          git describe --exact-match --tags HEAD 2>/dev/null || echo "Not on a tag"
+          
           # When running on a tag, get the PREVIOUS tag for comparison
           # If we're on a tag, git describe returns the current tag, so we need the one before it
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             # Get the second most recent tag
             LAST_TAG=$(git tag --sort=-version:refname | head -2 | tail -1 2>/dev/null || echo "")
             echo "Running on tag, using previous tag: $LAST_TAG"
+            
+            # Verify we got a different tag
+            CURRENT_TAG="${{ github.ref_name }}"
+            if [[ "$LAST_TAG" == "$CURRENT_TAG" ]]; then
+              echo "ERROR: Previous tag is same as current tag!"
+              echo "Attempting alternative method..."
+              # Try to get the tag before the current one
+              LAST_TAG=$(git tag --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -1 || echo "")
+              echo "Alternative previous tag: $LAST_TAG"
+            fi
           else
             # On branch, get the most recent tag
             LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
@@ -211,6 +231,9 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history and tags
+          fetch-tags: true
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -990,6 +1013,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history and tags
+          fetch-tags: true
       
       - name: Download all artifacts
         uses: actions/download-artifact@v4
