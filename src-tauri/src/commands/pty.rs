@@ -1,13 +1,13 @@
 use std::io::Read;
 // use std::sync::Arc;
-use std::thread;
-use std::path::Path;
 use std::fs;
+use std::path::Path;
+use std::thread;
 
-use portable_pty::{CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
-use tauri::{AppHandle, Emitter, State};
 use base64::Engine; // for .encode on base64 engines
+use portable_pty::{CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
 use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
 
 #[derive(Serialize)]
 pub struct ShellInfo {
@@ -18,7 +18,7 @@ pub struct ShellInfo {
 #[tauri::command]
 pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
     let mut shells = Vec::new();
-    
+
     #[cfg(unix)]
     {
         // Read /etc/shells on Unix-like systems
@@ -29,7 +29,7 @@ pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
                 if line.starts_with('#') || line.is_empty() {
                     continue;
                 }
-                
+
                 // Check if the shell actually exists
                 if Path::new(line).exists() {
                     let name = Path::new(line)
@@ -37,7 +37,7 @@ pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
                         .and_then(|s| s.to_str())
                         .unwrap_or(line)
                         .to_string();
-                    
+
                     shells.push(ShellInfo {
                         path: line.to_string(),
                         name: format!("{} ({})", friendly_shell_name(&name), line),
@@ -45,7 +45,7 @@ pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
                 }
             }
         }
-        
+
         // Check for additional common shells not in /etc/shells
         let additional_shells = [
             ("/usr/local/bin/fish", "fish"),
@@ -54,7 +54,7 @@ pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
             ("/usr/local/bin/nu", "nu"),
             ("/opt/homebrew/bin/nu", "nu"),
         ];
-        
+
         for (path, name) in additional_shells {
             if Path::new(path).exists() && !shells.iter().any(|s| s.path == path) {
                 shells.push(ShellInfo {
@@ -64,7 +64,7 @@ pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
             }
         }
     }
-    
+
     #[cfg(windows)]
     {
         // Common Windows shells
@@ -72,16 +72,19 @@ pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
             ("powershell.exe", "PowerShell"),
             ("pwsh.exe", "PowerShell Core"),
             ("cmd.exe", "Command Prompt"),
-            (r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "PowerShell"),
+            (
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                "PowerShell",
+            ),
             (r"C:\Program Files\PowerShell\7\pwsh.exe", "PowerShell 7"),
             (r"C:\Windows\System32\cmd.exe", "Command Prompt"),
             (r"C:\Program Files\Git\bin\bash.exe", "Git Bash"),
             (r"C:\Windows\System32\bash.exe", "WSL Bash"),
         ];
-        
+
         for (path, name) in windows_shells {
-            // Check both by path and in PATH
-            if Path::new(path).exists() || which::which(path).is_ok() {
+            // Check if the shell exists at the given path
+            if Path::new(path).exists() {
                 shells.push(ShellInfo {
                     path: path.to_string(),
                     name: format!("{} ({})", name, path),
@@ -89,17 +92,17 @@ pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
             }
         }
     }
-    
+
     // Sort shells by name for consistent ordering
     shells.sort_by(|a, b| a.name.cmp(&b.name));
-    
+
     Ok(shells)
 }
 
 fn friendly_shell_name(shell: &str) -> &str {
     match shell {
         "bash" => "Bash",
-        "zsh" => "Zsh", 
+        "zsh" => "Zsh",
         "fish" => "Fish",
         "sh" => "Sh",
         "dash" => "Dash",
@@ -205,7 +208,10 @@ pub async fn pty_open(
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => {
-                    let _ = app_clone.emit(crate::events::PTY_EXIT, &serde_json::json!({"ptyId": id_clone}));
+                    let _ = app_clone.emit(
+                        crate::events::PTY_EXIT,
+                        &serde_json::json!({"ptyId": id_clone}),
+                    );
                     break;
                 }
                 Ok(n) => {
@@ -256,7 +262,10 @@ pub async fn pty_resize(
 }
 
 #[tauri::command]
-pub async fn pty_kill(state: State<'_, crate::state::app_state::AppState>, pty_id: String) -> Result<(), String> {
+pub async fn pty_kill(
+    state: State<'_, crate::state::app_state::AppState>,
+    pty_id: String,
+) -> Result<(), String> {
     let mut inner = state.inner.lock().map_err(|_| "lock state")?;
     if let Some(mut sess) = inner.remove(&pty_id) {
         let _ = sess.child.kill();

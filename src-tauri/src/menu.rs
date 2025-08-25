@@ -1,6 +1,6 @@
 use tauri::{
     menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
-    AppHandle, Manager, Wry, Emitter,
+    AppHandle, Emitter, Manager, Wry,
 };
 
 pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
@@ -9,135 +9,135 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .id("new_tab")
         .accelerator("CmdOrCtrl+T")
         .build(app)?;
-    
+
     let new_window = MenuItemBuilder::new("New Window")
         .id("new_window")
         .accelerator("CmdOrCtrl+N")
         .build(app)?;
-    
+
     let close_tab = MenuItemBuilder::new("Close Tab")
         .id("close_tab")
         .accelerator("CmdOrCtrl+W")
         .build(app)?;
-    
+
     let close_window = MenuItemBuilder::new("Close Window")
         .id("close_window")
         .accelerator("CmdOrCtrl+Shift+W")
         .build(app)?;
-    
+
     let open_ssh = MenuItemBuilder::new("Open SSH Connection...")
         .id("open_ssh")
         .accelerator("CmdOrCtrl+Shift+S")
         .build(app)?;
-    
+
     let settings = MenuItemBuilder::new("Settings...")
         .id("settings")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
-    
+
     // Edit menu items
     let clear_terminal = MenuItemBuilder::new("Clear Terminal")
         .id("clear_terminal")
         .accelerator("CmdOrCtrl+L")
         .build(app)?;
-    
+
     let find = MenuItemBuilder::new("Find...")
         .id("find")
         .accelerator("CmdOrCtrl+F")
         .build(app)?;
-    
+
     // View menu items
     let toggle_fullscreen = MenuItemBuilder::new("Toggle Full Screen")
         .id("toggle_fullscreen")
         .accelerator("F11")
         .build(app)?;
-    
+
     let zoom_in = MenuItemBuilder::new("Zoom In")
         .id("zoom_in")
         .accelerator("CmdOrCtrl+Plus")
         .build(app)?;
-    
+
     let zoom_out = MenuItemBuilder::new("Zoom Out")
         .id("zoom_out")
         .accelerator("CmdOrCtrl+Minus")
         .build(app)?;
-    
+
     let reset_zoom = MenuItemBuilder::new("Reset Zoom")
         .id("reset_zoom")
         .accelerator("CmdOrCtrl+0")
         .build(app)?;
-    
+
     let toggle_git = MenuItemBuilder::new("Toggle Git Panel")
         .id("toggle_git")
         .accelerator("CmdOrCtrl+G")
         .build(app)?;
-    
+
     let toggle_sftp = MenuItemBuilder::new("Toggle SFTP Panel")
         .id("toggle_sftp")
         .accelerator("CmdOrCtrl+Shift+F")
         .build(app)?;
-    
+
     let toggle_ports = MenuItemBuilder::new("Toggle Ports Panel")
         .id("toggle_ports")
         .accelerator("CmdOrCtrl+P")
         .build(app)?;
-    
+
     #[cfg(debug_assertions)]
     let toggle_devtools = MenuItemBuilder::new("Toggle Developer Tools")
         .id("toggle_devtools")
         .accelerator("F12")
         .build(app)?;
-    
+
     // Window menu items
     let split_horizontal = MenuItemBuilder::new("Split Horizontally")
         .id("split_horizontal")
         .accelerator("CmdOrCtrl+Shift+H")
         .build(app)?;
-    
+
     let split_vertical = MenuItemBuilder::new("Split Vertically")
         .id("split_vertical")
         .accelerator("CmdOrCtrl+Shift+V")
         .build(app)?;
-    
+
     let next_tab = MenuItemBuilder::new("Next Tab")
         .id("next_tab")
         .accelerator("Ctrl+Tab")
         .build(app)?;
-    
+
     let prev_tab = MenuItemBuilder::new("Previous Tab")
         .id("prev_tab")
         .accelerator("Ctrl+Shift+Tab")
         .build(app)?;
-    
+
     let next_pane = MenuItemBuilder::new("Next Pane")
         .id("next_pane")
         .accelerator("CmdOrCtrl+Alt+Right")
         .build(app)?;
-    
+
     let prev_pane = MenuItemBuilder::new("Previous Pane")
         .id("prev_pane")
         .accelerator("CmdOrCtrl+Alt+Left")
         .build(app)?;
-    
+
     // Help menu items
     let documentation = MenuItemBuilder::new("Documentation")
         .id("documentation")
         .build(app)?;
-    
+
     let report_issue = MenuItemBuilder::new("Report Issue")
         .id("report_issue")
         .build(app)?;
-    
+
     let check_updates = MenuItemBuilder::new("Check for Updates...")
         .id("check_updates")
         .build(app)?;
-    
+
     let release_notes = MenuItemBuilder::new("View Release Notes")
         .id("release_notes")
         .build(app)?;
-    
+
     // About will be handled differently on macOS (in app menu) vs other platforms
-    
+
     // Build submenus
     #[cfg(target_os = "macos")]
     let file_menu = SubmenuBuilder::new(app, "File")
@@ -149,7 +149,7 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .separator()
         .item(&open_ssh)
         .build()?;
-    
+
     #[cfg(not(target_os = "macos"))]
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_tab)
@@ -164,7 +164,7 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .separator()
         .quit()
         .build()?;
-    
+
     let edit_menu = SubmenuBuilder::new(app, "Edit")
         .undo()
         .redo()
@@ -177,7 +177,7 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .item(&find)
         .item(&clear_terminal)
         .build()?;
-    
+
     let mut view_menu_builder = SubmenuBuilder::new(app, "View")
         .item(&toggle_fullscreen)
         .separator()
@@ -188,16 +188,14 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .item(&toggle_git)
         .item(&toggle_sftp)
         .item(&toggle_ports);
-    
+
     #[cfg(debug_assertions)]
     {
-        view_menu_builder = view_menu_builder
-            .separator()
-            .item(&toggle_devtools);
+        view_menu_builder = view_menu_builder.separator().item(&toggle_devtools);
     }
-    
+
     let view_menu = view_menu_builder.build()?;
-    
+
     let window_menu = SubmenuBuilder::new(app, "Window")
         .item(&split_horizontal)
         .item(&split_vertical)
@@ -211,7 +209,7 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .minimize()
         .maximize()
         .build()?;
-    
+
     #[cfg(target_os = "macos")]
     let help_menu = SubmenuBuilder::new(app, "Help")
         .item(&documentation)
@@ -220,13 +218,13 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
         .item(&check_updates)
         .item(&release_notes)
         .build()?;
-    
+
     #[cfg(not(target_os = "macos"))]
     let help_menu = {
         let about_item = MenuItemBuilder::new("About JaTerm")
             .id("about")
             .build(app)?;
-        
+
         SubmenuBuilder::new(app, "Help")
             .item(&documentation)
             .item(&report_issue)
@@ -237,12 +235,12 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
             .item(&about_item)
             .build()?
     };
-    
+
     // Build the complete menu
     #[cfg(target_os = "macos")]
     {
         use tauri::menu::AboutMetadata;
-        
+
         // On macOS, create app menu with native about dialog
         let app_menu = SubmenuBuilder::new(app, "JaTerm")
             .about(Some(AboutMetadata {
@@ -262,7 +260,7 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
             .separator()
             .quit()
             .build()?;
-        
+
         MenuBuilder::new(app)
             .item(&app_menu)
             .item(&file_menu)
@@ -273,7 +271,7 @@ pub fn create_menu(app: &AppHandle<Wry>) -> Result<Menu<Wry>, Box<dyn std::error
             .build()
             .map_err(|e| e.into())
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         MenuBuilder::new(app)
@@ -384,7 +382,10 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event_id: &str) {
         }
         "report_issue" => {
             // Emit event to frontend to open URL
-            let _ = app.emit("menu:open_url", "https://github.com/Kobozo/JaTerm/issues/new");
+            let _ = app.emit(
+                "menu:open_url",
+                "https://github.com/Kobozo/JaTerm/issues/new",
+            );
         }
         "check_updates" => {
             // Emit event to frontend to check for updates

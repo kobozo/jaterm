@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::io::Write as IoWrite;
 use std::sync::{Arc, Mutex};
 
-use portable_pty::{Child, MasterPty, PtySize};
-use ssh2::{Session as SshSessionInner, Channel};
-use std::net::TcpStream;
-use std::sync::Mutex as StdMutex;
 use crate::encryption::EncryptionManager;
 use crate::encryption_v2::EncryptionManager as EncryptionManagerV2;
+use portable_pty::{Child, MasterPty, PtySize};
+use ssh2::{Channel, Session as SshSessionInner};
+use std::net::TcpStream;
+use std::sync::Mutex as StdMutex;
 
 pub struct PtySession {
     pub id: String,
@@ -36,17 +36,17 @@ impl Default for AppState {
         let encryption = Arc::new(EncryptionManager::new());
         // Try to initialize old encryption from saved keys
         let _ = encryption.init();
-        
+
         let encryption_v2 = Arc::new(EncryptionManagerV2::new());
         // Initialize new encryption system
         let _ = encryption_v2.initialize();
-        
+
         Self {
-            inner: Arc::new(Mutex::new(Inner { 
-                sessions: HashMap::new(), 
-                ssh: HashMap::new(), 
-                ssh_channels: HashMap::new(), 
-                forwards: HashMap::new() 
+            inner: Arc::new(Mutex::new(Inner {
+                sessions: HashMap::new(),
+                ssh: HashMap::new(),
+                ssh_channels: HashMap::new(),
+                forwards: HashMap::new(),
             })),
             encryption,
             encryption_v2,
@@ -77,8 +77,10 @@ impl Inner {
 }
 
 pub struct SshSession {
-    #[allow(dead_code)] pub id: String,
-    #[allow(dead_code)] pub tcp: TcpStream,
+    #[allow(dead_code)]
+    pub id: String,
+    #[allow(dead_code)]
+    pub tcp: TcpStream,
     pub sess: SshSessionInner,
     // Serialize all libssh2 calls across channels for this session
     pub lock: std::sync::Arc<StdMutex<()>>,
@@ -89,16 +91,26 @@ pub struct SshSession {
 }
 
 pub struct SshChannel {
-    #[allow(dead_code)] pub id: String,
+    #[allow(dead_code)]
+    pub id: String,
     pub session_id: String,
     pub chan: Arc<StdMutex<Channel>>,
 }
 
-pub enum ForwardType { Local, Remote }
+pub enum ForwardType {
+    Local,
+    Remote,
+}
 
 pub enum ForwardBackend {
-    #[allow(dead_code)] LocalThread { shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>, thread: Option<std::thread::JoinHandle<()>> },
-    SshProcess { child: Option<std::process::Child> },
+    #[allow(dead_code)]
+    LocalThread {
+        shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    },
+    SshProcess {
+        child: Option<std::process::Child>,
+    },
 }
 
 #[allow(dead_code)]
