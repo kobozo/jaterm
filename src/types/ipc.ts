@@ -49,7 +49,17 @@ export type GitStatus = {
   conflicted?: number;
 };
 
+// Shell types
+export interface ShellInfo {
+  path: string;
+  name: string;
+}
+
 // Commands
+export async function getAvailableShells(): Promise<ShellInfo[]> {
+  return invoke('get_available_shells');
+}
+
 export async function ptyOpen(args: {
   cwd?: string;
   env?: Record<string, string>;

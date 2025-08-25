@@ -18,6 +18,7 @@ import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
 import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
+import { getCachedConfig } from '@/services/settings';
 import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
 import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
@@ -108,38 +109,41 @@ export default function App() {
   React.useEffect(() => {
     (async () => {
       // Load global configuration
+      let config;
       try {
         const { loadGlobalConfig } = await import('@/services/settings');
-        await loadGlobalConfig();
+        config = await loadGlobalConfig();
       } catch (error) {
         console.warn('Failed to load global config:', error);
       }
 
-      // Check for updates
-      try {
-        const mod: any = await import('@tauri-apps/plugin-updater');
-        const res = await mod.check();
-        if (res && res.available) {
-          setUpdateAvailable({ version: (res as any).version || undefined });
-          const tid = show({
-            title: `Update available${(res as any).version ? ' ' + (res as any).version : ''}`,
-            message: 'Restart to install the latest version.',
-            kind: 'info',
-            actions: [
-              { label: 'Restart & Update', onClick: async () => {
-                try {
-                  // v2 exposes install(); fallback to downloadAndInstall if present
-                  if (mod.install) await mod.install();
-                  else if (res.downloadAndInstall) await res.downloadAndInstall();
-                } catch (e) {
-                  show({ title: 'Update failed', message: String(e), kind: 'error' });
-                }
-              } }
-            ]
-          });
-          setTimeout(() => dismiss(tid), 15000);
-        }
-      } catch {}
+      // Check for updates if enabled in settings
+      if (config?.general?.autoCheckUpdates !== false) { // Default to true if not set
+        try {
+          const mod: any = await import('@tauri-apps/plugin-updater');
+          const res = await mod.check();
+          if (res && res.available) {
+            setUpdateAvailable({ version: (res as any).version || undefined });
+            const tid = show({
+              title: `Update available${(res as any).version ? ' ' + (res as any).version : ''}`,
+              message: 'Restart to install the latest version.',
+              kind: 'info',
+              actions: [
+                { label: 'Restart & Update', onClick: async () => {
+                  try {
+                    // v2 exposes install(); fallback to downloadAndInstall if present
+                    if (mod.install) await mod.install();
+                    else if (res.downloadAndInstall) await res.downloadAndInstall();
+                  } catch (e) {
+                    show({ title: 'Update failed', message: String(e), kind: 'error' });
+                  }
+                } }
+              ]
+            });
+            setTimeout(() => dismiss(tid), 15000);
+          }
+        } catch {}
+      }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -207,15 +211,77 @@ export default function App() {
 
   // Start on the Welcome screen by default; no auto-open on launch.
 
+  /**
+   * Get the default working directory based on user settings
+   */
+  async function getDefaultWorkingDirectory(): Promise<string | null> {
+    const config = getCachedConfig();
+    
+    if (!config?.general?.defaultWorkingDir) {
+      return null;
+    }
+    
+    switch (config.general.defaultWorkingDir) {
+      case 'home':
+        try {
+          return await resolvePathAbsolute('~');
+        } catch {
+          console.warn('Failed to resolve home directory');
+          return null;
+        }
+      
+      case 'lastUsed':
+        try {
+          const lastUsed = localStorage.getItem('jaterm.lastUsedDirectory');
+          if (lastUsed) {
+            return await resolvePathAbsolute(lastUsed);
+          }
+        } catch {
+          console.warn('Failed to resolve last used directory');
+        }
+        // If no last used, fall back to home
+        try {
+          return await resolvePathAbsolute('~');
+        } catch {
+          return null;
+        }
+      
+      case 'custom':
+        if (config.general.customWorkingDir) {
+          try {
+            return await resolvePathAbsolute(config.general.customWorkingDir);
+          } catch {
+            console.warn('Failed to resolve custom directory:', config.general.customWorkingDir);
+          }
+        }
+        return null;
+      
+      default:
+        return null;
+    }
+  }
+
   async function openFolderFor(tabId: string, path: string, opts: { 
     remember?: boolean;
     terminal?: any; // Terminal customization
     shell?: any; // Shell settings
   } = { remember: true }) {
-    if (opts.remember !== false) await addRecent(path);
+    if (opts.remember !== false) {
+      await addRecent(path);
+      // Store as last used directory for default working directory setting
+      try {
+        localStorage.setItem('jaterm.lastUsedDirectory', path);
+      } catch {}
+    }
     try {
       const abs = await resolvePathAbsolute(path);
-      const res = await ptyOpen({ cwd: abs });
+      // Use default shell from settings if configured
+      const config = getCachedConfig();
+      const defaultShell = config?.general?.defaultShell;
+      const res = await ptyOpen({ 
+        cwd: abs,
+        shell: defaultShell || undefined
+      });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
       const sid = String(id);
       
@@ -281,7 +347,49 @@ export default function App() {
     if (!t || !t.cwd) return;
     if (t.kind === 'ssh') { return; }
     try {
-      const res = await ptyOpen({ cwd: t.cwd });
+      // Determine working directory based on settings
+      const config = getCachedConfig();
+      let cwd = t.cwd;
+      
+      if (config?.general?.defaultWorkingDir) {
+        switch (config.general.defaultWorkingDir) {
+          case 'home':
+            // Use home directory
+            try {
+              cwd = await resolvePathAbsolute('~');
+            } catch {
+              // Fallback to current directory if home resolution fails
+            }
+            break;
+          case 'lastUsed':
+            // Use last used directory if available
+            try {
+              const lastUsed = localStorage.getItem('jaterm.lastUsedDirectory');
+              if (lastUsed) {
+                cwd = await resolvePathAbsolute(lastUsed);
+              }
+            } catch {
+              // Fallback to current directory if last used is invalid
+            }
+            break;
+          case 'custom':
+            // Use custom directory if configured
+            if (config.general.customWorkingDir) {
+              try {
+                cwd = await resolvePathAbsolute(config.general.customWorkingDir);
+              } catch {
+                // Fallback to current directory if custom path is invalid
+              }
+            }
+            break;
+        }
+      }
+      
+      const defaultShell = config?.general?.defaultShell;
+      const res = await ptyOpen({ 
+        cwd,
+        shell: defaultShell || undefined
+      });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
       const sid = String(id);
       setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, panes: [...tb.panes, sid], activePane: sid } : tb)));
@@ -1296,16 +1404,33 @@ export default function App() {
     }
   }, [tabs, registerTerminalEventDetector]);
 
+  // Debounced save function for workspace persistence
+  const saveWorkspaceDebounced = React.useMemo(() => {
+    const config = getCachedConfig();
+    const intervalMs = (config?.general?.stateInterval || 60) * 1000; // Convert seconds to milliseconds
+    
+    return debounce(async (tabsToSave: Tab[], activeTabId: string) => {
+      const ws = {
+        activeTabIndex: Math.max(0, tabsToSave.findIndex((t) => t.id === activeTabId)),
+        tabs: tabsToSave
+          .filter((t) => t.cwd && t.kind !== 'ssh')
+          .map((t) => ({ cwd: t.status.fullPath ?? (t.cwd as string), title: t.title, layoutShape: layoutToShape(t.layout as any) })),
+      };
+      await saveAppState({ workspace: ws });
+    }, intervalMs);
+  }, []); // Only create once on mount
+  
   // Persist workspace on changes (local tabs only)
   React.useEffect(() => {
-    const ws = {
-      activeTabIndex: Math.max(0, tabs.findIndex((t) => t.id === activeTab)),
-      tabs: tabs
-        .filter((t) => t.cwd && t.kind !== 'ssh')
-        .map((t) => ({ cwd: t.status.fullPath ?? (t.cwd as string), title: t.title, layoutShape: layoutToShape(t.layout as any) })),
-    };
-    void saveAppState({ workspace: ws });
-  }, [tabs, activeTab]);
+    // Check if auto-save is enabled in settings
+    const config = getCachedConfig();
+    if (!config?.general?.autoSaveState) {
+      return; // Skip auto-save if disabled
+    }
+    
+    // Use debounced save function
+    saveWorkspaceDebounced(tabs, activeTab);
+  }, [tabs, activeTab, saveWorkspaceDebounced]);
 
   // Restore workspace on first load and check encryption status
   React.useEffect(() => {

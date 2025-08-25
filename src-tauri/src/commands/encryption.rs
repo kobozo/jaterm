@@ -1,6 +1,6 @@
 use crate::state::app_state::AppState;
-use tauri::State;
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
 #[derive(Serialize)]
 pub struct EncryptionStatus {
@@ -17,11 +17,9 @@ pub async fn encryption_status(state: State<'_, AppState>) -> Result<EncryptionS
 }
 
 #[tauri::command]
-pub async fn set_master_key(
-    password: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    state.encryption
+pub async fn set_master_key(password: String, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .encryption
         .set_master_key(&password)
         .map_err(|e| e.to_string())
 }
@@ -31,7 +29,8 @@ pub async fn verify_master_key(
     password: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    state.encryption
+    state
+        .encryption
         .verify_master_key(&password)
         .map_err(|e| e.to_string())
 }
@@ -44,7 +43,8 @@ pub async fn clear_master_key(state: State<'_, AppState>) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn remove_master_key(state: State<'_, AppState>) -> Result<(), String> {
-    state.encryption
+    state
+        .encryption
         .remove_master_key()
         .map_err(|e| e.to_string())
 }
@@ -61,14 +61,13 @@ pub async fn test_encryption(
     data: String,
     state: State<'_, AppState>,
 ) -> Result<TestEncryption, String> {
-    let encrypted = state.encryption
-        .encrypt(&data)
-        .map_err(|e| e.to_string())?;
-    
-    let decrypted = state.encryption
+    let encrypted = state.encryption.encrypt(&data).map_err(|e| e.to_string())?;
+
+    let decrypted = state
+        .encryption
         .decrypt(&encrypted)
         .map_err(|e| e.to_string())?;
-    
+
     Ok(TestEncryption {
         original: data,
         encrypted,
