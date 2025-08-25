@@ -479,11 +479,13 @@ jobs:
           echo "Removing test_keyring binary from release build..."
           rm -f src-tauri/src/bin/test_keyring.rs
       
-      - name: Verify signing keys
+      - name: Verify signing keys (bash)
+        if: matrix.os != 'windows-latest'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+        shell: bash
         run: |
           echo "====== Verifying Tauri Signing Keys ======"
           
@@ -525,6 +527,64 @@ jobs:
           fi
           
           echo "====== Keys verification complete ======"
+      
+      - name: Verify signing keys (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+        shell: pwsh
+        run: |
+          Write-Output "====== Verifying Tauri Signing Keys ======"
+          
+          # Verify public key MD5
+          if ($env:TAURI_UPDATER_PUBKEY) {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($env:TAURI_UPDATER_PUBKEY)
+            $md5 = [System.Security.Cryptography.MD5]::Create()
+            $hash = $md5.ComputeHash($bytes)
+            $PUBKEY_MD5 = [System.BitConverter]::ToString($hash) -replace '-', '' | ForEach-Object { $_.ToLower() }
+            Write-Output "Public key MD5: $PUBKEY_MD5"
+            Write-Output "Expected: 1a1310bf394ca140c55cc01610e020b1"
+            if ($PUBKEY_MD5 -ne "1a1310bf394ca140c55cc01610e020b1") {
+              Write-Output "WARNING: Public key MD5 mismatch!"
+            }
+          } else {
+            Write-Output "ERROR: No public key found in TAURI_UPDATER_PUBKEY!"
+            exit 1
+          }
+          
+          # Verify private key exists (hash it to check)
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($env:TAURI_SIGNING_PRIVATE_KEY)
+            $md5 = [System.Security.Cryptography.MD5]::Create()
+            $hash = $md5.ComputeHash($bytes)
+            $PRIVKEY_MD5 = [System.BitConverter]::ToString($hash) -replace '-', '' | ForEach-Object { $_.ToLower() }
+            Write-Output "Private key MD5: $PRIVKEY_MD5"
+            Write-Output "Private key length: $($env:TAURI_SIGNING_PRIVATE_KEY.Length)"
+            # NOTE: Add your expected MD5 here after testing locally
+            # Write-Output "Expected: YOUR_PRIVATE_KEY_MD5"
+          } else {
+            Write-Output "ERROR: No private key found in TAURI_SIGNING_PRIVATE_KEY!"
+            exit 1
+          }
+          
+          # Verify password exists (hash it)
+          if ($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)
+            $md5 = [System.Security.Cryptography.MD5]::Create()
+            $hash = $md5.ComputeHash($bytes)
+            $PASSWORD_MD5 = [System.BitConverter]::ToString($hash) -replace '-', '' | ForEach-Object { $_.ToLower() }
+            Write-Output "Password MD5: $PASSWORD_MD5"
+            Write-Output "Password length: $($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD.Length)"
+            # NOTE: Add your expected MD5 here after testing locally
+            # Write-Output "Expected: YOUR_PASSWORD_MD5"
+          } else {
+            Write-Output "ERROR: No password found in TAURI_SIGNING_PRIVATE_KEY_PASSWORD!"
+            exit 1
+          }
+          
+          Write-Output "====== Keys verification complete ====="
       
       - name: Build Tauri app
         env:

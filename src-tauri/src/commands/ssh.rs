@@ -207,12 +207,6 @@ pub async fn ssh_connect(
     }
     // Auth
     if let Some(auth) = &profile.auth {
-        eprintln!(
-            "Auth provided - agent: {}, has_password: {}, has_key: {}",
-            auth.agent,
-            auth.password.is_some(),
-            auth.key_path.is_some()
-        );
         if auth.agent {
             let mut agent = sess.agent().map_err(|e| e.to_string())?;
             agent.connect().map_err(|e| e.to_string())?;
@@ -228,7 +222,6 @@ pub async fn ssh_connect(
                 return Err("agent auth failed".into());
             }
         } else if let Some(pw) = &auth.password {
-            eprintln!("Using password auth");
             sess.userauth_password(&profile.user, pw)
                 .map_err(|e| format!("auth pw: {e}"))?;
         } else if let Some(key) = &auth.key_path {
@@ -423,8 +416,8 @@ pub async fn ssh_sftp_download(
     local_path: String,
 ) -> Result<(), String> {
     eprintln!(
-        "[ssh] sftp_download session={} remote={} local={}",
-        session_id, remote_path, local_path
+        "[ssh] sftp_download remote={} local={}",
+        remote_path, local_path
     );
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner
@@ -496,8 +489,8 @@ pub async fn ssh_sftp_download_dir(
     local_dir: String,
 ) -> Result<(), String> {
     eprintln!(
-        "[ssh] sftp_download_dir session={} remote_dir={} local_dir={}",
-        session_id, remote_dir, local_dir
+        "[ssh] sftp_download_dir remote_dir={} local_dir={}",
+        remote_dir, local_dir
     );
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner
@@ -616,10 +609,7 @@ pub async fn ssh_sftp_read(
     session_id: String,
     remote_path: String,
 ) -> Result<String, String> {
-    eprintln!(
-        "[ssh] sftp_read session={} path={}",
-        session_id, remote_path
-    );
+    eprintln!("[ssh] sftp_read path={}", remote_path);
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner
         .ssh
@@ -735,10 +725,7 @@ pub async fn ssh_deploy_helper(
     session_id: String,
     remote_path: String,
 ) -> Result<(), String> {
-    eprintln!(
-        "[ssh] deploy_helper session={} path={}",
-        session_id, remote_path
-    );
+    eprintln!("[ssh] deploy_helper path={}", remote_path);
 
     // Use ssh_exec to detect OS first - it handles the locking properly
     let uname_result = ssh_exec(state.clone(), session_id.clone(), "uname -s".to_string()).await?;
@@ -816,8 +803,7 @@ pub async fn ssh_sftp_write(
     data_b64: String,
 ) -> Result<(), String> {
     eprintln!(
-        "[ssh] sftp_write session={} path={} size={}B",
-        session_id,
+        "[ssh] sftp_write path={} size={}B",
         remote_path,
         data_b64.len()
     );
@@ -1301,7 +1287,7 @@ pub async fn ssh_open_shell(
                     let read_result: Result<usize, std::io::Error> = guard.read(&mut buf);
                     match read_result {
                         Ok(0) => {
-                            eprintln!("[ssh] EOF channel {}", sid);
+                            eprintln!("[ssh] EOF on channel");
                             let _ = app.emit(
                                 crate::events::SSH_EXIT,
                                 &serde_json::json!({"channelId": sid}),
@@ -1309,7 +1295,7 @@ pub async fn ssh_open_shell(
                             break;
                         }
                         Ok(n) => {
-                            eprintln!("[ssh] read {} bytes channel {}", n, sid);
+                            eprintln!("[ssh] read {} bytes", n);
                             n
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -1317,7 +1303,7 @@ pub async fn ssh_open_shell(
                             continue;
                         }
                         Err(err) => {
-                            eprintln!("[ssh] read error channel {}: {}", sid, err);
+                            eprintln!("[ssh] read error: {}", err);
                             let _ = app.emit(
                                 crate::events::SSH_EXIT,
                                 &serde_json::json!({"channelId": sid}),
