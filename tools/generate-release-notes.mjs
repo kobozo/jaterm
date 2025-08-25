@@ -31,7 +31,7 @@ function parseArgs(argv) {
     includeDiffs: false,
     maxDiffBytes: 120000, // ~120KB
     out: undefined,
-    model: 'gpt-5',
+    model: 'gpt-4o-mini',
     temperature: 0.2,
     dryRun: false,
   };

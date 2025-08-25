@@ -38,6 +38,9 @@ else
   fi
 fi
 
+# Save the original repo directory
+repo_dir=$(pwd)
+
 tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t 'wiki')
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -63,7 +66,7 @@ cd "$tmp_dir"
 git config user.name "${GIT_AUTHOR_NAME:-github-actions}"
 git config user.email "${GIT_AUTHOR_EMAIL:-github-actions@users.noreply.github.com}"
 rm -f ./*.md
-cp -v ../wiki/*.md .
+cp -v "$repo_dir"/wiki/*.md .
 
 git add -A
 if git diff --cached --quiet; then
