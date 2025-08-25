@@ -61,11 +61,21 @@ jobs:
           # Try to generate AI release notes
           if [ -n "$OPENAI_API_KEY" ]; then
             echo "Generating AI release notes..."
-            if node tools/generate-release-notes.mjs --since-tag --out release-notes.md; then
+            echo "OpenAI API key length: ${#OPENAI_API_KEY}"
+            
+            # Run with error output to see what's failing
+            if node tools/generate-release-notes.mjs --since-tag --out release-notes.md 2>&1; then
               echo "AI release notes generated successfully"
-              CHANGELOG=$(cat release-notes.md)
+              if [ -f release-notes.md ]; then
+                CHANGELOG=$(cat release-notes.md)
+                echo "Release notes content length: ${#CHANGELOG}"
+              else
+                echo "ERROR: release-notes.md file not created"
+                CHANGELOG=""
+              fi
             else
-              echo "AI generation failed, falling back to git log"
+              echo "AI generation failed with exit code $?"
+              echo "Falling back to git log"
               # Fallback to simple git log
               if [ -n "$LAST_TAG" ]; then
                 CHANGELOG=$(git log $LAST_TAG..HEAD --pretty=format:"- %s" --no-merges | head -20)
@@ -74,7 +84,7 @@ jobs:
               fi
             fi
           else
-            echo "OPENAI_API_KEY not set, using git log"
+            echo "WARNING: OPENAI_API_KEY not set in GitHub secrets, using git log fallback"
             # Fallback to simple git log
             if [ -n "$LAST_TAG" ]; then
               CHANGELOG=$(git log $LAST_TAG..HEAD --pretty=format:"- %s" --no-merges | head -20)
