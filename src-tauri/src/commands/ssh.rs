@@ -679,7 +679,7 @@ pub async fn ssh_sftp_mkdirs(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
-    eprintln!("[ssh] mkdirs session={} path={}", session_id, path);
+    eprintln!("[ssh] mkdirs path={}", path);
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner
         .ssh
@@ -874,7 +874,7 @@ pub async fn ssh_exec(
     session_id: String,
     command: String,
 ) -> Result<ExecResult, String> {
-    eprintln!("[ssh] exec session={} cmd={}", session_id, command);
+    eprintln!("[ssh] exec cmd={}", command);
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner
         .ssh

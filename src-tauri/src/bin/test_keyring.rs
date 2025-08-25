@@ -8,7 +8,7 @@ fn main() {
     let test_password = "test-dek-value-base64";
 
     println!("Service: {}", service);
-    println!("Account: {}", account);
+    println!("Account: [REDACTED]");
 
     // Try to create entry
     match Entry::new(service, account) {
