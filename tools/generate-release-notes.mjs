@@ -57,7 +57,20 @@ function printHelp() {
 }
 
 function lastTag() {
-  try { return run('git describe --tags --abbrev=0'); } catch { return undefined; }
+  try { 
+    // Check if HEAD is currently tagged
+    const headTag = run('git describe --exact-match --tags HEAD 2>/dev/null || echo ""').trim();
+    if (headTag) {
+      // HEAD is tagged, get the previous tag
+      console.error(`[release-notes] HEAD is at tag ${headTag}, getting previous tag`);
+      const tags = run('git tag --sort=-version:refname').split('\n').filter(Boolean);
+      return tags.length > 1 ? tags[1] : tags[0];
+    }
+    // HEAD is not tagged, get the most recent tag
+    return run('git describe --tags --abbrev=0');
+  } catch { 
+    return undefined; 
+  }
 }
 
 function resolveRange(args) {
