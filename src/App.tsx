@@ -1573,24 +1573,27 @@ export default function App() {
         setActiveTab(sessionsId);
       }));
       unlisteners.push(await listen('menu:settings', () => {
-        // Open settings tab - check if it already exists
-        const existingSettings = tabs.find(t => t.kind === 'settings');
-        if (existingSettings) {
-          setActiveTab(existingSettings.id);
-        } else {
-          const settingsTab: Tab = {
-            id: crypto.randomUUID(),
-            kind: 'settings',
-            cwd: null,
-            panes: [],
-            activePane: null,
-            status: {},
-            title: 'Settings',
-            layoutShape: { type: 'leaf' }
-          };
-          setTabs(prev => [...prev, settingsTab]);
-          setActiveTab(settingsTab.id);
-        }
+        setTabs(prev => {
+          // Check if settings tab already exists
+          const existingSettings = prev.find(t => t.kind === 'settings');
+          if (existingSettings) {
+            setActiveTab(existingSettings.id);
+            return prev; // No change to tabs
+          } else {
+            const settingsTab: Tab = {
+              id: crypto.randomUUID(),
+              kind: 'settings',
+              cwd: null,
+              panes: [],
+              activePane: null,
+              status: {},
+              title: 'Settings',
+              layoutShape: { type: 'leaf' }
+            };
+            setActiveTab(settingsTab.id);
+            return [...prev, settingsTab];
+          }
+        });
       }));
       
       // Edit menu events
