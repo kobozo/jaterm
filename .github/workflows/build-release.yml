@@ -726,6 +726,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: pwsh
         run: |
           # Windows creates MSI installer
@@ -763,7 +764,9 @@ jobs:
                 $keyFile = New-TemporaryFile
                 Set-Content -Path $keyFile -Value $env:TAURI_SIGNING_PRIVATE_KEY
                 # Sign the MSI file
-                & pnpm tauri signer sign --private-key $keyFile --password $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
+                $msiPath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
+                Write-Host "Signing MSI at: $msiPath"
+                & pnpm tauri signer sign --private-key "$keyFile" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$msiPath"
                 Remove-Item $keyFile
               }
             }
@@ -779,7 +782,9 @@ jobs:
               Write-Host "Signing NSIS installer..."
               $keyFile = New-TemporaryFile
               Set-Content -Path $keyFile -Value $env:TAURI_SIGNING_PRIVATE_KEY
-              & pnpm tauri signer sign --private-key $keyFile --password $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
+              $exePath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
+              Write-Host "Signing NSIS at: $exePath"
+              & pnpm tauri signer sign --private-key "$keyFile" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$exePath"
               Remove-Item $keyFile
             }
           }
