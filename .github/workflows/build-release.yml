@@ -606,11 +606,22 @@ jobs:
           echo "Private key is set: $([ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && echo 'YES' || echo 'NO')"
           echo "Password is set: $([ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] && echo 'YES' || echo 'NO')"
           
+          # Explicitly enable updater signatures
+          export TAURI_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY"
+          export TAURI_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          
           pnpm tauri build --target ${{ matrix.target }}
           
           echo "Build complete. Looking for signature files..."
           echo "=== All .sig files in target directory ==="
           find src-tauri/target -name "*.sig" -type f 2>/dev/null || echo "No .sig files found"
+          
+          # If no signatures found, list what files were created
+          if ! find src-tauri/target -name "*.sig" -type f 2>/dev/null | grep -q .; then
+            echo "WARNING: No signature files generated!"
+            echo "Checking if updater artifacts were created:"
+            find src-tauri/target -name "*.tar.gz" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.deb" | head -20
+          fi
           
           echo "=== Bundle directory contents ==="
           ls -la src-tauri/target/${{ matrix.target }}/release/bundle/ || true
@@ -629,6 +640,8 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: pwsh
         run: |
           Write-Output "Building with Tauri signing enabled..."
@@ -637,12 +650,22 @@ jobs:
           Write-Output "Private key is set: $keySet"
           Write-Output "Password is set: $passSet"
           
+          # Also set alternative env vars that Tauri might use
+          $env:TAURI_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY
+          $env:TAURI_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          
           pnpm tauri build --target ${{ matrix.target }}
           
           Write-Output "Build complete. Looking for signature files..."
           Write-Output "=== All .sig files in target directory ==="
-          Get-ChildItem -Path "src-tauri\target" -Filter "*.sig" -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-          if ($LASTEXITCODE -ne 0) { Write-Output "No .sig files found" }
+          $sigFiles = Get-ChildItem -Path "src-tauri\target" -Filter "*.sig" -Recurse -ErrorAction SilentlyContinue
+          if ($sigFiles) {
+            $sigFiles | ForEach-Object { Write-Output $_.FullName }
+          } else {
+            Write-Output "WARNING: No .sig files found!"
+            Write-Output "Checking what files were created:"
+            Get-ChildItem -Path "src-tauri\target" -Include "*.msi","*.exe","*.zip" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object { Write-Output $_.FullName }
+          }
           
           Write-Output "=== Bundle directory contents ==="
           Get-ChildItem -Path "src-tauri\target\${{ matrix.target }}\release\bundle\" -ErrorAction SilentlyContinue
@@ -702,6 +725,14 @@ jobs:
                 $altSigFiles | ForEach-Object { Write-Host "  - $($_.Name)" }
                 Copy-Item $altSigFiles[0] -Destination "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi.sig"
                 Write-Host "Copied alternative signature: $($altSigFiles[0].Name)"
+              } elseif ($env:TAURI_SIGNING_PRIVATE_KEY) {
+                Write-Host "Attempting to generate MSI signature manually..."
+                # Create a temporary file with the private key
+                $keyFile = New-TemporaryFile
+                Set-Content -Path $keyFile -Value $env:TAURI_SIGNING_PRIVATE_KEY
+                # Sign the MSI file
+                & pnpm tauri signer sign --private-key $keyFile --password $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
+                Remove-Item $keyFile
               }
             }
           }
@@ -710,6 +741,15 @@ jobs:
           $exeFiles = Get-ChildItem -Path "src-tauri\target\${{ matrix.target }}\release\bundle\nsis\*.exe" -ErrorAction SilentlyContinue
           if ($exeFiles) {
             Copy-Item $exeFiles[0] -Destination "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
+            
+            # Sign the NSIS installer if we have signing keys
+            if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+              Write-Host "Signing NSIS installer..."
+              $keyFile = New-TemporaryFile
+              Set-Content -Path $keyFile -Value $env:TAURI_SIGNING_PRIVATE_KEY
+              & pnpm tauri signer sign --private-key $keyFile --password $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
+              Remove-Item $keyFile
+            }
           }
           
           # Final check of dist directory
@@ -731,6 +771,12 @@ jobs:
           if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
             # Copy DMG for manual installation
             cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.dmg || true
+            
+            # Sign the DMG if we have signing keys
+            if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.dmg" ]]; then
+              echo "Signing DMG file..."
+              echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.dmg" || echo "DMG signing failed"
+            fi
             
             # Check if app.tar.gz already exists (Tauri might create it)
             if [[ -f "src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app.tar.gz" ]]; then
@@ -771,6 +817,12 @@ jobs:
           else
             # Copy DMG for manual installation
             cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.dmg || true
+            
+            # Sign the DMG if we have signing keys
+            if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.dmg" ]]; then
+              echo "Signing DMG file..."
+              echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.dmg" || echo "DMG signing failed"
+            fi
             
             # Check if app.tar.gz already exists (Tauri might create it)
             if [[ -f "src-tauri/target/${{ matrix.target }}/release/bundle/macos/JaTerm.app.tar.gz" ]]; then
@@ -854,6 +906,12 @@ jobs:
           # Copy deb package
           cp src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.deb || true
           
+          # Sign the deb package if we have signing keys
+          if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.deb" ]]; then
+            echo "Signing deb package..."
+            echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.deb" || echo "Deb signing failed"
+          fi
+          
           # Make AppImage executable
           chmod +x dist/*.AppImage || true
           # Copy helper (gnu)
@@ -869,6 +927,37 @@ jobs:
           
           echo "=== Final dist directory contents ==="
           ls -la dist/
+          
+      - name: Verify signatures exist
+        shell: bash
+        run: |
+          echo "=== Verifying signatures for all release artifacts ==="
+          MISSING_SIGS=""
+          
+          # Check each artifact type that needs a signature
+          for file in dist/*.dmg dist/*.AppImage dist/*.deb dist/*.msi dist/*.exe dist/*.tar.gz; do
+            if [[ -f "$file" ]]; then
+              filename=$(basename "$file")
+              # Skip signature files themselves and helper binaries
+              if [[ ! "$filename" =~ \.sig$ ]] && [[ ! "$filename" =~ ^jaterm-agent ]]; then
+                if [[ ! -f "${file}.sig" ]]; then
+                  echo "WARNING: Missing signature for $filename"
+                  MISSING_SIGS="$MISSING_SIGS $filename"
+                else
+                  echo "✓ Found signature for $filename"
+                fi
+              fi
+            fi
+          done
+          
+          if [[ -n "$MISSING_SIGS" ]]; then
+            echo "ERROR: Missing signatures for:$MISSING_SIGS"
+            echo "This will cause auto-updater to fail!"
+            # Don't fail the build, but make it very visible
+            echo "::warning::Missing signature files for:$MISSING_SIGS"
+          else
+            echo "All artifacts have signatures!"
+          fi
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
