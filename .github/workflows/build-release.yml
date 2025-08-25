@@ -54,8 +54,17 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Get the last tag for fallback
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # When running on a tag, get the PREVIOUS tag for comparison
+          # If we're on a tag, git describe returns the current tag, so we need the one before it
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # Get the second most recent tag
+            LAST_TAG=$(git tag --sort=-version:refname | head -2 | tail -1 2>/dev/null || echo "")
+            echo "Running on tag, using previous tag: $LAST_TAG"
+          else
+            # On branch, get the most recent tag
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            echo "Running on branch, using last tag: $LAST_TAG"
+          fi
           echo "last_tag=$LAST_TAG" >> $GITHUB_OUTPUT
           
           # Try to generate AI release notes
