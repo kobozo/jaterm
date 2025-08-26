@@ -311,11 +311,28 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     
     setMenu({ x: e.clientX, y: e.clientY });
   };
+  
+  const onMouseDown = async (e: React.MouseEvent) => {
+    // Middle click paste (button 1)
+    if (e.button === 1 && termSettings.pasteOnMiddleClick) {
+      e.preventDefault();
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && id) {
+          bufferedWrite(text);
+        }
+      } catch {
+        // Silently ignore clipboard errors
+      }
+    }
+    // Also handle focus
+    onFocusPane?.(id);
+  };
 
   return (
     <div
       style={{ height: '100%', width: '100%', position: 'relative', boxSizing: 'border-box', border: '1px solid #444', borderRadius: 4, minHeight: 0, overflow: 'hidden' }}
-      onMouseDown={() => onFocusPane?.(id)}
+      onMouseDown={onMouseDown}
       onContextMenu={onCtx}
     >
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />

@@ -28,6 +28,7 @@ export interface TerminalSettings {
   bellStyle: 'none' | 'visual' | 'sound' | 'both';
   copyOnSelect: boolean;
   rightClickSelectsWord: boolean;
+  pasteOnMiddleClick: boolean;
 }
 
 export interface EditorSettings {
@@ -71,7 +72,8 @@ export const DEFAULT_CONFIG: GlobalConfig = {
     scrollback: 1000,
     bellStyle: 'visual',
     copyOnSelect: false,
-    rightClickSelectsWord: true
+    rightClickSelectsWord: true,
+    pasteOnMiddleClick: true
   },
   editor: {
     wordWrap: true,

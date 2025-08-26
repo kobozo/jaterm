@@ -260,6 +260,23 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
     
     setMenu({ x: e.clientX, y: e.clientY });
   };
+  
+  const onMouseDown = async (e: React.MouseEvent) => {
+    // Middle click paste (button 1)
+    if (e.button === 1 && terminalSettings.pasteOnMiddleClick) {
+      e.preventDefault();
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && id) {
+          ptyWrite({ ptyId: id, data: text });
+        }
+      } catch {
+        // Silently ignore clipboard errors
+      }
+    }
+    // Also handle focus
+    onFocusPane?.(id);
+  };
   React.useEffect(() => {
     const onCloseMenu = () => setMenu(null);
     window.addEventListener('click', onCloseMenu);
@@ -298,7 +315,7 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
         minHeight: 0,
         overflow: 'hidden',
       }}
-      onMouseDown={() => onFocusPane?.(id)}
+      onMouseDown={onMouseDown}
       onContextMenu={onCtx}
     >
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
