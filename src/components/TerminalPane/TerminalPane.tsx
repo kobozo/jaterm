@@ -266,13 +266,13 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
     setMenu({ x: e.clientX, y: e.clientY });
   };
   
-  const onMouseDown = async (e: React.MouseEvent) => {
+  const onMouseDown = (e: React.MouseEvent) => {
     // Middle click paste (button 1)
     if (e.button === 1 && terminalSettings.pasteOnMiddleClick) {
       e.preventDefault();
       e.stopPropagation();
-      try {
-        const text = await navigator.clipboard.readText();
+      // Read clipboard synchronously in the event handler to maintain user gesture
+      navigator.clipboard.readText().then(text => {
         if (text && id) {
           if (terminalSettings.confirmPaste) {
             setPasteConfirm({ content: text, source: 'middle-click' });
@@ -280,9 +280,9 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
             ptyWrite({ ptyId: id, data: text });
           }
         }
-      } catch {
+      }).catch(() => {
         // Silently ignore clipboard errors
-      }
+      });
       return; // Don't process focus or other mouse down handlers
     }
     // Also handle focus for other mouse buttons
@@ -362,8 +362,8 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onCompose?.(); }}>Compose with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async (e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); await copySelection(); }}>Copy Selection</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async (e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); await pasteClipboard(); }}>Paste</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); copySelection(); }}>Copy Selection</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); pasteClipboard(); }}>Paste</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); selectAll(); }}>Select All</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); clearBuffer(); }}>Clear</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />

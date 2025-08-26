@@ -317,13 +317,13 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     setMenu({ x: e.clientX, y: e.clientY });
   };
   
-  const onMouseDown = async (e: React.MouseEvent) => {
+  const onMouseDown = (e: React.MouseEvent) => {
     // Middle click paste (button 1)
     if (e.button === 1 && termSettings.pasteOnMiddleClick) {
       e.preventDefault();
       e.stopPropagation();
-      try {
-        const text = await navigator.clipboard.readText();
+      // Read clipboard synchronously in the event handler to maintain user gesture
+      navigator.clipboard.readText().then(text => {
         if (text && id) {
           if (termSettings.confirmPaste) {
             setPasteConfirm({ content: text, source: 'middle-click' });
@@ -331,9 +331,9 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
             bufferedWrite(text);
           }
         }
-      } catch {
+      }).catch(() => {
         // Silently ignore clipboard errors
-      }
+      });
       return; // Don't process focus or other mouse down handlers
     }
     // Also handle focus for other mouse buttons
@@ -367,21 +367,20 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onCompose?.(); }}>Compose with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async (e) => { 
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { 
             e.stopPropagation(); 
             e.preventDefault(); 
             setMenu(null);
             try { 
               const sel = term.getSelection?.() || ''; 
-              if (sel) await navigator.clipboard.writeText(sel); 
+              if (sel) navigator.clipboard.writeText(sel); 
             } catch {} 
           }}>Copy Selection</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async (e) => { 
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { 
             e.stopPropagation();
             e.preventDefault();
             setMenu(null);
-            try { 
-              const text = await navigator.clipboard.readText(); 
+            navigator.clipboard.readText().then(text => {
               if (text) {
                 if (termSettings.confirmPaste) {
                   setPasteConfirm({ content: text, source: 'context-menu' });
@@ -389,7 +388,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
                   bufferedWrite(text);
                 }
               }
-            } catch {} 
+            }).catch(() => {}); 
           }}>Paste</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); try { (term as any).selectAll?.(); } catch {} }}>Select All</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); try { term.clear?.(); } catch {} }}>Clear</div>
