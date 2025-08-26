@@ -3,6 +3,9 @@ import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { onSshExit, onSshOutput, sshResize, sshWrite, sshHomeDir } from '@/types/ipc';
 import { useTerminal } from './TerminalPane/useTerminal';
+import { getCachedConfig, saveGlobalConfig } from '@/services/settings';
+import { DEFAULT_CONFIG } from '@/types/settings';
+import PasteConfirmModal from './PasteConfirmModal';
 
 type Props = {
   id: string; // channelId
@@ -26,6 +29,10 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   const openedAtRef = useRef<number>(Date.now());
   const decoderRef = useRef<TextDecoder | null>(null);
   const IS_DEV = import.meta.env.DEV;
+  
+  // Get terminal settings
+  const globalConfig = getCachedConfig();
+  const termSettings = globalConfig?.terminal || DEFAULT_CONFIG.terminal;
   
   // Keystroke buffering for better performance
   const writeBufferRef = useRef<string>('');
@@ -59,6 +66,10 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   // Only allow a single correction per pane (on open), do not reset on cwd changes
   useEffect(() => { correctedRef.current = false; openedAtRef.current = Date.now(); }, [id]);
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const [pasteConfirm, setPasteConfirm] = React.useState<{
+    content: string;
+    source: 'middle-click' | 'context-menu';
+  } | null>(null);
   React.useEffect(() => {
     const onCloseMenu = () => setMenu(null);
     window.addEventListener('click', onCloseMenu);
@@ -104,6 +115,21 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     if (!containerRef.current) return;
     if (IS_DEV) console.info('[ssh] attach terminal', id);
     attach(containerRef.current);
+    
+    // Request clipboard permission on mount to prevent browser paste menu
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      // Write empty string to trigger permission grant
+      navigator.clipboard.writeText('').catch(() => {});
+    }
+    
+    // Also try to request read permission if Permissions API is available
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'clipboard-read' as any })
+        .catch(() => {});
+      navigator.permissions.query({ name: 'clipboard-write' as any })
+        .catch(() => {});
+    }
+    
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
@@ -204,6 +230,16 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
         }
       } catch {}
     });
+    
+    // Copy on select functionality
+    const selectionSub = termSettings.copyOnSelect ? term.onSelectionChange(() => {
+      const selection = term.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection).catch(() => {
+          // Silently ignore clipboard errors
+        });
+      }
+    }) : null;
     let unlisten: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
     onSshOutput((e) => {
@@ -260,37 +296,139 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
       keySub.dispose();
       resizeSub.dispose();
       titleSub?.dispose?.();
+      selectionSub?.dispose();
       elem?.removeEventListener('focusin', handleFocus);
       elem?.removeEventListener('mousedown', handleFocus);
       if (unlisten) unlisten();
       if (unlistenExit) unlistenExit();
     };
-  }, [id, term]);
+  }, [id, term, termSettings.copyOnSelect]);
+
+  const onCtx = (e: React.MouseEvent) => {
+    e.preventDefault();
+    
+    // Right-click selects word if enabled
+    if (termSettings.rightClickSelectsWord) {
+      // Get the terminal element's bounding rect
+      const rect = (term as any).element?.getBoundingClientRect();
+      if (rect) {
+        // Calculate the position relative to the terminal
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Convert to cell coordinates
+        const col = Math.floor(x / ((term as any).charMeasure?.width || 9));
+        const row = Math.floor(y / ((term as any).charMeasure?.height || 17));
+        
+        // Select word at position
+        try {
+          (term as any).selectWordAt?.(col, row);
+        } catch (err) {
+          // If the method doesn't exist or fails, silently continue
+        }
+      }
+    }
+    
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+  
+  const onMouseDown = (e: React.MouseEvent) => {
+    // Middle click paste (button 1)
+    if (e.button === 1 && termSettings.pasteOnMiddleClick) {
+      e.preventDefault();
+      e.stopPropagation();
+      // Read clipboard synchronously in the event handler to maintain user gesture
+      navigator.clipboard.readText().then(text => {
+        if (text && id) {
+          if (termSettings.confirmPaste) {
+            setPasteConfirm({ content: text, source: 'middle-click' });
+          } else {
+            bufferedWrite(text);
+          }
+        }
+      }).catch(() => {
+        // Silently ignore clipboard errors
+      });
+      return; // Don't process focus or other mouse down handlers
+    }
+    // Also handle focus for other mouse buttons
+    onFocusPane?.(id);
+  };
 
   return (
     <div
       style={{ height: '100%', width: '100%', position: 'relative', boxSizing: 'border-box', border: '1px solid #444', borderRadius: 4, minHeight: 0, overflow: 'hidden' }}
-      onMouseDown={() => onFocusPane?.(id)}
-      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+      onMouseDown={onMouseDown}
+      onAuxClick={(e) => {
+        // Handle middle click specifically
+        if (e.button === 1 && termSettings.pasteOnMiddleClick) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
+      onContextMenu={onCtx}
     >
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
       {onClose && (
         <button onClick={() => onClose(id)} style={{ position: 'absolute', right: 6, top: 6, fontSize: 12 }} title="Close SSH terminal">×</button>
       )}
       {menu && (
-        <div style={{ position: 'fixed', left: menu.x, top: menu.y, background: '#222', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 4, zIndex: 20, minWidth: 180 }}>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'row'); setMenu(null); }}>Split Horizontally</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'column'); setMenu(null); }}>Split Vertically</div>
+        <div 
+          style={{ position: 'fixed', left: menu.x, top: menu.y, background: '#222', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 4, zIndex: 20, minWidth: 180 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onSplit?.(id, 'row'); }}>Split Horizontally</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onSplit?.(id, 'column'); }}>Split Vertically</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onCompose?.(); setMenu(null); }}>Compose with AI</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onCompose?.(); }}>Compose with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const sel = term.getSelection?.() || ''; if (sel) await navigator.clipboard.writeText(sel); } catch {} setMenu(null); }}>Copy Selection</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const text = await navigator.clipboard.readText(); if (text) bufferedWrite(text); } catch {} setMenu(null); }}>Paste</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { try { (term as any).selectAll?.(); } catch {} setMenu(null); }}>Select All</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { try { term.clear?.(); } catch {} setMenu(null); }}>Clear</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { 
+            e.stopPropagation(); 
+            e.preventDefault(); 
+            setMenu(null);
+            try { 
+              const sel = term.getSelection?.() || ''; 
+              if (sel) navigator.clipboard.writeText(sel); 
+            } catch {} 
+          }}>Copy Selection</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { 
+            e.stopPropagation();
+            e.preventDefault();
+            setMenu(null);
+            navigator.clipboard.readText().then(text => {
+              if (text) {
+                if (termSettings.confirmPaste) {
+                  setPasteConfirm({ content: text, source: 'context-menu' });
+                } else {
+                  bufferedWrite(text);
+                }
+              }
+            }).catch(() => {}); 
+          }}>Paste</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); try { (term as any).selectAll?.(); } catch {} }}>Select All</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); try { term.clear?.(); } catch {} }}>Clear</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-          <div style={{ padding: '6px 10px', cursor: 'pointer', color: '#ff7777' }} onClick={() => { onClose?.(id); setMenu(null); }}>Close Pane</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer', color: '#ff7777' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onClose?.(id); }}>Close Pane</div>
         </div>
+      )}
+      {pasteConfirm && (
+        <PasteConfirmModal
+          content={pasteConfirm.content}
+          source={pasteConfirm.source}
+          onConfirm={() => {
+            bufferedWrite(pasteConfirm.content);
+            setPasteConfirm(null);
+          }}
+          onCancel={() => setPasteConfirm(null)}
+          onDontAskAgain={async () => {
+            // Update the global config to disable confirmation
+            const config = getCachedConfig();
+            if (config) {
+              config.terminal.confirmPaste = false;
+              await saveGlobalConfig(config);
+            }
+          }}
+        />
       )}
     </div>
   );

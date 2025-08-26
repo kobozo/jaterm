@@ -463,6 +463,15 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
                 <span>Right Click Selects Word</span>
               </label>
 
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <input
+                  type="checkbox"
+                  checked={config.terminal.confirmPaste}
+                  onChange={(e) => updateConfig(c => { c.terminal.confirmPaste = e.target.checked; })}
+                />
+                <span>Confirm Before Pasting</span>
+              </label>
+
               {/* Preview */}
               <div style={{ marginTop: '20px' }}>
                 <label style={labelStyle}>Preview</label>
