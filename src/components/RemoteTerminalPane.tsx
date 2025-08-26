@@ -3,7 +3,7 @@ import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { onSshExit, onSshOutput, sshResize, sshWrite, sshHomeDir } from '@/types/ipc';
 import { useTerminal } from './TerminalPane/useTerminal';
-import { getCachedConfig, updateGlobalConfig } from '@/services/settings';
+import { getCachedConfig, saveGlobalConfig } from '@/services/settings';
 import { DEFAULT_CONFIG } from '@/types/settings';
 import PasteConfirmModal from './PasteConfirmModal';
 
@@ -390,7 +390,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
             const config = getCachedConfig();
             if (config) {
               config.terminal.confirmPaste = false;
-              await updateGlobalConfig(config);
+              await saveGlobalConfig(config);
             }
           }}
         />

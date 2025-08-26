@@ -4,7 +4,7 @@ import '@xterm/xterm/css/xterm.css';
 import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
 import { homeDir } from '@tauri-apps/api/path';
 import { FitAddon } from '@xterm/addon-fit';
-import { getCachedConfig, updateGlobalConfig } from '@/services/settings';
+import { getCachedConfig, saveGlobalConfig } from '@/services/settings';
 import { DEFAULT_CONFIG } from '@/types/settings';
 import PasteConfirmModal from '../PasteConfirmModal';
 
@@ -372,7 +372,7 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
             const config = getCachedConfig();
             if (config) {
               config.terminal.confirmPaste = false;
-              await updateGlobalConfig(config);
+              await saveGlobalConfig(config);
             }
           }}
         />
