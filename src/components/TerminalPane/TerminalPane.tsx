@@ -4,8 +4,9 @@ import '@xterm/xterm/css/xterm.css';
 import { onPtyExit, onPtyOutput, ptyResize, ptyWrite } from '@/types/ipc';
 import { homeDir } from '@tauri-apps/api/path';
 import { FitAddon } from '@xterm/addon-fit';
-import { getCachedConfig } from '@/services/settings';
+import { getCachedConfig, updateGlobalConfig } from '@/services/settings';
 import { DEFAULT_CONFIG } from '@/types/settings';
+import PasteConfirmModal from '../PasteConfirmModal';
 
 type Props = { id: string; desiredCwd?: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void; onSplit?: (id: string, dir: 'row' | 'column') => void; onCompose?: () => void; onTerminalEvent?: (id: string, event: any) => void };
 
@@ -233,6 +234,10 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
   }, [id, term, terminalSettings.copyOnSelect]);
 
   const [menu, setMenu] = React.useState<{x:number;y:number}|null>(null);
+  const [pasteConfirm, setPasteConfirm] = React.useState<{
+    content: string;
+    source: 'middle-click' | 'context-menu';
+  } | null>(null);
   const onCtx = (e: React.MouseEvent) => {
     e.preventDefault();
     
@@ -268,7 +273,11 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
       try {
         const text = await navigator.clipboard.readText();
         if (text && id) {
-          ptyWrite({ ptyId: id, data: text });
+          if (terminalSettings.confirmPaste) {
+            setPasteConfirm({ content: text, source: 'middle-click' });
+          } else {
+            ptyWrite({ ptyId: id, data: text });
+          }
         }
       } catch {
         // Silently ignore clipboard errors
@@ -293,7 +302,13 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
   const pasteClipboard = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      if (text) ptyWrite({ ptyId: id, data: text });
+      if (text) {
+        if (terminalSettings.confirmPaste) {
+          setPasteConfirm({ content: text, source: 'context-menu' });
+        } else {
+          ptyWrite({ ptyId: id, data: text });
+        }
+      }
     } catch {}
   };
   const selectAll = () => {
@@ -342,6 +357,25 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer', color: '#ff7777' }} onClick={() => { onClose?.(id); setMenu(null); }}>Close Pane</div>
         </div>
+      )}
+      {pasteConfirm && (
+        <PasteConfirmModal
+          content={pasteConfirm.content}
+          source={pasteConfirm.source}
+          onConfirm={() => {
+            ptyWrite({ ptyId: id, data: pasteConfirm.content });
+            setPasteConfirm(null);
+          }}
+          onCancel={() => setPasteConfirm(null)}
+          onDontAskAgain={async () => {
+            // Update the global config to disable confirmation
+            const config = getCachedConfig();
+            if (config) {
+              config.terminal.confirmPaste = false;
+              await updateGlobalConfig(config);
+            }
+          }}
+        />
       )}
     </div>
   );

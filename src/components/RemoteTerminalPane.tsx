@@ -3,8 +3,9 @@ import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { onSshExit, onSshOutput, sshResize, sshWrite, sshHomeDir } from '@/types/ipc';
 import { useTerminal } from './TerminalPane/useTerminal';
-import { getCachedConfig } from '@/services/settings';
+import { getCachedConfig, updateGlobalConfig } from '@/services/settings';
 import { DEFAULT_CONFIG } from '@/types/settings';
+import PasteConfirmModal from './PasteConfirmModal';
 
 type Props = {
   id: string; // channelId
@@ -65,6 +66,10 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   // Only allow a single correction per pane (on open), do not reset on cwd changes
   useEffect(() => { correctedRef.current = false; openedAtRef.current = Date.now(); }, [id]);
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const [pasteConfirm, setPasteConfirm] = React.useState<{
+    content: string;
+    source: 'middle-click' | 'context-menu';
+  } | null>(null);
   React.useEffect(() => {
     const onCloseMenu = () => setMenu(null);
     window.addEventListener('click', onCloseMenu);
@@ -319,7 +324,11 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
       try {
         const text = await navigator.clipboard.readText();
         if (text && id) {
-          bufferedWrite(text);
+          if (termSettings.confirmPaste) {
+            setPasteConfirm({ content: text, source: 'middle-click' });
+          } else {
+            bufferedWrite(text);
+          }
         }
       } catch {
         // Silently ignore clipboard errors
@@ -347,12 +356,44 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onCompose?.(); setMenu(null); }}>Compose with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const sel = term.getSelection?.() || ''; if (sel) await navigator.clipboard.writeText(sel); } catch {} setMenu(null); }}>Copy Selection</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { try { const text = await navigator.clipboard.readText(); if (text) bufferedWrite(text); } catch {} setMenu(null); }}>Paste</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async () => { 
+            try { 
+              const text = await navigator.clipboard.readText(); 
+              if (text) {
+                if (termSettings.confirmPaste) {
+                  setPasteConfirm({ content: text, source: 'context-menu' });
+                  setMenu(null);
+                } else {
+                  bufferedWrite(text);
+                }
+              }
+            } catch {} 
+            setMenu(null); 
+          }}>Paste</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { try { (term as any).selectAll?.(); } catch {} setMenu(null); }}>Select All</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { try { term.clear?.(); } catch {} setMenu(null); }}>Clear</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer', color: '#ff7777' }} onClick={() => { onClose?.(id); setMenu(null); }}>Close Pane</div>
         </div>
+      )}
+      {pasteConfirm && (
+        <PasteConfirmModal
+          content={pasteConfirm.content}
+          source={pasteConfirm.source}
+          onConfirm={() => {
+            bufferedWrite(pasteConfirm.content);
+            setPasteConfirm(null);
+          }}
+          onCancel={() => setPasteConfirm(null)}
+          onDontAskAgain={async () => {
+            // Update the global config to disable confirmation
+            const config = getCachedConfig();
+            if (config) {
+              config.terminal.confirmPaste = false;
+              await updateGlobalConfig(config);
+            }
+          }}
+        />
       )}
     </div>
   );

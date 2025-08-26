@@ -29,6 +29,7 @@ export interface TerminalSettings {
   copyOnSelect: boolean;
   rightClickSelectsWord: boolean;
   pasteOnMiddleClick: boolean;
+  confirmPaste: boolean;
 }
 
 export interface EditorSettings {
@@ -73,7 +74,8 @@ export const DEFAULT_CONFIG: GlobalConfig = {
     bellStyle: 'visual',
     copyOnSelect: false,
     rightClickSelectsWord: true,
-    pasteOnMiddleClick: true
+    pasteOnMiddleClick: true,
+    confirmPaste: true
   },
   editor: {
     wordWrap: true,
