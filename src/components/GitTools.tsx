@@ -1,6 +1,7 @@
 import React from 'react';
 import { resolvePathAbsolute, sshHomeDir } from '@/types/ipc';
 import { gitStatusViaHelper, gitListChanges, gitDiffFile, GitChange } from '@/services/git';
+import MonacoDiffViewer from './MonacoDiffViewer';
 
 type Props = {
   cwd?: string | null;
@@ -19,11 +20,46 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
   const [files, setFiles] = React.useState<GitChange[]>([]);
   const [selected, setSelected] = React.useState<{ path: string; staged: boolean } | null>(null);
   const [diffText, setDiffText] = React.useState<string>('');
+  const [originalContent, setOriginalContent] = React.useState<string>('');
+  const [modifiedContent, setModifiedContent] = React.useState<string>('');
   const [commitMsg, setCommitMsg] = React.useState<string>('');
   const [busy, setBusy] = React.useState<boolean>(false);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
 
   async function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+
+  // Parse unified diff format to extract original and modified content
+  function parseDiff(diff: string): { original: string; modified: string } {
+    const lines = diff.split('\n');
+    const original: string[] = [];
+    const modified: string[] = [];
+    
+    let inHunk = false;
+    for (const line of lines) {
+      if (line.startsWith('@@')) {
+        inHunk = true;
+        continue;
+      }
+      if (!inHunk) continue;
+      
+      if (line.startsWith('-')) {
+        // Line removed in modified version
+        original.push(line.substring(1));
+      } else if (line.startsWith('+')) {
+        // Line added in modified version
+        modified.push(line.substring(1));
+      } else if (line.startsWith(' ')) {
+        // Context line - appears in both
+        original.push(line.substring(1));
+        modified.push(line.substring(1));
+      }
+    }
+    
+    return {
+      original: original.join('\n'),
+      modified: modified.join('\n')
+    };
+  }
 
   async function sshHomeDirWithRetry(id: string, tries = 40, delayMs = 15): Promise<string> {
     let lastErr: any = null;
@@ -133,10 +169,17 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
         const exists = ch.find((c) => c.path === selected.path && c.staged === selected.staged);
         if (exists) {
           const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, selected.path, selected.staged);
-          if (dt !== diffText) setDiffText(dt);
+          if (dt !== diffText) {
+            setDiffText(dt);
+            const { original, modified } = parseDiff(dt);
+            setOriginalContent(original);
+            setModifiedContent(modified);
+          }
         } else {
           setSelected(null);
           setDiffText('');
+          setOriginalContent('');
+          setModifiedContent('');
         }
       }
     } catch (e: any) {
@@ -302,6 +345,9 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
             const abs = kind === 'ssh' ? (cwd as string) : await resolvePathAbsolute(cwd!);
             const dt = await gitDiffFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, f.path, stagedFlag);
             setDiffText(dt);
+            const { original, modified } = parseDiff(dt);
+            setOriginalContent(original);
+            setModifiedContent(modified);
           }}>
             {badge(code)}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flex: 1, textDecoration: isDeleted ? 'line-through' as const : 'none' }}>
@@ -504,20 +550,49 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
           {renderTree(buildTree(files.filter(f => !f.staged)), 0, false)}
         </ul>
       </div>
-      {/* Right: diff viewer (simple pre styled) */}
-      <div style={{ flex: 1, minWidth: 0, padding: 8, boxSizing: 'border-box', overflow: 'auto' }}>
+      {/* Right: diff viewer with Monaco */}
+      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
         {selected ? (
-          <div>
-            <div style={{ marginBottom: 8, opacity: 0.8 }}>{selected.staged ? 'Staged' : 'Working tree'} · {selected.path}</div>
-            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#1e1e1e', color: '#ddd', padding: 12, borderRadius: 6 }}>
-              {diffText.split('\n').map((line, idx) => {
-                const color = line.startsWith('+') ? '#8fe18f' : line.startsWith('-') ? '#f0a1a1' : line.startsWith('@@') ? '#8fbbe1' : '#ddd';
-                return <div key={idx} style={{ color }}>{line}</div>;
-              })}
-            </pre>
-          </div>
+          <MonacoDiffViewer
+            originalContent={originalContent}
+            modifiedContent={modifiedContent}
+            fileName={selected.path}
+            isStaged={selected.staged}
+            onStage={!selected.staged ? async () => {
+              if (!cwd) return;
+              setBusy(true);
+              try {
+                const abs = kind === 'ssh' ? cwd : await resolvePathAbsolute(cwd);
+                const { gitStageFile } = await import('@/services/git');
+                await gitStageFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, selected.path);
+                await refresh();
+              } finally {
+                setBusy(false);
+              }
+            } : undefined}
+            onUnstage={selected.staged ? async () => {
+              if (!cwd) return;
+              setBusy(true);
+              try {
+                const abs = kind === 'ssh' ? cwd : await resolvePathAbsolute(cwd);
+                const { gitUnstageFile } = await import('@/services/git');
+                await gitUnstageFile({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!, selected.path);
+                await refresh();
+              } finally {
+                setBusy(false);
+              }
+            } : undefined}
+          />
         ) : (
-          <div style={{ opacity: 0.8 }}>Select a file to view diff.</div>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            height: '100%',
+            color: '#888'
+          }}>
+            Select a file to view diff
+          </div>
         )}
       </div>
     </div>
