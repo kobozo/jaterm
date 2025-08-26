@@ -1341,24 +1341,17 @@ pub async fn ssh_write(
         (ch.chan.clone(), s.lock.clone())
     };
 
-    // Try to acquire locks with timeout to avoid blocking
-    let _sess_guard = match sess_lock.try_lock() {
-        Ok(g) => g,
-        Err(_) => {
-            // If we can't get the lock immediately, wait a tiny bit and try again
-            std::thread::sleep(std::time::Duration::from_micros(100));
-            sess_lock.lock().map_err(|_| "sess lock")?
-        }
-    };
+    // Try to acquire locks without blocking - just retry immediately if needed
+    // The try_lock pattern avoids blocking the async runtime
+    let _sess_guard = sess_lock
+        .try_lock()
+        .or_else(|_| sess_lock.lock())
+        .map_err(|_| "sess lock")?;
 
-    let mut chan_guard = match chan_arc.try_lock() {
-        Ok(g) => g,
-        Err(_) => {
-            // Brief retry if channel is locked
-            std::thread::sleep(std::time::Duration::from_micros(100));
-            chan_arc.lock().map_err(|_| "channel lock poisoned")?
-        }
-    };
+    let mut chan_guard = chan_arc
+        .try_lock()
+        .or_else(|_| chan_arc.lock())
+        .map_err(|_| "channel lock poisoned")?;
 
     // Perform write - the channel should already be in non-blocking mode
     // Just use write_all since we're already handling locks efficiently

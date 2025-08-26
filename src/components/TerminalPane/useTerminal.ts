@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useEffect, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { applyThemeToTerminal } from '@/config/themes';
 import { getCachedConfig } from '@/services/settings';
 import { DEFAULT_CONFIG } from '@/types/settings';
+import { isMacOS } from '@/utils/platform';
 
 export function useTerminal(id: string, options?: { theme?: string; fontSize?: number; fontFamily?: string }) {
   // Get global settings or use defaults
@@ -22,6 +24,15 @@ export function useTerminal(id: string, options?: { theme?: string; fontSize?: n
 
   const attach = useCallback((el: HTMLDivElement) => {
     term.open(el);
+    
+    // On macOS, use the Canvas addon instead of WebGL to avoid WKWebView rendering issues
+    // This prevents missing/slow keystrokes in release builds
+    // The Canvas addon provides better compatibility with Safari/WKWebView
+    if (isMacOS()) {
+      const canvasAddon = new CanvasAddon();
+      term.loadAddon(canvasAddon);
+    }
+    
     // Apply theme if specified
     if (options?.theme) {
       applyThemeToTerminal(term, options.theme);
