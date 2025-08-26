@@ -353,18 +353,21 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
         </button>
       )}
       {menu && (
-        <div style={{ position: 'fixed', left: menu.x, top: menu.y, background: '#222', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 4, zIndex: 20, minWidth: 180 }}>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'row'); setMenu(null); }}>Split Horizontally</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onSplit?.(id, 'column'); setMenu(null); }}>Split Vertically</div>
+        <div 
+          style={{ position: 'fixed', left: menu.x, top: menu.y, background: '#222', color: '#eee', border: '1px solid #444', borderRadius: 4, padding: 4, zIndex: 20, minWidth: 180 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onSplit?.(id, 'row'); }}>Split Horizontally</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onSplit?.(id, 'column'); }}>Split Vertically</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { onCompose?.(); setMenu(null); }}>Compose with AI</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onCompose?.(); }}>Compose with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { copySelection(); setMenu(null); }}>Copy Selection</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { pasteClipboard(); setMenu(null); }}>Paste</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { selectAll(); setMenu(null); }}>Select All</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={() => { clearBuffer(); setMenu(null); }}>Clear</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async (e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); await copySelection(); }}>Copy Selection</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={async (e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); await pasteClipboard(); }}>Paste</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); selectAll(); }}>Select All</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); clearBuffer(); }}>Clear</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
-          <div style={{ padding: '6px 10px', cursor: 'pointer', color: '#ff7777' }} onClick={() => { onClose?.(id); setMenu(null); }}>Close Pane</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer', color: '#ff7777' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onClose?.(id); }}>Close Pane</div>
         </div>
       )}
       {pasteConfirm && (
