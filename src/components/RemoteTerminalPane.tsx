@@ -321,6 +321,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     // Middle click paste (button 1)
     if (e.button === 1 && termSettings.pasteOnMiddleClick) {
       e.preventDefault();
+      e.stopPropagation();
       try {
         const text = await navigator.clipboard.readText();
         if (text && id) {
@@ -333,8 +334,9 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
       } catch {
         // Silently ignore clipboard errors
       }
+      return; // Don't process focus or other mouse down handlers
     }
-    // Also handle focus
+    // Also handle focus for other mouse buttons
     onFocusPane?.(id);
   };
 
@@ -342,6 +344,13 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     <div
       style={{ height: '100%', width: '100%', position: 'relative', boxSizing: 'border-box', border: '1px solid #444', borderRadius: 4, minHeight: 0, overflow: 'hidden' }}
       onMouseDown={onMouseDown}
+      onAuxClick={(e) => {
+        // Handle middle click specifically
+        if (e.button === 1 && termSettings.pasteOnMiddleClick) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
       onContextMenu={onCtx}
     >
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
