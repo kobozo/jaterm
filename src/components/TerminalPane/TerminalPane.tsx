@@ -68,6 +68,20 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
     if (!containerRef.current) return;
     attach(containerRef.current);
 
+    // Request clipboard permission on mount to prevent browser paste menu
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      // Write empty string to trigger permission grant
+      navigator.clipboard.writeText('').catch(() => {});
+    }
+    
+    // Also try to request read permission if Permissions API is available
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'clipboard-read' as any })
+        .catch(() => {});
+      navigator.permissions.query({ name: 'clipboard-write' as any })
+        .catch(() => {});
+    }
+
     // Load fit addon and size to container
     const fit = new FitAddon();
     fitRef.current = fit;

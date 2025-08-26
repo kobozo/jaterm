@@ -115,6 +115,21 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     if (!containerRef.current) return;
     if (IS_DEV) console.info('[ssh] attach terminal', id);
     attach(containerRef.current);
+    
+    // Request clipboard permission on mount to prevent browser paste menu
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      // Write empty string to trigger permission grant
+      navigator.clipboard.writeText('').catch(() => {});
+    }
+    
+    // Also try to request read permission if Permissions API is available
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'clipboard-read' as any })
+        .catch(() => {});
+      navigator.permissions.query({ name: 'clipboard-write' as any })
+        .catch(() => {});
+    }
+    
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
