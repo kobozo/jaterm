@@ -29,8 +29,13 @@ export function useTerminal(id: string, options?: { theme?: string; fontSize?: n
     // This prevents missing/slow keystrokes in release builds
     // The Canvas addon provides better compatibility with Safari/WKWebView
     if (isMacOS()) {
-      const canvasAddon = new CanvasAddon();
-      term.loadAddon(canvasAddon);
+      try {
+        const canvasAddon = new CanvasAddon();
+        term.loadAddon(canvasAddon);
+      } catch (e) {
+        // Addon might already be loaded or not compatible
+        console.warn('Failed to load Canvas addon:', e);
+      }
     }
     
     // Apply theme if specified

@@ -51,6 +51,8 @@ pub async fn ssh_connect(
     // Explicitly set NO timeout on the TCP socket - crucial for SSH channel operations
     tcp.set_read_timeout(None).ok();
     tcp.set_write_timeout(None).ok();
+    // Disable Nagle's algorithm for better responsiveness (TCP_NODELAY)
+    tcp.set_nodelay(true).ok();
     let mut sess = ssh2::Session::new().map_err(|e| format!("session: {e}"))?;
     sess.set_tcp_stream(tcp.try_clone().map_err(|e| e.to_string())?);
     sess.handshake().map_err(|e| format!("handshake: {e}"))?;
@@ -1299,7 +1301,9 @@ pub async fn ssh_open_shell(
                             n
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            // Instead of sleeping, yield CPU briefly to avoid busy-wait
+                            // This is much more responsive than a 10ms sleep
+                            std::thread::yield_now();
                             continue;
                         }
                         Err(err) => {
