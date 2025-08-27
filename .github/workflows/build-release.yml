@@ -760,14 +760,29 @@ jobs:
                 Write-Host "Copied alternative signature: $($altSigFiles[0].Name)"
               } elseif ($env:TAURI_SIGNING_PRIVATE_KEY) {
                 Write-Host "Attempting to generate MSI signature manually..."
-                # Create a temporary file with the private key
-                $keyFile = New-TemporaryFile
-                [System.IO.File]::WriteAllText($keyFile.FullName, $env:TAURI_SIGNING_PRIVATE_KEY, [System.Text.Encoding]::UTF8)
-                # Sign the MSI file
-                $msiPath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
-                Write-Host "Signing MSI at: $msiPath"
-                & pnpm tauri signer sign --private-key "$keyFile" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$msiPath"
-                Remove-Item $keyFile
+                try {
+                  # Debug: Check key format
+                  $keyStart = $env:TAURI_SIGNING_PRIVATE_KEY.Substring(0, [Math]::Min(20, $env:TAURI_SIGNING_PRIVATE_KEY.Length))
+                  Write-Host "Key starts with: $($keyStart -replace '.', '*')" # Masked for security
+                  
+                  # Clean up the key - remove any prefixes and whitespace
+                  $cleanKey = $env:TAURI_SIGNING_PRIVATE_KEY
+                  # Remove common prefixes if present
+                  $cleanKey = $cleanKey -replace '^base64:', ''
+                  $cleanKey = $cleanKey -replace '^data:.*base64,', ''
+                  $cleanKey = $cleanKey.Trim()
+                  
+                  # Create a temporary file with the private key
+                  $keyFile = New-TemporaryFile
+                  [System.IO.File]::WriteAllText($keyFile.FullName, $cleanKey, [System.Text.Encoding]::UTF8)
+                  # Sign the MSI file
+                  $msiPath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
+                  Write-Host "Signing MSI at: $msiPath"
+                  & pnpm tauri signer sign --private-key "$keyFile" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$msiPath"
+                  Remove-Item $keyFile
+                } catch {
+                  Write-Host "WARNING: Failed to sign MSI: $_"
+                }
               }
             }
           }
@@ -780,12 +795,27 @@ jobs:
             # Sign the NSIS installer if we have signing keys
             if ($env:TAURI_SIGNING_PRIVATE_KEY) {
               Write-Host "Signing NSIS installer..."
-              $keyFile = New-TemporaryFile
-              [System.IO.File]::WriteAllText($keyFile.FullName, $env:TAURI_SIGNING_PRIVATE_KEY, [System.Text.Encoding]::UTF8)
-              $exePath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
-              Write-Host "Signing NSIS at: $exePath"
-              & pnpm tauri signer sign --private-key "$keyFile" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$exePath"
-              Remove-Item $keyFile
+              try {
+                # Debug: Check key format
+                $keyStart = $env:TAURI_SIGNING_PRIVATE_KEY.Substring(0, [Math]::Min(20, $env:TAURI_SIGNING_PRIVATE_KEY.Length))
+                Write-Host "Key starts with: $($keyStart -replace '.', '*')" # Masked for security
+                
+                # Clean up the key - remove any prefixes and whitespace
+                $cleanKey = $env:TAURI_SIGNING_PRIVATE_KEY
+                # Remove common prefixes if present
+                $cleanKey = $cleanKey -replace '^base64:', ''
+                $cleanKey = $cleanKey -replace '^data:.*base64,', ''
+                $cleanKey = $cleanKey.Trim()
+                
+                $keyFile = New-TemporaryFile
+                [System.IO.File]::WriteAllText($keyFile.FullName, $cleanKey, [System.Text.Encoding]::UTF8)
+                $exePath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
+                Write-Host "Signing NSIS at: $exePath"
+                & pnpm tauri signer sign --private-key "$keyFile" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$exePath"
+                Remove-Item $keyFile
+              } catch {
+                Write-Host "WARNING: Failed to sign NSIS: $_"
+              }
             }
           }
           
