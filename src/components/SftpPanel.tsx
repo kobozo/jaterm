@@ -272,23 +272,6 @@ export default function SftpPanel({
                         <span style={{ color: '#ffaa00', fontSize: 10 }}>●</span>
                       )}
                     </div>
-                    {!e.is_dir && onOpenFile && (
-                      <button 
-                        disabled={busy} 
-                        onClick={() => onOpenFile(e.path)} 
-                        title={isOpen ? "Go to File" : "Edit File"}
-                        style={{ 
-                          fontSize: 11,
-                          background: isOpen ? '#0078d4' : 'transparent',
-                          color: isOpen ? '#fff' : '#ddd',
-                          padding: '2px 8px',
-                          borderRadius: 3,
-                          border: isOpen ? 'none' : '1px solid #555'
-                        }}
-                      >
-                        {isOpen ? 'Open' : 'Edit'}
-                      </button>
-                    )}
                     <button disabled={busy} onClick={() => download(e)} title={e.is_dir ? 'Download Folder' : 'Download File'}>⬇</button>
                   </div>
                 );
