@@ -5,10 +5,23 @@ type Props = {
   sessionId: string;
   cwd?: string | null;
   onCwdChange?: (next: string) => void;
+  onOpenFile?: (path: string) => void;
   isActive?: boolean;
+  openFiles?: string[];
+  activeFile?: string | null;
+  modifiedFiles?: string[];
 };
 
-export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true }: Props) {
+export default function SftpPanel({ 
+  sessionId, 
+  cwd, 
+  onCwdChange, 
+  onOpenFile, 
+  isActive = true,
+  openFiles = [],
+  activeFile = null,
+  modifiedFiles = []
+}: Props) {
   const [path, setPath] = React.useState<string>('');
   const [entries, setEntries] = React.useState<SftpEntry[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
@@ -220,15 +233,66 @@ export default function SftpPanel({ sessionId, cwd, onCwdChange, isActive = true
             <div style={{ padding: '6px 10px', cursor: canNavigateUp ? 'pointer' : 'default', color: canNavigateUp ? '#ddd' : '#666' }} onClick={() => canNavigateUp && load(parentDir(path))}>..</div>
             {entries
               .filter((e) => showHidden || !e.name.startsWith('.'))
-              .map((e) => (
-              <div key={e.path} style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ flex: 1, cursor: e.is_dir ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: 8 }} onClick={() => e.is_dir && load(e.path)}>
-                  <span className="nf-icon" style={{ width: 18, textAlign: 'center' }}>{nfIconFor(e.name, e.is_dir)}</span>
-                  <span>{e.name}</span>
-                </div>
-                <button disabled={busy} onClick={() => download(e)} title={e.is_dir ? 'Download Folder' : 'Download File'}>⬇</button>
-              </div>
-            ))}
+              .map((e) => {
+                const isOpen = openFiles.includes(e.path);
+                const isActive = activeFile === e.path;
+                const isModified = modifiedFiles.includes(e.path);
+                
+                return (
+                  <div 
+                    key={e.path} 
+                    style={{ 
+                      padding: '6px 10px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 8,
+                      background: isActive ? '#094771' : isOpen ? '#2a2a2a' : 'transparent',
+                      borderLeft: isActive ? '2px solid #007acc' : '2px solid transparent'
+                    }}
+                    onMouseEnter={(ev) => { 
+                      if (!isActive && !isOpen) ev.currentTarget.style.background = '#2a2a2a'; 
+                    }}
+                    onMouseLeave={(ev) => { 
+                      if (!isActive && !isOpen) ev.currentTarget.style.background = 'transparent'; 
+                    }}
+                  >
+                    <div 
+                      style={{ flex: 1, cursor: e.is_dir ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: 8 }} 
+                      onClick={() => e.is_dir && load(e.path)}
+                      onDoubleClick={() => !e.is_dir && onOpenFile && onOpenFile(e.path)}
+                    >
+                      <span className="nf-icon" style={{ width: 18, textAlign: 'center' }}>{nfIconFor(e.name, e.is_dir)}</span>
+                      <span style={{ 
+                        fontWeight: isActive ? 'bold' : 'normal',
+                        color: isActive ? '#fff' : isOpen ? '#e8e8e8' : '#ddd'
+                      }}>
+                        {e.name}
+                      </span>
+                      {isModified && !e.is_dir && (
+                        <span style={{ color: '#ffaa00', fontSize: 10 }}>●</span>
+                      )}
+                    </div>
+                    {!e.is_dir && onOpenFile && (
+                      <button 
+                        disabled={busy} 
+                        onClick={() => onOpenFile(e.path)} 
+                        title={isOpen ? "Go to File" : "Edit File"}
+                        style={{ 
+                          fontSize: 11,
+                          background: isOpen ? '#0078d4' : 'transparent',
+                          color: isOpen ? '#fff' : '#ddd',
+                          padding: '2px 8px',
+                          borderRadius: 3,
+                          border: isOpen ? 'none' : '1px solid #555'
+                        }}
+                      >
+                        {isOpen ? 'Open' : 'Edit'}
+                      </button>
+                    )}
+                    <button disabled={busy} onClick={() => download(e)} title={e.is_dir ? 'Download Folder' : 'Download File'}>⬇</button>
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>

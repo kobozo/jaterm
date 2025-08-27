@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import SplitView from '@/components/SplitView';
-import SftpPanel from '@/components/SftpPanel';
-import EditorPane from '@/components/EditorPane';
+import FileExplorerWithEditor from '@/components/FileExplorerWithEditor';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import RemoteTerminalPane from '@/components/RemoteTerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
@@ -44,8 +43,7 @@ export default function App() {
     activePane: string | null;
     status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean; helperOk?: boolean; helperVersion?: string; helperChecked?: boolean; helperPath?: string | null };
     title?: string;
-    view?: 'terminal' | 'git' | 'ports' | 'sftp' | 'editor';
-    editorFile?: { path: string; isLocal: boolean; modified?: boolean };
+    view?: 'terminal' | 'git' | 'ports' | 'files';
     forwards?: { id: string; type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number; status?: 'starting'|'active'|'error'|'closed' }[];
     detectedPorts?: number[];
     sftpCwd?: string;
@@ -1754,19 +1752,11 @@ export default function App() {
               )}
               <button
                 className="nf-icon"
-                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'sftp' ? '#2b2b2b' : 'transparent', color: t.kind === 'ssh' ? '#ddd' : '#666', cursor: t.kind === 'ssh' ? 'pointer' : 'not-allowed' }}
-                onClick={() => { if (t.kind === 'ssh') setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'sftp' } : tb))); }}
-                title={t.kind === 'ssh' ? 'SFTP' : 'SFTP (SSH only)'}
+                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'files' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
+                onClick={() => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'files' } : tb)))}
+                title="Files"
               >
                 
-              </button>
-              <button
-                className="nf-icon"
-                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'editor' ? '#2b2b2b' : 'transparent', color: t.editorFile ? '#ddd' : '#666', cursor: t.editorFile ? 'pointer' : 'not-allowed' }}
-                onClick={() => { if (t.editorFile) setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'editor' } : tb))); }}
-                title={t.editorFile ? `Edit: ${t.editorFile.path}` : 'Editor (No file open)'}
-              >
-                
               </button>
               {t.kind === 'ssh' && (
                 <button
@@ -1794,88 +1784,19 @@ export default function App() {
                   onStatus={(st) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)))}
                 />
               </div>
-              {/* SFTP view */}
-              <div style={{ display: (t.view === 'sftp') ? 'block' : 'none', height: '100%' }}>
-                {t.kind === 'ssh' && t.sshSessionId ? (
-                  <SftpPanel
-                    sessionId={t.sshSessionId}
-                    cwd={(t as any).sftpCwd || t.status.cwd || t.cwd || undefined}
-                    isActive={t.view === 'sftp'}
-                    onCwdChange={(next) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, sftpCwd: next } : tb)))}
-                  />
-                ) : (
-                  <div style={{ padding: 12, color: '#aaa' }}>Open an SSH session to use SFTP.</div>
-                )}
-              </div>
-              {/* Editor view */}
-              <div style={{ display: (t.view === 'editor') ? 'block' : 'none', height: '100%' }}>
-                {t.editorFile ? (
-                  <EditorPane
-                    filePath={t.editorFile.path}
-                    sessionId={t.kind === 'ssh' ? t.sshSessionId : undefined}
-                    isLocal={t.editorFile.isLocal}
-                    onModified={(modified) => {
-                      setTabs((prev) => prev.map((tb) => 
-                        tb.id === t.id && tb.editorFile 
-                          ? { ...tb, editorFile: { ...tb.editorFile, modified } }
-                          : tb
-                      ));
-                    }}
-                    onSave={() => {
-                      addToast({ title: 'File saved', kind: 'success' } as any);
-                    }}
-                    onClose={() => {
-                      setTabs((prev) => prev.map((tb) => 
-                        tb.id === t.id ? { ...tb, editorFile: undefined, view: 'terminal' } : tb
-                      ));
-                    }}
-                  />
-                ) : (
-                  <div style={{ 
-                    padding: 20, 
-                    color: '#888',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    height: '100%'
-                  }}>
-                    <div style={{ fontSize: 48, marginBottom: 16 }}>📝</div>
-                    <div>No file open</div>
-                    <div style={{ fontSize: 12, marginTop: 8 }}>
-                      Open a file from the terminal or SFTP panel to start editing
-                    </div>
-                    <button
-                      style={{
-                        marginTop: 20,
-                        padding: '8px 16px',
-                        background: '#0078d4',
-                        border: 'none',
-                        borderRadius: 4,
-                        color: '#fff',
-                        cursor: 'pointer'
-                      }}
-                      onClick={() => {
-                        // Open a test file for demonstration
-                        setTabs((prev) => prev.map((tb) => 
-                          tb.id === t.id 
-                            ? { 
-                                ...tb, 
-                                editorFile: { 
-                                  path: '/Users/yannick/Kobozo/jaterm/test-editor.txt',
-                                  isLocal: true,
-                                  modified: false
-                                },
-                                view: 'editor'
-                              }
-                            : tb
-                        ));
-                      }}
-                    >
-                      Open Test File
-                    </button>
-                  </div>
-                )}
+              {/* Files view with integrated editor */}
+              <div style={{ display: (t.view === 'files') ? 'block' : 'none', height: '100%' }}>
+                <FileExplorerWithEditor
+                  isLocal={!(t.kind === 'ssh' && t.sshSessionId)}
+                  sessionId={t.kind === 'ssh' ? t.sshSessionId : undefined}
+                  cwd={(t as any).sftpCwd || t.status.cwd || t.cwd || undefined}
+                  isActive={t.view === 'files'}
+                  onCwdChange={(next) => {
+                    setTabs((prev) => prev.map((tb) => 
+                      tb.id === t.id ? { ...tb, sftpCwd: next } : tb
+                    ));
+                  }}
+                />
               </div>
               {/* Ports view (kept mounted) */}
               <div style={{ display: (t.view === 'ports') ? 'block' : 'none', height: '100%' }}>
@@ -1935,7 +1856,7 @@ export default function App() {
                 />
               </div>
               {/* Terminal/Welcome view (kept mounted) */}
-              <div style={{ display: (t.view === 'git' || t.view === 'ports' || t.view === 'editor' || t.view === 'sftp') ? 'none' : 'block', height: '100%' }}>
+              <div style={{ display: (t.view === 'git' || t.view === 'ports' || t.view === 'files') ? 'none' : 'block', height: '100%' }}>
                 {t.kind === 'settings' ? (
                   <SettingsPane />
                 ) : t.kind === 'ssh' ? (
