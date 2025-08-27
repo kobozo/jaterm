@@ -28,6 +28,8 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   const correctedRef = useRef(false);
   const openedAtRef = useRef<number>(Date.now());
   const decoderRef = useRef<TextDecoder | null>(null);
+  const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const writeBufferRef = useRef<string>('');
   const IS_DEV = import.meta.env.DEV;
   
   // Get terminal settings
