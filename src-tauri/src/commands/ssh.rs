@@ -1189,15 +1189,29 @@ pub async fn ssh_open_shell(
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<String, String> {
-    // Access the session and create/configure the channel in blocking mode
+    // Access the session and create/configure the channel
+    // IMPORTANT: Don't change blocking mode if other channels exist to avoid disrupting them
     let chan = {
         let mut inner = state.inner.lock().map_err(|_| "lock")?;
+        
+        // Check if this is the first channel or if other channels exist
+        let has_other_channels = inner.ssh_channels.values()
+            .any(|ch| ch.session_id == session_id);
+        
         let s = inner
             .ssh
             .get_mut(&session_id)
             .ok_or("ssh session not found")?;
-        // Set to blocking for all channel setup operations
-        s.sess.set_blocking(true);
+        
+        // Only set blocking mode if no other channels exist
+        let was_blocking = if !has_other_channels {
+            s.sess.set_blocking(true);
+            false
+        } else {
+            // Keep current mode for existing channels
+            true
+        };
+        
         let mut chan = s
             .sess
             .channel_session()
@@ -1206,7 +1220,7 @@ pub async fn ssh_open_shell(
         let term = "xterm-256color";
         let sz_cols = cols.unwrap_or(120);
         let sz_rows = rows.unwrap_or(30);
-        // Request PTY with the desired initial size (in blocking mode)
+        // Request PTY with the desired initial size
         chan.request_pty(term, None, Some((sz_cols as u32, sz_rows as u32, 0, 0)))
             .map_err(|e| format!("request_pty: {e}"))?;
         // Merge STDERR into STDOUT so we don't miss prompts/messages
@@ -1221,8 +1235,10 @@ pub async fn ssh_open_shell(
             chan.shell().map_err(|e| format!("shell: {e}"))?;
         }
 
-        // Now switch back to non-blocking after all setup is done
-        s.sess.set_blocking(false);
+        // Only switch to non-blocking if we changed it
+        if !was_blocking {
+            s.sess.set_blocking(false);
+        }
         chan
     };
     // Channel is ready; start a command-processing thread that also reads output
@@ -1238,13 +1254,21 @@ pub async fn ssh_open_shell(
             },
         );
     }
-    // Switch the underlying session to non-blocking for better performance
+    // Ensure session is in non-blocking mode for reading thread
+    // Only do this once when setting up the first channel
     {
         let mut inner = state.inner.lock().map_err(|_| "lock")?;
-        if let Some(sess) = inner.ssh.get_mut(&session_id) {
-            sess.sess.set_blocking(false);
-            // Also set TCP stream to non-blocking for consistency
-            let _ = sess.tcp.set_nonblocking(true);
+        // Check if this is the only channel for this session
+        let channel_count = inner.ssh_channels.values()
+            .filter(|ch| ch.session_id == session_id)
+            .count();
+        if channel_count == 1 {
+            // First channel - ensure non-blocking mode
+            if let Some(sess) = inner.ssh.get_mut(&session_id) {
+                sess.sess.set_blocking(false);
+                // Also set TCP stream to non-blocking for consistency
+                let _ = sess.tcp.set_nonblocking(true);
+            }
         }
     }
     let _ = app.emit(
