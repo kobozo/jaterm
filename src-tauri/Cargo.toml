@@ -1,6 +1,6 @@
 [package]
 name = "jaterm"
-version = "1.5.4"
+version = "1.5.5"
 description = "JATerm Tauri backend"
 authors = ["you"]
 edition = "2021"
