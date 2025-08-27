@@ -922,10 +922,18 @@ export default function App() {
       setActiveTab(tabId);
     } catch (e) {
       console.error('Failed to continue SSH session:', e);
-      addToast({ title: 'SSH Failed', message: String(e), kind: 'error' });
+      addToast({ 
+        title: 'SSH Session Failed', 
+        message: `Failed to open shell on ${opts.host}: ${String(e)}`,
+        kind: 'error',
+        timeout: 10000
+      });
+      
+      // Disconnect and close tab
       try {
         await sshDisconnect(sessionId);
       } catch {}
+      closeTab(tabId);
     }
   }
 
@@ -1065,8 +1073,40 @@ export default function App() {
         await continueOpenSshFor(sessionId, tabId, opts);
       }
     } catch (e) {
-      alert('SSH connection failed: ' + (e as any));
-      console.error('ssh open failed', e);
+      console.error('SSH connection failed:', e);
+      
+      // Parse error message for better user feedback
+      let errorMessage = String(e);
+      let errorTitle = 'SSH Connection Failed';
+      
+      // Common error patterns
+      if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+        errorTitle = 'SSH Connection Timeout';
+        errorMessage = `Unable to connect to ${opts.host}:${opts.port || 22}. The server may be down or unreachable.`;
+      } else if (errorMessage.includes('authentication') || errorMessage.includes('Authentication')) {
+        errorTitle = 'SSH Authentication Failed';
+        errorMessage = 'Invalid credentials or authentication method. Please check your username, password, or SSH key.';
+      } else if (errorMessage.includes('refused') || errorMessage.includes('Connection refused')) {
+        errorTitle = 'Connection Refused';
+        errorMessage = `Connection to ${opts.host}:${opts.port || 22} was refused. The SSH service may not be running.`;
+      } else if (errorMessage.includes('Host not trusted')) {
+        errorTitle = 'Host Key Verification Failed';
+        errorMessage = 'The host key verification was cancelled.';
+      } else if (errorMessage.includes('Network')) {
+        errorTitle = 'Network Error';
+        errorMessage = `Unable to reach ${opts.host}. Please check your network connection.`;
+      }
+      
+      // Show toast with error details
+      addToast({ 
+        title: errorTitle, 
+        message: errorMessage,
+        kind: 'error',
+        timeout: 10000 // Show for 10 seconds
+      });
+      
+      // Close the empty tab that was created
+      closeTab(tabId);
     }
   }
 
