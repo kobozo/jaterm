@@ -762,7 +762,7 @@ jobs:
                 Write-Host "Attempting to generate MSI signature manually..."
                 # Create a temporary file with the private key
                 $keyFile = New-TemporaryFile
-                Set-Content -Path $keyFile -Value $env:TAURI_SIGNING_PRIVATE_KEY
+                [System.IO.File]::WriteAllText($keyFile.FullName, $env:TAURI_SIGNING_PRIVATE_KEY, [System.Text.Encoding]::UTF8)
                 # Sign the MSI file
                 $msiPath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
                 Write-Host "Signing MSI at: $msiPath"
@@ -781,7 +781,7 @@ jobs:
             if ($env:TAURI_SIGNING_PRIVATE_KEY) {
               Write-Host "Signing NSIS installer..."
               $keyFile = New-TemporaryFile
-              Set-Content -Path $keyFile -Value $env:TAURI_SIGNING_PRIVATE_KEY
+              [System.IO.File]::WriteAllText($keyFile.FullName, $env:TAURI_SIGNING_PRIVATE_KEY, [System.Text.Encoding]::UTF8)
               $exePath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
               Write-Host "Signing NSIS at: $exePath"
               & pnpm tauri signer sign --private-key "$keyFile" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$exePath"
