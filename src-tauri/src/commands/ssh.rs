@@ -51,6 +51,8 @@ pub async fn ssh_connect(
     // Explicitly set NO timeout on the TCP socket - crucial for SSH channel operations
     tcp.set_read_timeout(None).ok();
     tcp.set_write_timeout(None).ok();
+    // Disable Nagle's algorithm for better responsiveness (TCP_NODELAY)
+    tcp.set_nodelay(true).ok();
     let mut sess = ssh2::Session::new().map_err(|e| format!("session: {e}"))?;
     sess.set_tcp_stream(tcp.try_clone().map_err(|e| e.to_string())?);
     sess.handshake().map_err(|e| format!("handshake: {e}"))?;
@@ -1299,7 +1301,9 @@ pub async fn ssh_open_shell(
                             n
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            // Instead of sleeping, yield CPU briefly to avoid busy-wait
+                            // This is much more responsive than a 10ms sleep
+                            std::thread::yield_now();
                             continue;
                         }
                         Err(err) => {
@@ -1341,24 +1345,17 @@ pub async fn ssh_write(
         (ch.chan.clone(), s.lock.clone())
     };
 
-    // Try to acquire locks with timeout to avoid blocking
-    let _sess_guard = match sess_lock.try_lock() {
-        Ok(g) => g,
-        Err(_) => {
-            // If we can't get the lock immediately, wait a tiny bit and try again
-            std::thread::sleep(std::time::Duration::from_micros(100));
-            sess_lock.lock().map_err(|_| "sess lock")?
-        }
-    };
+    // Try to acquire locks without blocking - just retry immediately if needed
+    // The try_lock pattern avoids blocking the async runtime
+    let _sess_guard = sess_lock
+        .try_lock()
+        .or_else(|_| sess_lock.lock())
+        .map_err(|_| "sess lock")?;
 
-    let mut chan_guard = match chan_arc.try_lock() {
-        Ok(g) => g,
-        Err(_) => {
-            // Brief retry if channel is locked
-            std::thread::sleep(std::time::Duration::from_micros(100));
-            chan_arc.lock().map_err(|_| "channel lock poisoned")?
-        }
-    };
+    let mut chan_guard = chan_arc
+        .try_lock()
+        .or_else(|_| chan_arc.lock())
+        .map_err(|_| "channel lock poisoned")?;
 
     // Perform write - the channel should already be in non-blocking mode
     // Just use write_all since we're already handling locks efficiently

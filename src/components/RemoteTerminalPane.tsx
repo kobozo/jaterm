@@ -35,32 +35,14 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
   const termSettings = globalConfig?.terminal || DEFAULT_CONFIG.terminal;
   
   // Keystroke buffering for better performance
-  const writeBufferRef = useRef<string>('');
-  const writeTimerRef = useRef<number | null>(null);
-  
-  // Buffered write function to batch rapid keystrokes
+  // Direct write function for immediate responsiveness
   const bufferedWrite = useRef((data: string) => {
-    writeBufferRef.current += data;
-    
-    // Clear any existing timer
-    if (writeTimerRef.current !== null) {
-      clearTimeout(writeTimerRef.current);
+    // Send immediately for maximum responsiveness
+    if (id) {
+      sshWrite({ channelId: id, data });
+      // Feed to event detector
+      onTerminalEvent?.(id, { type: 'input', data });
     }
-    
-    // For single characters or short input, use a very short delay
-    // For longer pastes, send immediately
-    const delay = data.length > 10 ? 0 : 5;
-    
-    writeTimerRef.current = window.setTimeout(() => {
-      if (writeBufferRef.current && id) {
-        const toSend = writeBufferRef.current;
-        writeBufferRef.current = '';
-        sshWrite({ channelId: id, data: toSend });
-        // Feed to event detector
-        onTerminalEvent?.(id, { type: 'input', data: toSend });
-      }
-      writeTimerRef.current = null;
-    }, delay);
   }).current;
   
   // Only allow a single correction per pane (on open), do not reset on cwd changes
