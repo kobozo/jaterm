@@ -763,8 +763,8 @@ jobs:
                 try {
                   $msiPath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
                   Write-Host "Signing MSI at: $msiPath"
-                  # Use cmd.exe echo to avoid PowerShell string interpretation issues
-                  cmd.exe /c "echo %TAURI_SIGNING_PRIVATE_KEY% | pnpm tauri signer sign --private-key - --password %TAURI_SIGNING_PRIVATE_KEY_PASSWORD% $msiPath"
+                  # Use direct string parameter
+                  pnpm tauri signer sign --private-key "$env:TAURI_SIGNING_PRIVATE_KEY" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$msiPath"
                   if (Test-Path "${msiPath}.sig") {
                     Write-Host "MSI signature generated successfully!"
                   } else {
@@ -788,8 +788,8 @@ jobs:
               try {
                 $exePath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
                 Write-Host "Signing NSIS at: $exePath"
-                # Use cmd.exe echo to avoid PowerShell string interpretation issues
-                cmd.exe /c "echo %TAURI_SIGNING_PRIVATE_KEY% | pnpm tauri signer sign --private-key - --password %TAURI_SIGNING_PRIVATE_KEY_PASSWORD% $exePath"
+                # Use direct string parameter
+                pnpm tauri signer sign --private-key "$env:TAURI_SIGNING_PRIVATE_KEY" --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$exePath"
                 if (Test-Path "${exePath}.sig") {
                   Write-Host "NSIS signature generated successfully!"
                 } else {
@@ -824,7 +824,7 @@ jobs:
             # Sign the DMG if we have signing keys
             if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.dmg" ]]; then
               echo "Signing DMG file..."
-              echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.dmg" || echo "DMG signing failed"
+              pnpm tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.dmg" || echo "DMG signing failed"
             fi
             
             # Check if app.tar.gz already exists (Tauri might create it)
@@ -854,7 +854,7 @@ jobs:
               if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.app.tar.gz" ]]; then
                 echo "Attempting to generate signature manually..."
                 # Use tauri signer to generate signature
-                echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.app.tar.gz" || echo "Manual signing failed"
+                pnpm tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_aarch64.app.tar.gz" || echo "Manual signing failed"
               fi
             fi
             
@@ -870,7 +870,7 @@ jobs:
             # Sign the DMG if we have signing keys
             if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.dmg" ]]; then
               echo "Signing DMG file..."
-              echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.dmg" || echo "DMG signing failed"
+              pnpm tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.dmg" || echo "DMG signing failed"
             fi
             
             # Check if app.tar.gz already exists (Tauri might create it)
@@ -900,7 +900,7 @@ jobs:
               if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.app.tar.gz" ]]; then
                 echo "Attempting to generate signature manually..."
                 # Use tauri signer to generate signature
-                echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.app.tar.gz" || echo "Manual signing failed"
+                pnpm tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_x64.app.tar.gz" || echo "Manual signing failed"
               fi
             fi
             
@@ -947,7 +947,7 @@ jobs:
               if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.AppImage" ]]; then
                 echo "Attempting to generate signature manually..."
                 # Use tauri signer to generate signature
-                echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.AppImage" || echo "Manual signing failed"
+                pnpm tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.AppImage" || echo "Manual signing failed"
               fi
             fi
           fi
@@ -958,7 +958,7 @@ jobs:
           # Sign the deb package if we have signing keys
           if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]] && [[ -f "dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.deb" ]]; then
             echo "Signing deb package..."
-            echo "$TAURI_SIGNING_PRIVATE_KEY" | pnpm tauri signer sign --private-key - --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.deb" || echo "Deb signing failed"
+            pnpm tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "dist/JaTerm_${{ needs.create-release.outputs.version }}_amd64.deb" || echo "Deb signing failed"
           fi
           
           # Make AppImage executable

@@ -12,7 +12,7 @@ NIGHTLY_VERSION="0.0.0-nightly$(date +%Y%m%d%H%M%S)"
 echo "Nightly version: $NIGHTLY_VERSION"
 
 # Test regular version
-RELEASE_VERSION="1.5.5"
+RELEASE_VERSION="1.5.6"
 echo "Release version: $RELEASE_VERSION"
 
 # Verify with npm (which enforces semver)
