@@ -16,13 +16,16 @@
     "release:notes": "node tools/generate-release-notes.mjs --since-tag"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@tauri-apps/api": "^2.7.0",
     "@tauri-apps/plugin-dialog": "^2.3.2",
+    "@tauri-apps/plugin-fs": "^2.4.2",
     "@tauri-apps/plugin-shell": "^2.3.0",
     "@tauri-apps/plugin-updater": "^2.9.0",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "monaco-editor": "^0.52.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

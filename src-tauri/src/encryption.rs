@@ -77,6 +77,14 @@ impl EncryptionManager {
     /// Save master key hash to fallback file
     fn save_key_fallback(&self, password_hash: &str, salt: &str) -> Result<(), EncryptionError> {
         let path = Self::fallback_key_path()?;
+        
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                EncryptionError::KeyringError(format!("Failed to create config directory: {}", e))
+            })?;
+        }
+        
         let data = serde_json::json!({
             "hash": password_hash,
             "salt": salt,
@@ -89,9 +97,11 @@ impl EncryptionManager {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o600);
-            let _ = fs::set_permissions(&path, perms);
+            if let Ok(metadata) = fs::metadata(&path) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o600);
+                let _ = fs::set_permissions(&path, perms);
+            }
         }
         Ok(())
     }

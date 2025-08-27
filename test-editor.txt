@@ -1,0 +1,10 @@
+This is a test file for the new editor component!
+
+Features to test:
+1. Opening files in the editor
+2. Syntax highlighting based on file extension
+3. Save functionality (Cmd+S)
+4. Modified indicator
+5. Integration with tab system
+
+The editor should support both local and remote (SSH) files.

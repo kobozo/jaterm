@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import SplitView from '@/components/SplitView';
-import SftpPanel from '@/components/SftpPanel';
+import FileExplorerWithEditor from '@/components/FileExplorerWithEditor';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
 import RemoteTerminalPane from '@/components/RemoteTerminalPane';
 import GitStatusBar from '@/components/GitStatusBar';
@@ -43,7 +43,7 @@ export default function App() {
     activePane: string | null;
     status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean; helperOk?: boolean; helperVersion?: string; helperChecked?: boolean; helperPath?: string | null };
     title?: string;
-    view?: 'terminal' | 'git' | 'ports' | 'sftp';
+    view?: 'terminal' | 'git' | 'ports' | 'files';
     forwards?: { id: string; type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number; status?: 'starting'|'active'|'error'|'closed' }[];
     detectedPorts?: number[];
     sftpCwd?: string;
@@ -922,10 +922,18 @@ export default function App() {
       setActiveTab(tabId);
     } catch (e) {
       console.error('Failed to continue SSH session:', e);
-      addToast({ title: 'SSH Failed', message: String(e), kind: 'error' });
+      addToast({ 
+        title: 'SSH Session Failed', 
+        message: `Failed to open shell on ${opts.host}: ${String(e)}`,
+        kind: 'error',
+        timeout: 10000
+      });
+      
+      // Disconnect and close tab
       try {
         await sshDisconnect(sessionId);
       } catch {}
+      closeTab(tabId);
     }
   }
 
@@ -1065,8 +1073,40 @@ export default function App() {
         await continueOpenSshFor(sessionId, tabId, opts);
       }
     } catch (e) {
-      alert('SSH connection failed: ' + (e as any));
-      console.error('ssh open failed', e);
+      console.error('SSH connection failed:', e);
+      
+      // Parse error message for better user feedback
+      let errorMessage = String(e);
+      let errorTitle = 'SSH Connection Failed';
+      
+      // Common error patterns
+      if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+        errorTitle = 'SSH Connection Timeout';
+        errorMessage = `Unable to connect to ${opts.host}:${opts.port || 22}. The server may be down or unreachable.`;
+      } else if (errorMessage.includes('authentication') || errorMessage.includes('Authentication')) {
+        errorTitle = 'SSH Authentication Failed';
+        errorMessage = 'Invalid credentials or authentication method. Please check your username, password, or SSH key.';
+      } else if (errorMessage.includes('refused') || errorMessage.includes('Connection refused')) {
+        errorTitle = 'Connection Refused';
+        errorMessage = `Connection to ${opts.host}:${opts.port || 22} was refused. The SSH service may not be running.`;
+      } else if (errorMessage.includes('Host not trusted')) {
+        errorTitle = 'Host Key Verification Failed';
+        errorMessage = 'The host key verification was cancelled.';
+      } else if (errorMessage.includes('Network')) {
+        errorTitle = 'Network Error';
+        errorMessage = `Unable to reach ${opts.host}. Please check your network connection.`;
+      }
+      
+      // Show toast with error details
+      addToast({ 
+        title: errorTitle, 
+        message: errorMessage,
+        kind: 'error',
+        timeout: 10000 // Show for 10 seconds
+      });
+      
+      // Close the empty tab that was created
+      closeTab(tabId);
     }
   }
 
@@ -1752,9 +1792,9 @@ export default function App() {
               )}
               <button
                 className="nf-icon"
-                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'sftp' ? '#2b2b2b' : 'transparent', color: t.kind === 'ssh' ? '#ddd' : '#666', cursor: t.kind === 'ssh' ? 'pointer' : 'not-allowed' }}
-                onClick={() => { if (t.kind === 'ssh') setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'sftp' } : tb))); }}
-                title={t.kind === 'ssh' ? 'SFTP' : 'SFTP (SSH only)'}
+                style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'files' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
+                onClick={() => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'files' } : tb)))}
+                title="Files"
               >
                 
               </button>
@@ -1784,18 +1824,19 @@ export default function App() {
                   onStatus={(st) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, status: { ...tb.status, branch: st.branch, ahead: st.ahead, behind: st.behind } } : tb)))}
                 />
               </div>
-              {/* SFTP view */}
-              <div style={{ display: (t.view === 'sftp') ? 'block' : 'none', height: '100%' }}>
-                {t.kind === 'ssh' && t.sshSessionId ? (
-                  <SftpPanel
-                    sessionId={t.sshSessionId}
-                    cwd={(t as any).sftpCwd || t.status.cwd || t.cwd || undefined}
-                    isActive={t.view === 'sftp'}
-                    onCwdChange={(next) => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, sftpCwd: next } : tb)))}
-                  />
-                ) : (
-                  <div style={{ padding: 12, color: '#aaa' }}>Open an SSH session to use SFTP.</div>
-                )}
+              {/* Files view with integrated editor */}
+              <div style={{ display: (t.view === 'files') ? 'block' : 'none', height: '100%' }}>
+                <FileExplorerWithEditor
+                  isLocal={!(t.kind === 'ssh' && t.sshSessionId)}
+                  sessionId={t.kind === 'ssh' ? t.sshSessionId : undefined}
+                  cwd={(t as any).sftpCwd || t.status.cwd || t.cwd || undefined}
+                  isActive={t.view === 'files'}
+                  onCwdChange={(next) => {
+                    setTabs((prev) => prev.map((tb) => 
+                      tb.id === t.id ? { ...tb, sftpCwd: next } : tb
+                    ));
+                  }}
+                />
               </div>
               {/* Ports view (kept mounted) */}
               <div style={{ display: (t.view === 'ports') ? 'block' : 'none', height: '100%' }}>
@@ -1855,7 +1896,7 @@ export default function App() {
                 />
               </div>
               {/* Terminal/Welcome view (kept mounted) */}
-              <div style={{ display: (t.view === 'git' || t.view === 'ports') ? 'none' : 'block', height: '100%' }}>
+              <div style={{ display: (t.view === 'git' || t.view === 'ports' || t.view === 'files') ? 'none' : 'block', height: '100%' }}>
                 {t.kind === 'settings' ? (
                   <SettingsPane />
                 ) : t.kind === 'ssh' ? (
