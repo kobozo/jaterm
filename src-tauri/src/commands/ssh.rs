@@ -1190,7 +1190,7 @@ pub async fn ssh_open_shell(
     rows: Option<u16>,
 ) -> Result<String, String> {
     // Access the session and create/configure the channel
-    // IMPORTANT: Don't change blocking mode if other channels exist to avoid disrupting them
+    // We need blocking mode for channel creation, but must restore the previous state
     let chan = {
         let mut inner = state.inner.lock().map_err(|_| "lock")?;
         
@@ -1203,14 +1203,9 @@ pub async fn ssh_open_shell(
             .get_mut(&session_id)
             .ok_or("ssh session not found")?;
         
-        // Only set blocking mode if no other channels exist
-        let was_blocking = if !has_other_channels {
-            s.sess.set_blocking(true);
-            false
-        } else {
-            // Keep current mode for existing channels
-            true
-        };
+        // Always set to blocking for channel creation, but remember if we need to restore
+        let was_non_blocking = has_other_channels;
+        s.sess.set_blocking(true);
         
         let mut chan = s
             .sess
@@ -1235,8 +1230,10 @@ pub async fn ssh_open_shell(
             chan.shell().map_err(|e| format!("shell: {e}"))?;
         }
 
-        // Only switch to non-blocking if we changed it
-        if !was_blocking {
+        // Restore non-blocking mode after setup
+        // For the first channel, we'll set it to non-blocking later
+        // For additional channels, restore immediately to avoid disrupting existing ones
+        if was_non_blocking {
             s.sess.set_blocking(false);
         }
         chan
