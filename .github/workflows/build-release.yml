@@ -760,10 +760,19 @@ jobs:
                 Write-Host "Copied alternative signature: $($altSigFiles[0].Name)"
               } elseif ($env:TAURI_SIGNING_PRIVATE_KEY) {
                 Write-Host "Attempting to generate MSI signature manually..."
-                Write-Host "NOTE: Signature generation is currently disabled due to key format issues"
-                Write-Host "The key appears to have an invalid format (contains ':' at position 1)"
-                Write-Host "Please ensure TAURI_SIGNING_PRIVATE_KEY is a pure base64 string without prefixes"
-                Write-Host "Continuing build without signatures..."
+                try {
+                  $msiPath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64.msi"
+                  Write-Host "Signing MSI at: $msiPath"
+                  # Use stdin approach like Linux/macOS
+                  $env:TAURI_SIGNING_PRIVATE_KEY | pnpm tauri signer sign --private-key - --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$msiPath"
+                  if (Test-Path "${msiPath}.sig") {
+                    Write-Host "MSI signature generated successfully!"
+                  } else {
+                    Write-Host "Warning: MSI signature file was not created"
+                  }
+                } catch {
+                  Write-Host "WARNING: Failed to sign MSI: $_"
+                }
               }
             }
           }
@@ -773,9 +782,22 @@ jobs:
           if ($exeFiles) {
             Copy-Item $exeFiles[0] -Destination "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
             
-            # Skip NSIS signing due to key format issues
+            # Sign the NSIS installer if we have signing keys
             if ($env:TAURI_SIGNING_PRIVATE_KEY) {
-              Write-Host "NOTE: NSIS signature generation is disabled due to key format issues"
+              Write-Host "Signing NSIS installer..."
+              try {
+                $exePath = "dist\JaTerm_${{ needs.create-release.outputs.version }}_x64-setup.exe"
+                Write-Host "Signing NSIS at: $exePath"
+                # Use stdin approach like Linux/macOS
+                $env:TAURI_SIGNING_PRIVATE_KEY | pnpm tauri signer sign --private-key - --password "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$exePath"
+                if (Test-Path "${exePath}.sig") {
+                  Write-Host "NSIS signature generated successfully!"
+                } else {
+                  Write-Host "Warning: NSIS signature file was not created"
+                }
+              } catch {
+                Write-Host "WARNING: Failed to sign NSIS: $_"
+              }
             }
           }
           
