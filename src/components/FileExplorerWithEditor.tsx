@@ -5,7 +5,7 @@ import SftpPanel from '@/components/SftpPanel';
 import TabbedEditor, { OpenFile } from '@/components/TabbedEditor';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { sshSftpRead, sshSftpWrite } from '@/types/ipc';
-import { addToast } from '@/store/toasts';
+import { useToasts } from '@/store/toasts';
 
 interface FileExplorerWithEditorProps {
   isLocal: boolean;
@@ -25,6 +25,7 @@ export default function FileExplorerWithEditor({
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [currentPath, setCurrentPath] = useState<string>(cwd || '');
+  const { show: showToast } = useToasts();
 
   // Load file content
   const loadFile = async (path: string): Promise<OpenFile> => {
@@ -113,9 +114,9 @@ export default function FileExplorerWithEditor({
           : f
       ));
       
-      addToast({ title: 'File saved', kind: 'success' } as any);
+      showToast({ title: 'File saved', kind: 'success' });
     } catch (err) {
-      addToast({ title: `Failed to save: ${err}`, kind: 'error' } as any);
+      showToast({ title: `Failed to save: ${err}`, kind: 'error' });
     }
   };
 
