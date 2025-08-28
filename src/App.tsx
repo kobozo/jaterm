@@ -134,9 +134,32 @@ export default function App() {
               actions: [
                 { label: 'Restart & Update', onClick: async () => {
                   try {
+                    // Show downloading toast
+                    const downloadId = show({ 
+                      title: 'Downloading update...', 
+                      message: 'Please wait while the update is downloaded.', 
+                      kind: 'info' 
+                    });
+                    
                     // v2 exposes install(); fallback to downloadAndInstall if present
                     if (mod.install) await mod.install();
                     else if (res.downloadAndInstall) await res.downloadAndInstall();
+                    
+                    dismiss(downloadId);
+                    
+                    // Show restarting toast briefly
+                    show({ 
+                      title: 'Restarting...', 
+                      message: 'The application will now restart to apply the update.', 
+                      kind: 'success' 
+                    });
+                    
+                    // Wait a moment for the toast to be visible
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    // Restart the application
+                    const { relaunch } = await import('@tauri-apps/plugin-process');
+                    await relaunch();
                   } catch (e) {
                     show({ title: 'Update failed', message: String(e), kind: 'error' });
                   }
@@ -165,8 +188,36 @@ export default function App() {
           kind: 'info',
           actions: [
             { label: 'Restart & Update', onClick: async () => {
-              try { if (mod.install) await mod.install(); else if (res.downloadAndInstall) await res.downloadAndInstall(); }
-              catch (e) { show({ title: 'Update failed', message: String(e), kind: 'error' }); }
+              try {
+                // Show downloading toast
+                const downloadId = show({ 
+                  title: 'Downloading update...', 
+                  message: 'Please wait while the update is downloaded.', 
+                  kind: 'info' 
+                });
+                
+                // v2 exposes install(); fallback to downloadAndInstall if present
+                if (mod.install) await mod.install();
+                else if (res.downloadAndInstall) await res.downloadAndInstall();
+                
+                dismiss(downloadId);
+                
+                // Show restarting toast briefly
+                show({ 
+                  title: 'Restarting...', 
+                  message: 'The application will now restart to apply the update.', 
+                  kind: 'success' 
+                });
+                
+                // Wait a moment for the toast to be visible
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Restart the application
+                const { relaunch } = await import('@tauri-apps/plugin-process');
+                await relaunch();
+              } catch (e) {
+                show({ title: 'Update failed', message: String(e), kind: 'error' });
+              }
             } },
             { label: 'View Release Notes', onClick: async () => {
               const { open } = await import('@tauri-apps/plugin-shell');

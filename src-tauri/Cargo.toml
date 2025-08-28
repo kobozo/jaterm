@@ -1,6 +1,6 @@
 [package]
 name = "jaterm"
-version = "1.5.6"
+version = "1.5.7"
 description = "JATerm Tauri backend"
 authors = ["you"]
 edition = "2021"
@@ -20,6 +20,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-process = "2"
 anyhow = "1"
 thiserror = "1"
 portable-pty = "0.8"
