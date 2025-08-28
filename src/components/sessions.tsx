@@ -540,8 +540,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
       setLocalProfiles(await getLocalProfiles());
     } else {
       await deleteSshProfile(n.ref.id);
-      // Refresh from disk only if we don't have passed profiles
-      setSshProfiles(passedSshProfiles || await getSshProfiles());
+      setSshProfiles(await getSshProfiles());
     }
     updateTree((root) => { removeNode(root, n.id); });
   }
@@ -622,11 +621,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
     window.addEventListener('recent-sessions-updated', handleRecentSessionsUpdated);
     
     // Refresh profiles periodically to catch external updates (e.g., OS detection)
-    // Only refresh from disk if we don't have passed profiles
     const interval = setInterval(async () => {
-      if (!passedSshProfiles) {
-        setSshProfiles(await getSshProfiles());
-      }
+      setSshProfiles(await getSshProfiles());
     }, 5000); // Check every 5 seconds
     
     return () => {
@@ -1728,8 +1724,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                   }
                   
                   await saveSshProfile(profile);
-                  // Refresh from disk only if we don't have passed profiles
-                  setSshProfiles(passedSshProfiles || await getSshProfiles());
+                  setSshProfiles(await getSshProfiles());
                   if (tree && !hasProfileNode(tree, 'ssh', spForm.id!)) {
                     const dest = inheritContextFolderId || currentFolderId;
                     updateTree((root) => addProfileNode(root, 'ssh', spForm.id!, dest));
