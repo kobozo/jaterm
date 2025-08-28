@@ -1189,15 +1189,39 @@ pub async fn ssh_open_shell(
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<String, String> {
-    // Access the session and create/configure the channel in blocking mode
+    // Access the session and create/configure the channel
+    // We need to serialize channel creation with the session lock
     let chan = {
+        // First get the session lock Arc
+        let (sess_lock, has_other_channels) = {
+            let inner = state.inner.lock().map_err(|_| "lock")?;
+            
+            // Check if this is the first channel or if other channels exist
+            let has_other_channels = inner.ssh_channels.values()
+                .any(|ch| ch.session_id == session_id);
+            
+            let s = inner
+                .ssh
+                .get(&session_id)
+                .ok_or("ssh session not found")?;
+            
+            (s.lock.clone(), has_other_channels)
+        };
+        
+        // Acquire the session lock before any session operations
+        // This ensures no other operations (reads/writes) happen during channel creation
+        let _guard = sess_lock.lock().map_err(|_| "session lock poisoned")?;
+        
+        // Now reacquire inner lock with session lock held
         let mut inner = state.inner.lock().map_err(|_| "lock")?;
         let s = inner
             .ssh
             .get_mut(&session_id)
             .ok_or("ssh session not found")?;
-        // Set to blocking for all channel setup operations
+        
+        // Now safe to change blocking mode temporarily
         s.sess.set_blocking(true);
+        
         let mut chan = s
             .sess
             .channel_session()
@@ -1206,24 +1230,29 @@ pub async fn ssh_open_shell(
         let term = "xterm-256color";
         let sz_cols = cols.unwrap_or(120);
         let sz_rows = rows.unwrap_or(30);
-        // Request PTY with the desired initial size (in blocking mode)
+        
         chan.request_pty(term, None, Some((sz_cols as u32, sz_rows as u32, 0, 0)))
             .map_err(|e| format!("request_pty: {e}"))?;
-        // Merge STDERR into STDOUT so we don't miss prompts/messages
+        
         let _ = chan.handle_extended_data(ssh2::ExtendedData::Merge);
-        // Start the shell without echoing pre-commands. If a cwd is provided, exec a login shell after changing dir.
+        
         if let Some(dir) = cwd {
             let esc = dir.replace("'", "'\\''");
-            // Use bash -lc to change directory and exec user's login shell without printing pre-commands
             let cmd = format!("bash -lc 'cd \"{}\"; exec $SHELL -l'", esc);
             chan.exec(&cmd).map_err(|e| format!("exec(shell): {e}"))?;
         } else {
             chan.shell().map_err(|e| format!("shell: {e}"))?;
         }
 
-        // Now switch back to non-blocking after all setup is done
+        // Always restore to non-blocking mode for reading
         s.sess.set_blocking(false);
+        // Also ensure TCP stream is non-blocking for consistency
+        if !has_other_channels {
+            let _ = s.tcp.set_nonblocking(true);
+        }
+        
         chan
+        // Guard and inner are dropped here, releasing both locks
     };
     // Channel is ready; start a command-processing thread that also reads output
     let id = format!("chan_{}", nanoid::nanoid!(8));
@@ -1238,15 +1267,7 @@ pub async fn ssh_open_shell(
             },
         );
     }
-    // Switch the underlying session to non-blocking for better performance
-    {
-        let mut inner = state.inner.lock().map_err(|_| "lock")?;
-        if let Some(sess) = inner.ssh.get_mut(&session_id) {
-            sess.sess.set_blocking(false);
-            // Also set TCP stream to non-blocking for consistency
-            let _ = sess.tcp.set_nonblocking(true);
-        }
-    }
+    // Session is already in non-blocking mode from channel creation
     let _ = app.emit(
         crate::events::SSH_OPENED,
         &serde_json::json!({"channelId": id}),
