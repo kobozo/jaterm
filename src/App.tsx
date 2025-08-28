@@ -716,8 +716,10 @@ export default function App() {
         if (t.id === tabId) {
           const newStatus = { ...t.status, cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true };
           // Keep current view as is when in a git repo
-          // Reset sftpCwd to null so SFTP follows the terminal's CWD
-          return { ...t, status: newStatus, sftpCwd: null };
+          // Only reset sftpCwd if it hasn't been manually set (is still null/undefined)
+          // This allows SFTP to follow terminal on first open but not reset during manual navigation
+          const newSftpCwd = t.sftpCwd === undefined ? null : t.sftpCwd;
+          return { ...t, status: newStatus, sftpCwd: newSftpCwd };
         }
         return t;
       }));
@@ -737,8 +739,10 @@ export default function App() {
           const newStatus = { ...t.status, fullPath: abs, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 };
           // If we were viewing git tools but we're no longer in a git repo, switch to terminal view
           const newView = t.view === 'git' ? 'terminal' : t.view;
-          // Reset sftpCwd to null so SFTP follows the terminal's CWD
-          return { ...t, status: newStatus, view: newView, sftpCwd: null };
+          // Only reset sftpCwd if it hasn't been manually set (is still null/undefined)
+          // This allows SFTP to follow terminal on first open but not reset during manual navigation
+          const newSftpCwd = t.sftpCwd === undefined ? null : t.sftpCwd;
+          return { ...t, status: newStatus, view: newView, sftpCwd: newSftpCwd };
         }
         return t;
       }));
@@ -1984,7 +1988,7 @@ export default function App() {
               <button
                 className="nf-icon"
                 style={{ padding: 6, borderRadius: 4, border: '1px solid #444', background: t.view === 'files' ? '#2b2b2b' : 'transparent', color: '#ddd', cursor: 'pointer' }}
-                onClick={() => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'files' } : tb)))}
+                onClick={() => setTabs((prev) => prev.map((tb) => (tb.id === t.id ? { ...tb, view: 'files', sftpCwd: undefined } : tb)))}
                 title="Files"
               >
                 
