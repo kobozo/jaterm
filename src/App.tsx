@@ -1093,6 +1093,10 @@ export default function App() {
         sshHome = await sshHomeDir(sessionId);
       } catch {}
       
+      // Load global config for reconnect settings
+      const { loadGlobalConfig } = await import('@/services/settings');
+      const globalConfig = await loadGlobalConfig();
+      
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { 
         ...t, 
         kind: 'ssh', 
@@ -1113,6 +1117,13 @@ export default function App() {
           // Set default helper path if we have home directory
           helperPath: sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : undefined
         },
+        // Store reconnection settings for potential auto-reconnect
+        reconnectSettings: globalConfig.ssh.autoReconnect ? {
+          enabled: true,
+          delay: globalConfig.ssh.reconnectDelay,
+          auth: opts.auth,
+          opts: opts
+        } : undefined,
         // Store terminal settings
         terminalSettings: opts.terminal
       } : t)));
@@ -1178,8 +1189,26 @@ export default function App() {
       // Final fallback to agent if still no usable auth
       if (!hasUsableAuth(authToUse)) authToUse = { agent: true } as any;
 
+      // Load global SSH settings
+      const { loadGlobalConfig } = await import('@/services/settings');
+      const globalConfig = await loadGlobalConfig();
+      const sshSettings = globalConfig.ssh;
+
+      // Use port from options first, then from global settings, then default to 22
+      const port = opts.port ?? sshSettings.defaultPort ?? 22;
+
       const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
-      const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: authToUse.password, key_path: (authToUse as any).keyPath, passphrase: authToUse.passphrase, agent: authToUse.agent } as any, timeout_ms: 15000 });
+      const sessionId = await sshConnectWithTrustPrompt({ 
+        host: opts.host, 
+        port, 
+        user: opts.user, 
+        auth: { password: authToUse.password, key_path: (authToUse as any).keyPath, passphrase: authToUse.passphrase, agent: authToUse.agent } as any, 
+        timeout_ms: 15000,
+        keepalive_interval: sshSettings.keepaliveInterval,
+        compression: sshSettings.compression,
+        x11_forwarding: sshSettings.x11Forwarding,
+        agent_forwarding: sshSettings.agentForwarding
+      } as any);
       
       // Check if password auth was used and we have a profile that could be upgraded
       if (authToUse.password && opts.profileId && opts.profileName) {
@@ -1207,20 +1236,27 @@ export default function App() {
         }
       }
       
-      // Check helper consent
-      const consent = await resolveHelperConsent(opts.profileId);
+      // Check helper consent - use global setting if no profile-specific consent
+      let consent = await resolveHelperConsent(opts.profileId);
       
+      // If no profile-specific consent, check global setting
       if (consent === undefined) {
-        // No consent recorded, show modal
-        setHelperConsentModal({
-          sessionId,
-          profileId: opts.profileId,
-          profileName: opts.profileName || opts.host,
-          host: opts.host,
-          tabId,
-          opts
-        });
-        return; // Will continue in handleHelperConsent
+        if (sshSettings.helperAutoConsent === 'always') {
+          consent = 'yes';
+        } else if (sshSettings.helperAutoConsent === 'never') {
+          consent = 'no';
+        } else {
+          // 'ask' - show modal
+          setHelperConsentModal({
+            sessionId,
+            profileId: opts.profileId,
+            profileName: opts.profileName || opts.host,
+            host: opts.host,
+            tabId,
+            opts
+          });
+          return; // Will continue in handleHelperConsent
+        }
       }
       
       // Ensure helper in background (non-blocking) and record status in tab
