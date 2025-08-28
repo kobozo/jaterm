@@ -768,6 +768,8 @@ export default function App() {
     const toRecord = tabs.find((t) => t.id === id);
     if (toRecord && toRecord.kind !== 'ssh' && (toRecord.status.cwd || toRecord.cwd)) {
       addRecentSession({ cwd: (toRecord.status.cwd ?? toRecord.cwd) as string, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
+      // Dispatch event so Sessions component can refresh
+      window.dispatchEvent(new CustomEvent('recent-sessions-updated'));
     }
     // SSH recents recorded below in a unified normalized form
     if (toRecord?.activePane) {
@@ -843,20 +845,27 @@ export default function App() {
             }
           }
         } catch {}
-        // Use the actual current working directory from status.fullPath if available
+        // Use the actual current working directory from status.fullPath or status.cwd
         // This is the last known CWD tracked via OSC7 sequences
         if (toRecord.status?.fullPath) {
           path = toRecord.status.fullPath;
           console.info('[ssh][recents] Using fullPath from status:', path);
+        } else if (toRecord.status?.cwd) {
+          // Fall back to status.cwd if fullPath is not available
+          path = toRecord.status.cwd;
+          console.info('[ssh][recents] Using cwd from status:', path);
         } else {
-          // Fall back to title parsing only if no fullPath available
+          // Final fallback to title parsing only if no status paths available
           if (titleCandidate && !titleCandidate.startsWith('~/') && (!path || titleCandidate.length > path.length)) {
             path = titleCandidate;
           }
+          console.info('[ssh][recents] Using title/initial path:', path);
         }
-        console.info('[ssh][recents] save final path=', path);
+        console.info('[ssh][recents] save final path=', path, 'status:', toRecord.status);
         const { addRecentSshSession } = await import('@/store/sessions');
         await addRecentSshSession({ profileId: toRecord.profileId, path, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
+        // Dispatch event so Sessions component can refresh
+        window.dispatchEvent(new CustomEvent('recent-sessions-updated'));
       }
     }
   }
@@ -2011,7 +2020,7 @@ export default function App() {
                 <FileExplorerWithEditor
                   isLocal={!(t.kind === 'ssh' && t.sshSessionId)}
                   sessionId={t.kind === 'ssh' ? t.sshSessionId : undefined}
-                  cwd={(t as any).sftpCwd || t.status.cwd || t.cwd || undefined}
+                  cwd={(t as any).sftpCwd || t.status.fullPath || t.status.cwd || t.cwd || undefined}
                   isActive={t.view === 'files'}
                   onCwdChange={(next) => {
                     setTabs((prev) => prev.map((tb) => 

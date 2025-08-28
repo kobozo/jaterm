@@ -612,6 +612,14 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
     };
     window.addEventListener('profiles-unlocked', handleProfilesUnlocked);
     
+    // Listen for recent sessions updates
+    const handleRecentSessionsUpdated = async () => {
+      console.log('Recent sessions updated, refreshing...');
+      setRecentSessions(await getRecentSessions());
+      setRecentSsh(await getRecentSshSessions());
+    };
+    window.addEventListener('recent-sessions-updated', handleRecentSessionsUpdated);
+    
     // Refresh profiles periodically to catch external updates (e.g., OS detection)
     const interval = setInterval(async () => {
       setSshProfiles(await getSshProfiles());
@@ -620,6 +628,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
     return () => {
       clearInterval(interval);
       window.removeEventListener('profiles-unlocked', handleProfilesUnlocked);
+      window.removeEventListener('recent-sessions-updated', handleRecentSessionsUpdated);
     };
   }, []);
 
