@@ -765,7 +765,12 @@ export default function App() {
     lastNormalizedPath.current.delete(id);
     
     // record session for the tab if it had a cwd
-    const toRecord = tabs.find((t) => t.id === id);
+    // Get the current tab state (not stale closure)
+    let toRecord: Tab | undefined;
+    setTabs((current) => {
+      toRecord = current.find((t) => t.id === id);
+      return current; // Don't modify, just read
+    });
     if (toRecord && toRecord.kind !== 'ssh' && (toRecord.status.cwd || toRecord.cwd)) {
       addRecentSession({ cwd: (toRecord.status.cwd ?? toRecord.cwd) as string, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
       // Dispatch event so Sessions component can refresh
