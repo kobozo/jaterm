@@ -3,6 +3,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::time::Duration;
+use std::thread;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
@@ -36,6 +38,100 @@ pub struct SshProfile {
 
 fn default_port() -> u16 {
     22
+}
+
+/// Helper to retry operations that might return WouldBlock in non-blocking mode
+fn retry_would_block<T, F>(mut f: F, max_retries: u32) -> Result<T, String>
+where
+    F: FnMut() -> Result<T, ssh2::Error>,
+{
+    for attempt in 0..max_retries {
+        match f() {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                // Check if it's a WouldBlock error
+                // SSH2 error code -37 is EAGAIN/EWOULDBLOCK
+                let msg = e.to_string();
+                if msg.contains("Would block") || msg.contains("EAGAIN") || msg.contains("[-37]") {
+                    if attempt < max_retries - 1 {
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                }
+                return Err(format!("SSH operation failed after {} attempts: {}", attempt + 1, e));
+            }
+        }
+    }
+    Err("Max retries exceeded".to_string())
+}
+
+/// Helper to establish an SSH connection (used by ssh_connect and ssh_open_shell for splits)
+fn establish_ssh_connection(
+    host: &str,
+    port: u16,
+    user: &str,
+    auth: &Option<SshAuth>,
+    _trust_host: bool,
+) -> Result<(TcpStream, ssh2::Session), String> {
+    let host_lc = host.to_ascii_lowercase();
+    let addr = format!("{}:{}", host_lc, port);
+    let tcp = TcpStream::connect(&addr).map_err(|e| format!("tcp connect: {e}"))?;
+    
+    // Configure TCP socket
+    tcp.set_read_timeout(None).ok();
+    tcp.set_write_timeout(None).ok();
+    tcp.set_nodelay(true).ok();
+    
+    let mut sess = ssh2::Session::new().map_err(|e| format!("session: {e}"))?;
+    sess.set_tcp_stream(tcp.try_clone().map_err(|e| e.to_string())?);
+    sess.handshake().map_err(|e| format!("handshake: {e}"))?;
+    
+    // For split connections, skip known_hosts verification if the primary already trusted it
+    // This avoids prompting again for the same host
+    
+    // Authenticate
+    if let Some(auth) = auth {
+        if auth.agent {
+            let mut agent = sess.agent().map_err(|e| e.to_string())?;
+            agent.connect().map_err(|e| e.to_string())?;
+            agent.list_identities().map_err(|e| e.to_string())?;
+            let mut ok = false;
+            for id in agent.identities().map_err(|e| e.to_string())? {
+                if agent.userauth(user, &id).is_ok() {
+                    ok = true;
+                    break;
+                }
+            }
+            if !ok {
+                return Err("agent auth failed".into());
+            }
+        } else if let Some(pw) = &auth.password {
+            sess.userauth_password(user, pw)
+                .map_err(|e| format!("auth pw: {e}"))?;
+        } else if let Some(key) = &auth.key_path {
+            sess.userauth_pubkey_file(
+                user,
+                None,
+                std::path::Path::new(key),
+                auth.passphrase.as_deref(),
+            )
+            .map_err(|e| format!("auth key: {e}"))?;
+        }
+    } else {
+        return Err("no auth method provided".into());
+    }
+    
+    if !sess.authenticated() {
+        return Err("authentication failed".into());
+    }
+    
+    // Configure session
+    let _ = sess.set_keepalive(true, 30);
+    sess.set_timeout(0);
+    sess.set_blocking(false);
+    tcp.set_nonblocking(true).map_err(|e| format!("set_nonblocking: {e}"))?;
+    
+    Ok((tcp, sess))
 }
 
 #[tauri::command]
@@ -251,8 +347,9 @@ pub async fn ssh_connect(
     // Explicitly set NO timeout (0 means infinite) - crucial for channel creation
     sess.set_timeout(0);
 
-    // Start in blocking mode - functions will switch to non-blocking as needed
-    sess.set_blocking(true);
+    // Set to non-blocking mode and keep it that way
+    sess.set_blocking(false);
+    tcp.set_nonblocking(true).map_err(|e| format!("set_nonblocking: {e}"))?;
 
     // Start watchdog for git status and port detection (non-blocking)
     let session_id_for_watchdog = format!("ssh_{}", nanoid::nanoid!(8));
@@ -308,7 +405,9 @@ pub async fn ssh_connect(
                 lock: std::sync::Arc::new(std::sync::Mutex::new(())),
                 host: host_lc,
                 port: profile.port,
-                user: profile.user,
+                user: profile.user.clone(),
+                auth: profile.auth.clone(),
+                is_primary: true, // First connection is always primary
             },
         );
     }
@@ -326,12 +425,17 @@ pub async fn ssh_home_dir(
         .get_mut(&session_id)
         .ok_or("ssh session not found")?;
 
-    // Temporarily set to blocking mode for SFTP creation
+    // SFTP operations need blocking mode temporarily
     s.sess.set_blocking(true);
-    let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
-    let path = sftp.realpath(Path::new(".")).map_err(|e| e.to_string())?;
-    // Return to non-blocking mode
-    s.sess.set_blocking(false);
+    let sftp = s.sess.sftp().map_err(|e| {
+        s.sess.set_blocking(false); // Restore non-blocking
+        e.to_string()
+    })?;
+    let path = sftp.realpath(Path::new(".")).map_err(|e| {
+        s.sess.set_blocking(false); // Restore non-blocking
+        e.to_string()
+    })?;
+    s.sess.set_blocking(false); // Restore non-blocking
     path.to_str()
         .map(|s| s.to_string())
         .ok_or_else(|| "non-utf8 path".to_string())
@@ -345,7 +449,6 @@ pub struct SftpEntry {
 }
 
 use std::path::Path;
-use std::time::Duration;
 
 #[tauri::command]
 pub async fn ssh_sftp_list(
@@ -353,37 +456,40 @@ pub async fn ssh_sftp_list(
     session_id: String,
     path: String,
 ) -> Result<Vec<SftpEntry>, String> {
-    let mut inner = state.inner.lock().map_err(|_| "lock")?;
-    let s = inner
-        .ssh
-        .get_mut(&session_id)
-        .ok_or("ssh session not found")?;
-    let sftp = loop {
-        match s.sess.sftp() {
-            Ok(h) => break h,
+    let entries = {
+        let mut inner = state.inner.lock().map_err(|_| "lock")?;
+        let s = inner
+            .ssh
+            .get_mut(&session_id)
+            .ok_or("ssh session not found")?;
+        
+        // Get session lock to serialize operations
+        let session_lock = s.lock.clone();
+        
+        // Lock the session for exclusive access during SFTP operation
+        let _guard = session_lock.lock().unwrap();
+        
+        // SFTP operations need blocking mode temporarily
+        s.sess.set_blocking(true);
+        let sftp = match s.sess.sftp() {
+            Ok(sftp) => sftp,
             Err(e) => {
-                if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    return Err(e.to_string());
-                }
+                s.sess.set_blocking(false); // Restore non-blocking
+                return Err(e.to_string());
             }
-        }
-    };
-    let entries = loop {
-        match sftp.readdir(Path::new(&path)) {
-            Ok(v) => break v,
+        };
+        let entries = match sftp.readdir(Path::new(&path)) {
+            Ok(entries) => entries,
             Err(e) => {
-                if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    return Err(e.to_string());
-                }
+                s.sess.set_blocking(false); // Restore non-blocking
+                return Err(e.to_string());
             }
-        }
+        };
+        s.sess.set_blocking(false); // Restore non-blocking
+        
+        entries
     };
+    
     let mut out = Vec::new();
     for (p, st) in entries {
         if let Some(name_os) = p.file_name() {
@@ -421,65 +527,59 @@ pub async fn ssh_sftp_download(
         "[ssh] sftp_download remote={} local={}",
         remote_path, local_path
     );
-    let mut inner = state.inner.lock().map_err(|_| "lock")?;
-    let s = inner
-        .ssh
-        .get_mut(&session_id)
-        .ok_or("ssh session not found")?;
-    let sftp = loop {
-        match s.sess.sftp() {
-            Ok(h) => break h,
+    
+    // Get SFTP handle with blocking mode
+    let sftp = {
+        let mut inner = state.inner.lock().map_err(|_| "lock")?;
+        let s = inner
+            .ssh
+            .get_mut(&session_id)
+            .ok_or("ssh session not found")?;
+        
+        // Get session lock to serialize operations
+        let session_lock = s.lock.clone();
+        let _guard = session_lock.lock().unwrap();
+        
+        // SFTP operations need blocking mode temporarily
+        s.sess.set_blocking(true);
+        let sftp = match s.sess.sftp() {
+            Ok(sftp) => sftp,
             Err(e) => {
-                if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    return Err(e.to_string());
-                }
+                s.sess.set_blocking(false); // Restore non-blocking
+                return Err(e.to_string());
             }
-        }
+        };
+        
+        // Keep sftp handle, blocking mode stays on
+        sftp
     };
     // Ensure local parent directory exists
     if let Some(parent) = std::path::Path::new(&local_path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let mut remote = loop {
-        match sftp.open(Path::new(&remote_path)) {
-            Ok(f) => break f,
-            Err(e) => {
-                if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    return Err(e.to_string());
-                }
-            }
-        }
-    };
+    
+    let mut remote = sftp.open(Path::new(&remote_path)).map_err(|e| e.to_string())?;
     let mut local = std::fs::File::create(&local_path).map_err(|e| e.to_string())?;
     let mut buf = [0u8; 131072];
+    
     loop {
         match remote.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                let mut off = 0;
-                while off < n {
-                    match local.write(&buf[off..n]) {
-                        Ok(m) => off += m,
-                        Err(e) => return Err(e.to_string()),
-                    }
-                }
+                local.write_all(&buf[..n]).map_err(|e| e.to_string())?;
             }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    return Err(e.to_string());
-                }
-            }
+            Err(e) => return Err(e.to_string()),
         }
     }
+    
+    // Restore non-blocking mode
+    {
+        let mut inner = state.inner.lock().map_err(|_| "lock")?;
+        if let Some(s) = inner.ssh.get_mut(&session_id) {
+            s.sess.set_blocking(false);
+        }
+    }
+    
     Ok(())
 }
 
@@ -494,23 +594,31 @@ pub async fn ssh_sftp_download_dir(
         "[ssh] sftp_download_dir remote_dir={} local_dir={}",
         remote_dir, local_dir
     );
-    let mut inner = state.inner.lock().map_err(|_| "lock")?;
-    let s = inner
-        .ssh
-        .get_mut(&session_id)
-        .ok_or("ssh session not found")?;
-    let sftp = loop {
-        match s.sess.sftp() {
-            Ok(h) => break h,
+    
+    // Get SFTP handle with blocking mode
+    let sftp = {
+        let mut inner = state.inner.lock().map_err(|_| "lock")?;
+        let s = inner
+            .ssh
+            .get_mut(&session_id)
+            .ok_or("ssh session not found")?;
+        
+        // Get session lock to serialize operations
+        let session_lock = s.lock.clone();
+        let _guard = session_lock.lock().unwrap();
+        
+        // SFTP operations need blocking mode temporarily
+        s.sess.set_blocking(true);
+        let sftp = match s.sess.sftp() {
+            Ok(sftp) => sftp,
             Err(e) => {
-                if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    return Err(e.to_string());
-                }
+                s.sess.set_blocking(false); // Restore non-blocking
+                return Err(e.to_string());
             }
-        }
+        };
+        
+        // Keep sftp handle, blocking mode stays on
+        sftp
     };
     let remote_root = Path::new(&remote_dir).to_path_buf();
     let local_root = std::path::Path::new(&local_dir).to_path_buf();
@@ -529,19 +637,7 @@ pub async fn ssh_sftp_download_dir(
         lroot: &std::path::Path,
         rcur: &std::path::Path,
     ) -> Result<(), String> {
-        let entries = loop {
-            match sftp.readdir(rcur) {
-                Ok(v) => break v,
-                Err(e) => {
-                    if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                        std::thread::sleep(Duration::from_millis(10));
-                        continue;
-                    } else {
-                        return Err(e.to_string());
-                    }
-                }
-            }
-        };
+        let entries = sftp.readdir(rcur).map_err(|e| e.to_string())?;
 
         for (rpath, st) in entries {
             let name = match rpath.file_name().and_then(|s| s.to_str()) {
@@ -560,41 +656,16 @@ pub async fn ssh_sftp_download_dir(
                 if let Some(parent) = lpath.parent() {
                     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
-                let mut rfile = loop {
-                    match sftp.open(&rpath) {
-                        Ok(f) => break f,
-                        Err(e) => {
-                            if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                                std::thread::sleep(Duration::from_millis(10));
-                                continue;
-                            } else {
-                                return Err(e.to_string());
-                            }
-                        }
-                    }
-                };
+                let mut rfile = sftp.open(&rpath).map_err(|e| e.to_string())?;
                 let mut lfile = std::fs::File::create(&lpath).map_err(|e| e.to_string())?;
                 let mut buf = [0u8; 131072];
                 loop {
                     match rfile.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
-                            let mut off = 0;
-                            while off < n {
-                                match lfile.write(&buf[off..n]) {
-                                    Ok(m) => off += m,
-                                    Err(e) => return Err(e.to_string()),
-                                }
-                            }
+                            lfile.write_all(&buf[..n]).map_err(|e| e.to_string())?;
                         }
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                std::thread::sleep(Duration::from_millis(10));
-                                continue;
-                            } else {
-                                return Err(e.to_string());
-                            }
-                        }
+                        Err(e) => return Err(e.to_string()),
                     }
                 }
             }
@@ -602,7 +673,17 @@ pub async fn ssh_sftp_download_dir(
         Ok(())
     }
 
-    download_recursive(&sftp, &remote_root, &local_root, &remote_root)
+    let result = download_recursive(&sftp, &remote_root, &local_root, &remote_root);
+    
+    // Restore non-blocking mode
+    {
+        let mut inner = state.inner.lock().map_err(|_| "lock")?;
+        if let Some(s) = inner.ssh.get_mut(&session_id) {
+            s.sess.set_blocking(false);
+        }
+    }
+    
+    result
 }
 
 #[tauri::command]
@@ -612,55 +693,55 @@ pub async fn ssh_sftp_read(
     remote_path: String,
 ) -> Result<String, String> {
     eprintln!("[ssh] sftp_read path={}", remote_path);
-    let mut inner = state.inner.lock().map_err(|_| "lock")?;
-    let s = inner
-        .ssh
-        .get_mut(&session_id)
-        .ok_or("ssh session not found")?;
-    let sftp = loop {
-        match s.sess.sftp() {
-            Ok(h) => break h,
+    
+    let buf = {
+        let mut inner = state.inner.lock().map_err(|_| "lock")?;
+        let s = inner
+            .ssh
+            .get_mut(&session_id)
+            .ok_or("ssh session not found")?;
+        
+        // Get session lock to serialize operations
+        let session_lock = s.lock.clone();
+        let _guard = session_lock.lock().unwrap();
+        
+        // SFTP operations need blocking mode temporarily
+        s.sess.set_blocking(true);
+        let sftp = match s.sess.sftp() {
+            Ok(sftp) => sftp,
             Err(e) => {
-                if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    return Err(e.to_string());
-                }
+                s.sess.set_blocking(false); // Restore non-blocking
+                return Err(e.to_string());
             }
-        }
-    };
-    let mut file = loop {
-        match sftp.open(Path::new(&remote_path)) {
-            Ok(f) => break f,
+        };
+        
+        let mut file = match sftp.open(Path::new(&remote_path)) {
+            Ok(f) => f,
             Err(e) => {
-                if matches!(e.code(), ssh2::ErrorCode::Session(code) if code == -37) {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    return Err(e.to_string());
-                }
+                s.sess.set_blocking(false); // Restore non-blocking
+                return Err(e.to_string());
             }
-        }
-    };
-    let mut buf = Vec::new();
-    loop {
+        };
+        
+        let mut buf = Vec::new();
         let mut tmp = [0u8; 65536];
-        match file.read(&mut tmp) {
-            Ok(0) => break,
-            Ok(n) => {
-                buf.extend_from_slice(&tmp[..n]);
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
+        loop {
+            match file.read(&mut tmp) {
+                Ok(0) => break,
+                Ok(n) => {
+                    buf.extend_from_slice(&tmp[..n]);
+                }
+                Err(e) => {
+                    s.sess.set_blocking(false); // Restore non-blocking
                     return Err(e.to_string());
                 }
             }
         }
-    }
+        
+        s.sess.set_blocking(false); // Restore non-blocking
+        buf
+    };
+    
     let b64 = base64::engine::general_purpose::STANDARD.encode(buf);
     Ok(b64)
 }
@@ -672,15 +753,26 @@ pub async fn ssh_sftp_mkdirs(
     path: String,
 ) -> Result<(), String> {
     eprintln!("[ssh] mkdirs path={}", path);
+    
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner
         .ssh
         .get_mut(&session_id)
         .ok_or("ssh session not found")?;
-
-    // Temporarily set to blocking mode for SFTP operations
+    
+    // Get session lock to serialize operations
+    let session_lock = s.lock.clone();
+    let _guard = session_lock.lock().unwrap();
+    
+    // SFTP operations need blocking mode temporarily
     s.sess.set_blocking(true);
-    let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+    let sftp = match s.sess.sftp() {
+        Ok(sftp) => sftp,
+        Err(e) => {
+            s.sess.set_blocking(false); // Restore non-blocking
+            return Err(e.to_string());
+        }
+    };
     let parts: Vec<&str> = path
         .split('/')
         .filter(|p| !p.is_empty() && *p != ".")
@@ -696,7 +788,7 @@ pub async fn ssh_sftp_mkdirs(
         }
         cur.push_str(part);
         let p = Path::new(&cur);
-        // If exists and is dir, continue (no retry needed in blocking mode)
+        // If exists and is dir, continue
         if let Ok(st) = sftp.stat(p) {
             if st.is_dir() {
                 continue;
@@ -710,13 +802,12 @@ pub async fn ssh_sftp_mkdirs(
                     continue;
                 }
             }
-            // Return to non-blocking before returning error
-            s.sess.set_blocking(false);
+            // Error occurred
+            s.sess.set_blocking(false); // Restore non-blocking on error
             return Err(e.to_string());
         }
     }
-    // Return to non-blocking mode
-    s.sess.set_blocking(false);
+    s.sess.set_blocking(false); // Restore non-blocking
     Ok(())
 }
 
@@ -758,28 +849,34 @@ pub async fn ssh_deploy_helper(
         .ssh
         .get_mut(&session_id)
         .ok_or("ssh session not found")?;
-
-    // Temporarily set to blocking mode for SFTP operations
+    
+    // Get session lock to serialize operations
+    let session_lock = s.lock.clone();
+    let _guard = session_lock.lock().unwrap();
+    
+    // SFTP operations need blocking mode temporarily
     s.sess.set_blocking(true);
-    let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+    let sftp = match s.sess.sftp() {
+        Ok(sftp) => sftp,
+        Err(e) => {
+            s.sess.set_blocking(false); // Restore non-blocking
+            return Err(e.to_string());
+        }
+    };
 
     let total = helper_binary.len();
     let mut written = 0usize;
     let mut file = sftp.create(Path::new(&remote_path)).map_err(|e| {
         eprintln!("[ssh] sftp create failed: {}", e);
-        // Return to non-blocking before error
-        s.sess.set_blocking(false);
         e.to_string()
     })?;
 
     while written < total {
         let end = usize::min(written + 8192, total);
         let chunk = &helper_binary[written..end];
-        // In blocking mode, no need for retry loop
         file.write_all(chunk).map_err(|e| {
-            // Return to non-blocking before error
-            s.sess.set_blocking(false);
-            e.to_string()
+            s.sess.set_blocking(false); // Restore non-blocking on error
+            format!("Write failed: {}", e)
         })?;
         written = end;
         let _ = app.emit(
@@ -789,10 +886,9 @@ pub async fn ssh_deploy_helper(
         std::thread::sleep(Duration::from_millis(1));
     }
 
-    // Return to non-blocking mode
-    s.sess.set_blocking(false);
 
     eprintln!("[ssh] helper uploaded {} bytes", written);
+    s.sess.set_blocking(false); // Restore non-blocking
     Ok(())
 }
 
@@ -809,15 +905,26 @@ pub async fn ssh_sftp_write(
         remote_path,
         data_b64.len()
     );
+    
     let mut inner = state.inner.lock().map_err(|_| "lock")?;
     let s = inner
         .ssh
         .get_mut(&session_id)
         .ok_or("ssh session not found")?;
-
-    // Temporarily set to blocking mode for SFTP operations
+    
+    // Get session lock to serialize operations
+    let session_lock = s.lock.clone();
+    let _guard = session_lock.lock().unwrap();
+    
+    // SFTP operations need blocking mode temporarily
     s.sess.set_blocking(true);
-    let sftp = s.sess.sftp().map_err(|e| e.to_string())?;
+    let sftp = match s.sess.sftp() {
+        Ok(sftp) => sftp,
+        Err(e) => {
+            s.sess.set_blocking(false); // Restore non-blocking
+            return Err(e.to_string());
+        }
+    };
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data_b64)
         .map_err(|e| e.to_string())?;
@@ -825,16 +932,14 @@ pub async fn ssh_sftp_write(
     let mut written = 0usize;
     let mut file = sftp.create(Path::new(&remote_path)).map_err(|e| {
         eprintln!("[ssh] sftp create failed: {}", e);
-        s.sess.set_blocking(false);
         e.to_string()
     })?;
     while written < total {
         let end = usize::min(written + 8192, total);
         let chunk = &bytes[written..end];
-        // In blocking mode, no need for retry loop
         file.write_all(chunk).map_err(|e| {
-            s.sess.set_blocking(false);
-            e.to_string()
+            s.sess.set_blocking(false); // Restore non-blocking on error
+            format!("Write failed: {}", e)
         })?;
         written = end;
         let _ = app.emit(
@@ -843,9 +948,9 @@ pub async fn ssh_sftp_write(
         );
         std::thread::sleep(Duration::from_millis(1));
     }
-
-    // Return to non-blocking mode
-    s.sess.set_blocking(false);
+    
+    eprintln!("[ssh] file uploaded {} bytes", written);
+    s.sess.set_blocking(false); // Restore non-blocking
     Ok(())
 }
 
@@ -868,71 +973,73 @@ pub async fn ssh_exec(
         .ssh
         .get_mut(&session_id)
         .ok_or("ssh session not found")?;
+    
+    // Get session lock to serialize operations
     let sess_lock = s.lock.clone();
-
-    // Temporarily set to blocking mode for channel creation and exec
+    let _guard = sess_lock.lock().unwrap();
+    
+    // SSH exec needs blocking mode temporarily
     s.sess.set_blocking(true);
-    let mut chan = s.sess.channel_session().map_err(|e| e.to_string())?;
+    
+    // Create channel and execute
+    let mut chan = match s.sess.channel_session() {
+        Ok(c) => c,
+        Err(e) => {
+            s.sess.set_blocking(false); // Restore non-blocking
+            return Err(format!("channel_session: {}", e));
+        }
+    };
+    
     // Keep stderr separate
     let _ = chan.handle_extended_data(ssh2::ExtendedData::Normal);
-    // Execute command in blocking mode (no retry needed)
-    chan.exec(&command).map_err(|e| format!("exec: {e}"))?;
-    // Return to non-blocking mode for reading output
-    s.sess.set_blocking(false);
+    
+    // Execute command
+    if let Err(e) = chan.exec(&command) {
+        s.sess.set_blocking(false); // Restore non-blocking
+        return Err(format!("exec: {}", e));
+    }
+    
+    // Read output
     let mut out = Vec::new();
     let mut err = Vec::new();
+    let mut buf = [0u8; 8192];
+    
+    // Read stdout
     let mut stdout = chan.stream(0);
-    let mut stderr = chan.stream(1);
-    let mut buf_out = [0u8; 8192];
-    let mut buf_err = [0u8; 4096];
     loop {
-        let mut progressed = false;
-        match {
-            let _g = sess_lock.lock().unwrap();
-            stdout.read(&mut buf_out)
-        } {
-            Ok(0) => {}
-            Ok(n) => {
-                out.extend_from_slice(&buf_out[..n]);
-                progressed = true;
+        match stdout.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+            Err(e) => {
+                s.sess.set_blocking(false); // Restore non-blocking
+                return Err(format!("read stdout: {}", e));
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e.to_string()),
-        }
-        match {
-            let _g = sess_lock.lock().unwrap();
-            stderr.read(&mut buf_err)
-        } {
-            Ok(0) => {}
-            Ok(n) => {
-                err.extend_from_slice(&buf_err[..n]);
-                progressed = true;
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e.to_string()),
-        }
-        if chan.eof() {
-            break;
-        }
-        if !progressed {
-            std::thread::sleep(Duration::from_millis(10));
         }
     }
-    // Try to get exit status with a short retry loop
-    let mut code = 0i32;
-    for _ in 0..50 {
-        let res = {
-            let _g = sess_lock.lock().unwrap();
-            chan.exit_status()
-        };
-        match res {
-            Ok(c) => {
-                code = c;
-                break;
+    
+    // Read stderr
+    let mut stderr = chan.stream(1);
+    loop {
+        match stderr.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => err.extend_from_slice(&buf[..n]),
+            Err(e) => {
+                s.sess.set_blocking(false); // Restore non-blocking
+                return Err(format!("read stderr: {}", e));
             }
-            Err(_) => std::thread::sleep(Duration::from_millis(10)),
         }
     }
+    
+    // Wait for channel to close and get exit status
+    chan.wait_close().map_err(|e| {
+        s.sess.set_blocking(false); // Restore non-blocking
+        format!("wait_close: {}", e)
+    })?;
+    
+    let code = chan.exit_status().unwrap_or(0);
+    
+    s.sess.set_blocking(false); // Restore non-blocking
+    
     Ok(ExecResult {
         stdout: String::from_utf8_lossy(&out).to_string(),
         stderr: String::from_utf8_lossy(&err).to_string(),
@@ -993,6 +1100,43 @@ pub async fn ssh_disconnect(
         let _ = s.sess.disconnect(None, "bye", None);
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_set_primary(
+    state: State<'_, crate::state::app_state::AppState>,
+    session_id: String,
+) -> Result<(), String> {
+    let mut inner = state.inner.lock().map_err(|_| "lock state")?;
+    
+    // First, unmark all sessions as primary
+    for (_, session) in inner.ssh.iter_mut() {
+        session.is_primary = false;
+    }
+    
+    // Then mark the specified session as primary
+    if let Some(s) = inner.ssh.get_mut(&session_id) {
+        s.is_primary = true;
+        Ok(())
+    } else {
+        Err("session not found".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn ssh_get_primary(
+    state: State<'_, crate::state::app_state::AppState>,
+) -> Result<Option<String>, String> {
+    let inner = state.inner.lock().map_err(|_| "lock state")?;
+    
+    // Find the primary session
+    for (id, session) in inner.ssh.iter() {
+        if session.is_primary {
+            return Ok(Some(id.clone()));
+        }
+    }
+    
+    Ok(None)
 }
 
 #[tauri::command]
@@ -1189,70 +1333,72 @@ pub async fn ssh_open_shell(
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<String, String> {
-    // Access the session and create/configure the channel
-    // We need to serialize channel creation with the session lock
-    let chan = {
-        // First get the session lock Arc
-        let (sess_lock, has_other_channels) = {
-            let inner = state.inner.lock().map_err(|_| "lock")?;
-            
-            // Check if this is the first channel or if other channels exist
-            let has_other_channels = inner.ssh_channels.values()
-                .any(|ch| ch.session_id == session_id);
-            
-            let s = inner
-                .ssh
-                .get(&session_id)
-                .ok_or("ssh session not found")?;
-            
-            (s.lock.clone(), has_other_channels)
-        };
-        
-        // Acquire the session lock before any session operations
-        // This ensures no other operations (reads/writes) happen during channel creation
-        let _guard = sess_lock.lock().map_err(|_| "session lock poisoned")?;
-        
-        // Now reacquire inner lock with session lock held
-        let mut inner = state.inner.lock().map_err(|_| "lock")?;
+    // For splits, create a new SSH connection instead of reusing the existing session
+    // This prevents channel interference and makes each split independent
+    
+    // Get connection info from the existing session
+    let (host, port, user, auth) = {
+        let inner = state.inner.lock().map_err(|_| "lock")?;
         let s = inner
             .ssh
-            .get_mut(&session_id)
+            .get(&session_id)
             .ok_or("ssh session not found")?;
-        
-        // Now safe to change blocking mode temporarily
-        s.sess.set_blocking(true);
-        
-        let mut chan = s
-            .sess
-            .channel_session()
-            .map_err(|e| format!("channel_session: {e}"))?;
+        (s.host.clone(), s.port, s.user.clone(), s.auth.clone())
+    };
+    
+    // Create a new SSH connection for this split
+    let (tcp, sess) = establish_ssh_connection(&host, port, &user, &auth, true)?;
+    
+    // Create a new session ID for this connection
+    let new_session_id = format!("ssh_{}", nanoid::nanoid!(8));
+    
+    // Store the new session (not primary since it's a split)
+    {
+        let mut inner = state.inner.lock().map_err(|_| "lock state")?;
+        inner.ssh.insert(
+            new_session_id.clone(),
+            crate::state::app_state::SshSession {
+                id: new_session_id.clone(),
+                tcp,
+                sess: sess.clone(),
+                lock: std::sync::Arc::new(std::sync::Mutex::new(())),
+                host,
+                port,
+                user: user.clone(),
+                auth,
+                is_primary: false, // Splits are not primary by default
+            },
+        );
+    }
+    
+    // Now create the channel on the new session
+    let chan = {
+        // Create channel with retry for non-blocking mode
+        let mut chan = retry_would_block(|| sess.channel_session(), 10)?;
 
         let term = "xterm-256color";
         let sz_cols = cols.unwrap_or(120);
         let sz_rows = rows.unwrap_or(30);
         
-        chan.request_pty(term, None, Some((sz_cols as u32, sz_rows as u32, 0, 0)))
-            .map_err(|e| format!("request_pty: {e}"))?;
+        // Request PTY with retry for non-blocking mode
+        retry_would_block(
+            || chan.request_pty(term, None, Some((sz_cols as u32, sz_rows as u32, 0, 0))),
+            10
+        ).map_err(|e| format!("request_pty: {e}"))?;
         
+        // Merge STDERR into STDOUT so we don't miss prompts/messages
         let _ = chan.handle_extended_data(ssh2::ExtendedData::Merge);
         
+        // Start the shell with retry for non-blocking mode
         if let Some(dir) = cwd {
             let esc = dir.replace("'", "'\\''");
             let cmd = format!("bash -lc 'cd \"{}\"; exec $SHELL -l'", esc);
-            chan.exec(&cmd).map_err(|e| format!("exec(shell): {e}"))?;
+            retry_would_block(|| chan.exec(&cmd), 10).map_err(|e| format!("exec(shell): {e}"))?;
         } else {
-            chan.shell().map_err(|e| format!("shell: {e}"))?;
+            retry_would_block(|| chan.shell(), 10).map_err(|e| format!("shell: {e}"))?;
         }
 
-        // Always restore to non-blocking mode for reading
-        s.sess.set_blocking(false);
-        // Also ensure TCP stream is non-blocking for consistency
-        if !has_other_channels {
-            let _ = s.tcp.set_nonblocking(true);
-        }
-        
         chan
-        // Guard and inner are dropped here, releasing both locks
     };
     // Channel is ready; start a command-processing thread that also reads output
     let id = format!("chan_{}", nanoid::nanoid!(8));
@@ -1262,12 +1408,12 @@ pub async fn ssh_open_shell(
             id.clone(),
             crate::state::app_state::SshChannel {
                 id: id.clone(),
-                session_id: session_id.clone(),
+                session_id: new_session_id.clone(), // Use the new session ID for the split
                 chan: std::sync::Arc::new(std::sync::Mutex::new(chan)),
             },
         );
     }
-    // Session is already in non-blocking mode from channel creation
+    // Session is already in non-blocking mode
     let _ = app.emit(
         crate::events::SSH_OPENED,
         &serde_json::json!({"channelId": id}),
@@ -1345,7 +1491,11 @@ pub async fn ssh_open_shell(
             }
         }
     });
-    Ok(id)
+    // Return both channel ID and session ID so frontend can track the mapping
+    Ok(serde_json::json!({
+        "channelId": id,
+        "sessionId": new_session_id
+    }).to_string())
 }
 
 #[tauri::command]

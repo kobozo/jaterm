@@ -88,6 +88,10 @@ pub struct SshSession {
     pub host: String,
     pub port: u16,
     pub user: String,
+    // Store auth info to recreate connections for splits
+    pub auth: Option<crate::commands::ssh::SshAuth>,
+    // Track if this is the primary connection for Git/SFTP
+    pub is_primary: bool,
 }
 
 pub struct SshChannel {

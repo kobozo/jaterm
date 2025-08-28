@@ -47,6 +47,8 @@ fn main() {
             commands::pty::pty_kill,
             commands::ssh::ssh_connect,
             commands::ssh::ssh_disconnect,
+            commands::ssh::ssh_set_primary,
+            commands::ssh::ssh_get_primary,
             commands::keygen::generate_ssh_key,
             commands::keygen::deploy_public_key,
             commands::keygen::test_key_auth,

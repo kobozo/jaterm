@@ -19,17 +19,20 @@ type Props = {
   onCompose?: () => void;
   onTerminalEvent?: (id: string, event: any) => void;
   terminalSettings?: { theme?: string; fontSize?: number; fontFamily?: string };
+  isPrimary?: boolean;
+  onSetPrimary?: () => void;
 };
 
-export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId, onCompose, onTerminalEvent, terminalSettings }: Props) {
+export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId, onCompose, onTerminalEvent, terminalSettings, isPrimary, onSetPrimary }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id, terminalSettings);
   const fitRef = useRef<FitAddon | null>(null);
   const correctedRef = useRef(false);
   const openedAtRef = useRef<number>(Date.now());
   const decoderRef = useRef<TextDecoder | null>(null);
-  const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const writeBufferRef = useRef<string>('');
+  const lastCwdRef = useRef<string>('');
+  const lastCwdTimeRef = useRef<number>(0);
+  const cwdDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const IS_DEV = import.meta.env.DEV;
   
   // Get terminal settings
@@ -93,6 +96,35 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
       }
     }
     return results;
+  }
+  
+  // Centralized CWD update handler with deduplication
+  function handleCwdUpdate(newCwd: string, source: 'osc7' | 'title') {
+    const now = Date.now();
+    
+    // Skip if same path was sent within 500ms
+    if (lastCwdRef.current === newCwd && (now - lastCwdTimeRef.current) < 500) {
+      if (IS_DEV) console.info(`[ssh][cwd] Skipping duplicate from ${source}:`, newCwd);
+      return;
+    }
+    
+    // Cancel any pending debounced update
+    if (cwdDebounceRef.current) {
+      clearTimeout(cwdDebounceRef.current);
+      cwdDebounceRef.current = null;
+    }
+    
+    // Update tracking
+    lastCwdRef.current = newCwd;
+    lastCwdTimeRef.current = now;
+    
+    if (IS_DEV) console.info(`[ssh][cwd] Update from ${source}:`, newCwd);
+    
+    // Debounce the actual callback to prevent rapid successive calls
+    cwdDebounceRef.current = setTimeout(() => {
+      onCwd?.(id, newCwd);
+      cwdDebounceRef.current = null;
+    }, 100);
   }
 
   useEffect(() => {
@@ -187,29 +219,38 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
             if (sessionId) {
               sshHomeDir(sessionId).then((hd) => {
                 const abs = hd.replace(/\/$/, '') + rest;
-                if (IS_DEV) console.info('[ssh][title] cwd=', abs);
-                onCwd?.(id, abs);
+                handleCwdUpdate(abs, 'title');
               }).catch(() => {});
             }
           } else if (candidate.startsWith('/') && sessionId) {
-            // Heuristic: some prompts render home-relative as "/foo" (missing home prefix). Prefix with $HOME unless it's a known root path.
-            const KNOWN_ROOTS = ['/home/', '/usr/', '/var/', '/etc/', '/opt/', '/bin/', '/sbin/', '/lib', '/tmp/', '/mnt/', '/media/', '/root/'];
+            // Improved heuristic: Be more conservative about prepending home directory
+            // Only prepend home if the path clearly looks like a relative path from home
+            const KNOWN_ROOTS = ['/home/', '/usr/', '/var/', '/etc/', '/opt/', '/bin/', '/sbin/', '/lib', '/tmp/', '/mnt/', '/media/', '/root/', '/dev/', '/sys/', '/proc/'];
             const looksRooted = KNOWN_ROOTS.some((p) => candidate.startsWith(p));
-            sshHomeDir(sessionId).then((hd) => {
-              const home = hd.replace(/\/$/, '') + '/';
-              let abs = candidate;
-              if (!candidate.startsWith(home) && !looksRooted) {
-                abs = home + candidate.replace(/^\//, '');
+            
+            if (looksRooted) {
+              // Path starts with a known root, use as-is
+              handleCwdUpdate(candidate, 'title');
+            } else {
+              // Path might be relative to home, but be conservative
+              // Only prepend home if the path is a single component like "/development"
+              const pathComponents = candidate.split('/').filter(c => c.length > 0);
+              if (pathComponents.length === 1) {
+                // Single component like "/development", might be relative to home
+                sshHomeDir(sessionId).then((hd) => {
+                  const home = hd.replace(/\/$/, '') + '/';
+                  const abs = home + candidate.replace(/^\//, '');
+                  handleCwdUpdate(abs, 'title');
+                }).catch(() => {
+                  handleCwdUpdate(candidate, 'title');
+                });
+              } else {
+                // Multiple components, more likely to be an absolute path
+                handleCwdUpdate(candidate, 'title');
               }
-              if (IS_DEV) console.info('[ssh][title] cwd=', abs);
-              onCwd?.(id, abs);
-            }).catch(() => {
-              if (IS_DEV) console.info('[ssh][title] cwd=', candidate);
-              onCwd?.(id, candidate);
-            });
+            }
           } else {
-            if (IS_DEV) console.info('[ssh][title] cwd=', candidate);
-            onCwd?.(id, candidate);
+            handleCwdUpdate(candidate, 'title');
           }
         }
       } catch {}
@@ -235,7 +276,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
           const dataStr = decoderRef.current.decode(bytes);
           const cwds = parseOsc7Cwds(dataStr);
           cwds.forEach((p) => {
-            onCwd?.(id, p);
+            handleCwdUpdate(p, 'osc7');
             const withinWindow = Date.now() - openedAtRef.current < 2500;
             if (!correctedRef.current && withinWindow && desiredCwd && p !== desiredCwd) {
               // Use direct write for cd commands to ensure they're sent immediately
@@ -255,7 +296,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
         const data = e.data as string;
         const cwds = parseOsc7Cwds(data);
         cwds.forEach((p) => {
-          onCwd?.(id, p);
+          handleCwdUpdate(p, 'osc7');
           const withinWindow = Date.now() - openedAtRef.current < 2500;
           if (!correctedRef.current && withinWindow && desiredCwd && p !== desiredCwd) {
             sshWrite({ channelId: id, data: `cd '${desiredCwd.replace(/'/g, "'\\''")}'\n` });
@@ -269,13 +310,7 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
     }).then((u) => (unlisten = u));
     onSshExit((e) => { if (e.channelId === id) { if (IS_DEV) console.info('[ssh] exit', id); onClose?.(id); } }).then((u) => (unlistenExit = u));
     return () => {
-      // Flush any pending writes before cleanup
-      if (writeTimerRef.current !== null) {
-        clearTimeout(writeTimerRef.current);
-        if (writeBufferRef.current && id) {
-          sshWrite({ channelId: id, data: writeBufferRef.current });
-        }
-      }
+      // Clean up subscriptions
       sub.dispose();
       keySub.dispose();
       resizeSub.dispose();
@@ -285,6 +320,11 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
       elem?.removeEventListener('mousedown', handleFocus);
       if (unlisten) unlisten();
       if (unlistenExit) unlistenExit();
+      // Clean up CWD debounce timer
+      if (cwdDebounceRef.current) {
+        clearTimeout(cwdDebounceRef.current);
+        cwdDebounceRef.current = null;
+      }
     };
   }, [id, term, termSettings.copyOnSelect]);
 
@@ -341,7 +381,17 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
 
   return (
     <div
-      style={{ height: '100%', width: '100%', position: 'relative', boxSizing: 'border-box', border: '1px solid #444', borderRadius: 4, minHeight: 0, overflow: 'hidden' }}
+      style={{ 
+        height: '100%', 
+        width: '100%', 
+        position: 'relative', 
+        boxSizing: 'border-box', 
+        // Only show green border for primary when there are splits
+        border: (isPrimary && onSetPrimary) ? '2px solid #00d084' : '1px solid #444', 
+        borderRadius: 4, 
+        minHeight: 0, 
+        overflow: 'hidden' 
+      }}
       onMouseDown={onMouseDown}
       onAuxClick={(e) => {
         // Handle middle click specifically
@@ -363,6 +413,21 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
         >
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onSplit?.(id, 'row'); }}>Split Horizontally</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onSplit?.(id, 'column'); }}>Split Vertically</div>
+          {onSetPrimary && (
+            <>
+              <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
+              {isPrimary ? (
+                <div style={{ padding: '6px 10px', color: '#00d084', opacity: 0.7 }}>✓ Primary (Git/SFTP follows)</div>
+              ) : (
+                <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { 
+                  e.stopPropagation(); 
+                  e.preventDefault(); 
+                  setMenu(null); 
+                  onSetPrimary(); 
+                }}>Make Primary (Git/SFTP follows)</div>
+              )}
+            </>
+          )}
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onCompose?.(); }}>Compose with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />

@@ -115,12 +115,29 @@ export function sshDisconnect(sessionId: string) {
   return invoke('ssh_disconnect', { sessionId } as any);
 }
 
+export async function sshSetPrimary(sessionId: string): Promise<void> {
+  return invoke('ssh_set_primary', { sessionId } as any);
+}
+
+export async function sshGetPrimary(): Promise<string | null> {
+  return invoke('ssh_get_primary', {} as any);
+}
+
 export function sshDetectPorts(sessionId: string): Promise<number[]> {
   return invoke('ssh_detect_ports', { sessionId } as any);
 }
 
-export async function sshOpenShell(args: { sessionId: string; cwd?: string; cols?: number; rows?: number }): Promise<string> {
-  return invoke('ssh_open_shell', { sessionId: args.sessionId, cwd: args.cwd, cols: args.cols, rows: args.rows } as any);
+export async function sshOpenShell(args: { sessionId: string; cwd?: string; cols?: number; rows?: number }): Promise<{ channelId: string; sessionId: string } | string> {
+  const result = await invoke('ssh_open_shell', { sessionId: args.sessionId, cwd: args.cwd, cols: args.cols, rows: args.rows } as any);
+  // Try to parse as JSON for new format, fall back to string for compatibility
+  if (typeof result === 'string') {
+    try {
+      return JSON.parse(result);
+    } catch {
+      return result; // Legacy format - just channel ID
+    }
+  }
+  return result;
 }
 
 export function sshWrite(args: { channelId: string; data: string }) {

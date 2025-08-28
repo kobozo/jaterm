@@ -103,55 +103,11 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
     setErr(null);
     try {
       if (!cwd) throw new Error('No working directory');
-      // Only resolve locally for local sessions; SSH paths are remote and should not be resolved locally
+      // Use the cwd prop directly - it's already been properly normalized by the parent component
+      // For SSH sessions, the cwd is already the correct remote path
+      // For local sessions, resolve it to absolute
       let abs = kind === 'ssh' ? cwd : await resolvePathAbsolute(cwd);
-      if (kind === 'ssh') {
-        console.info('[git] GitTools title=', title);
-        try {
-          let home: string | undefined = undefined;
-          if (sessionId) {
-            try { home = await sshHomeDirWithRetry(sessionId); } catch (e) { /* ignore, will fallback */ }
-          }
-          // Fallback: derive home from helperPath like "/home/user/.jaterm-helper/jaterm-agent"
-          if (!home && helperPath) {
-            const idx = helperPath.indexOf('/.jaterm-helper/');
-            if (idx > 0) home = helperPath.slice(0, idx);
-          }
-          const pref = home ? home.replace(/\/$/, '') + '/' : undefined;
-          // Prefer extracting from the end of the title after ':'
-          let candidate: string | undefined;
-          if (title) {
-            const afterColon = title.includes(':') ? title.split(':').slice(-1)[0].trim() : title.trim();
-            if (afterColon.startsWith('~/')) candidate = afterColon;
-            else if (afterColon.startsWith('/')) candidate = afterColon;
-            // Fallback regexes
-            if (!candidate) {
-              const mTilde = title.match(/~\/[A-Za-z0-9_\-\.\/~]+/);
-              if (mTilde && mTilde[0]) candidate = mTilde[0];
-            }
-            if (!candidate) {
-              const mAbs = title.match(/\/[A-Za-z0-9_\-\.\/]+/g);
-              if (mAbs && mAbs.length) candidate = mAbs[mAbs.length - 1];
-            }
-          }
-          console.info('[git] GitTools candidate=', candidate, 'home=', home);
-          if (candidate) {
-            if (candidate.startsWith('~/')) {
-              if (home) abs = home.replace(/\/$/, '') + candidate.slice(1);
-              else abs = candidate; // helper will expand ~ now
-            } else {
-              abs = candidate;
-            }
-          }
-          // Normalize home-relative like "/foo" when not a known root
-          if (home && abs && abs.startsWith('/')) {
-            const known = /^(\/home\/|\/usr\/|\/var\/|\/etc\/|\/opt\/|\/bin\/|\/sbin\/|\/lib|\/tmp\/|\/mnt\/|\/media\/|\/root\/)/;
-            if (!known.test(abs) && pref && !abs.startsWith(pref)) {
-              abs = pref + abs.replace(/^\//, '');
-            }
-          }
-        } catch (e) { console.info('[git] GitTools path resolve error', e); }
-      }
+      
       console.info('[git] GitTools refresh cwd=', abs, { kind, sessionId, helperPath });
       const st = await gitStatusViaHelper({ kind: kind === 'ssh' ? 'ssh' : 'local', sessionId: sessionId || undefined, helperPath: helperPath || undefined }, abs!);
       const prevStatus = status;
@@ -197,7 +153,7 @@ export default function GitTools({ cwd, kind, sessionId, helperPath, title, onSt
     if (!cwd || !helperReady || !isActive) return;
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, kind, sessionId, helperPath, title, isActive]);
+  }, [cwd, kind, sessionId, helperPath, isActive]);
 
   // Periodic refresh while mounted
   React.useEffect(() => {
