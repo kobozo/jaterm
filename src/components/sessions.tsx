@@ -969,7 +969,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                                 // Try to resolve effective settings from the first occurrence in the tree
                                 let term = p.terminal, shell = p.shell, advanced = p.advanced, ssh: any = { host: p.host, port: p.port, user: p.user, auth: p.auth };
                                 try {
-                                  const t = tree ?? (await ensureProfilesTree());
+                                  const t = tree;
                                   // Find first tree node referencing this profile
                                   function findNode(n: ProfilesTreeNode, kind: 'ssh'|'local', id: string): Extract<ProfilesTreeNode, { type: 'profile' }> | null {
                                     if (n.type === 'profile' && n.ref.kind === kind && n.ref.id === id) return n as any;
@@ -984,7 +984,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                                     term = eff.terminal; shell = eff.shell; advanced = eff.advanced; ssh = eff.ssh ? { ...ssh, ...eff.ssh } : ssh;
                                   }
                                 } catch {}
-                                onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.s.path, profileId: p.id, profileName: p.name, terminal: term, shell, advanced, os: p.os });
+                                onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.s.path, profileId: p.id, profileName: p.name, terminal: term, shell, advanced, os: p.os, _resolved: true } as any);
                               } else if (r.s.host && r.s.user) {
                                 onOpenSsh?.({ host: r.s.host, port: r.s.port ?? 22, user: r.s.user, auth: { agent: true } as any, cwd: r.s.path });
                               } else {
