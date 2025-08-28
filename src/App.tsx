@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import SplitView from '@/components/SplitView';
 import FileExplorerWithEditor from '@/components/FileExplorerWithEditor';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
@@ -53,6 +53,7 @@ export default function App() {
   };
   const [sessionsId] = useState<string>(() => crypto.randomUUID());
   const [tabs, setTabs] = useState<Tab[]>([{ id: sessionsId, cwd: null, panes: [], activePane: null, status: {} }]);
+  const tabsRef = useRef<Tab[]>(tabs);
   const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
   // Map channel IDs to SSH session IDs (for splits with independent connections)
@@ -153,6 +154,11 @@ export default function App() {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep tabsRef in sync with tabs state
+  React.useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
 
   // Load SSH profiles on startup and when unlocked
   React.useEffect(() => {
@@ -765,12 +771,7 @@ export default function App() {
     lastNormalizedPath.current.delete(id);
     
     // record session for the tab if it had a cwd
-    // Get the current tab state (not stale closure)
-    let toRecord: Tab | undefined;
-    setTabs((current) => {
-      toRecord = current.find((t) => t.id === id);
-      return current; // Don't modify, just read
-    });
+    const toRecord = tabsRef.current.find((t) => t.id === id);
     if (toRecord && toRecord.kind !== 'ssh' && (toRecord.status.cwd || toRecord.cwd)) {
       addRecentSession({ cwd: (toRecord.status.cwd ?? toRecord.cwd) as string, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
       // Dispatch event so Sessions component can refresh
