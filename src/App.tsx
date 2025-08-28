@@ -17,7 +17,7 @@ import { MasterKeyDialog } from '@/components/MasterKeyDialog';
 import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
-import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
+import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, sshSetPrimary, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
 import { getCachedConfig } from '@/services/settings';
 import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
 import { useToasts } from '@/store/toasts';
@@ -41,6 +41,7 @@ export default function App() {
     cwd: string | null;
     panes: string[];
     activePane: string | null;
+    primaryPane?: string | null; // Track which pane's session is primary for Git/SFTP
     status: { cwd?: string | null; fullPath?: string | null; branch?: string; ahead?: number; behind?: number; staged?: number; unstaged?: number; seenOsc7?: boolean; helperOk?: boolean; helperVersion?: string; helperChecked?: boolean; helperPath?: string | null };
     title?: string;
     view?: 'terminal' | 'git' | 'ports' | 'files';
@@ -54,6 +55,8 @@ export default function App() {
   const [tabs, setTabs] = useState<Tab[]>([{ id: sessionsId, cwd: null, panes: [], activePane: null, status: {} }]);
   const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
+  // Map channel IDs to SSH session IDs (for splits with independent connections)
+  const [channelToSession, setChannelToSession] = useState<Record<string, string>>({});
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
   // Master key dialog state
   const [masterKeyDialog, setMasterKeyDialog] = useState<{ isOpen: boolean; mode: 'setup' | 'unlock'; isMigration?: boolean }>({ isOpen: false, mode: 'setup' });
@@ -425,10 +428,17 @@ export default function App() {
     if (t.kind === 'ssh') {
       if (!t.sshSessionId) return;
       try {
-        const newId = await sshOpenShell({ sessionId: t.sshSessionId, cwd: t.cwd ?? undefined, cols: 120, rows: 30 });
-        const replacement: LayoutNode = { type: 'split', direction, children: [{ type: 'leaf', paneId }, { type: 'leaf', paneId: newId }] };
+        const result = await sshOpenShell({ sessionId: t.sshSessionId, cwd: t.cwd ?? undefined, cols: 120, rows: 30 });
+        // Handle both new format (object) and old format (string)
+        const channelId = typeof result === 'string' ? result : result.channelId;
+        const sessionId = typeof result === 'string' ? t.sshSessionId : result.sessionId;
+        
+        // Track the channel-to-session mapping for splits
+        setChannelToSession(prev => ({ ...prev, [channelId]: sessionId }));
+        
+        const replacement: LayoutNode = { type: 'split', direction, children: [{ type: 'leaf', paneId }, { type: 'leaf', paneId: channelId }] };
         const newLayout: LayoutNode = t.layout ? replaceLeaf(t.layout as any, paneId, replacement) : replacement;
-        setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, panes: [...tb.panes, newId], activePane: newId, layout: newLayout } : tb)));
+        setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, panes: [...tb.panes, channelId], activePane: channelId, layout: newLayout } : tb)));
       } catch (e) {
         console.error('ssh split failed', e);
       }
@@ -446,13 +456,50 @@ export default function App() {
     }
   }
 
+  async function setPrimaryPane(paneId: string) {
+    const t = tabs.find(x => x.id === activeTab);
+    if (!t || !t.panes.includes(paneId)) return;
+    
+    // Update the primary pane for this tab
+    setTabs(prev => prev.map(tab => {
+      if (tab.id === activeTab) {
+        return { ...tab, primaryPane: paneId };
+      }
+      return tab;
+    }));
+    
+    // If this is an SSH tab, update the backend primary flag
+    if (t.kind === 'ssh' && channelToSession[paneId]) {
+      const sessionId = channelToSession[paneId];
+      await sshSetPrimary(sessionId);
+    }
+  }
+  
   async function closePane(id: string) {
     // Clean up event detector
     unregisterTerminalEventDetector(id);
     
     const t = tabs.find((x) => x.id === activeTab);
+    
+    // Check if we're closing the primary pane
+    const isClosingPrimary = t?.primaryPane === id;
+    
     if (t?.kind === 'ssh') {
-      try { await sshCloseShell(id); } catch {}
+      try { 
+        await sshCloseShell(id);
+        // If this pane has its own SSH session (from a split), disconnect it
+        const sessionId = channelToSession[id];
+        if (sessionId && sessionId !== t.sshSessionId) {
+          // This is a split with its own connection - disconnect it
+          await sshDisconnect(sessionId);
+          // Clean up the mapping
+          setChannelToSession(prev => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+        }
+      } catch {}
     } else {
       emitCwdViaOsc7(id);
       await new Promise((r) => setTimeout(r, 120));
@@ -467,7 +514,31 @@ export default function App() {
       if (t.id !== activeTab) return t;
       const nextPanes = t.panes.filter((p) => p !== id);
       const nextLayout = t.layout ? removeLeaf(t.layout as any, id) : undefined;
-      const updated = { ...t, panes: nextPanes, activePane: nextPanes[nextPanes.length - 1] ?? null, cwd: nextPanes.length ? t.cwd : null, layout: nextLayout };
+      
+      // If we're closing the primary pane and there are still other panes, set a new primary
+      let nextPrimary = t.primaryPane;
+      if (isClosingPrimary && nextPanes.length > 0) {
+        // Set the first remaining pane as the new primary
+        nextPrimary = nextPanes[0];
+        // Update backend if SSH
+        if (t.kind === 'ssh' && channelToSession[nextPrimary]) {
+          const newPrimarySessionId = channelToSession[nextPrimary];
+          sshSetPrimary(newPrimarySessionId).catch(() => {});
+        }
+      } else if (nextPanes.length === 0) {
+        // No panes left, clear primary
+        nextPrimary = null;
+      }
+      
+      const updated = { 
+        ...t, 
+        panes: nextPanes, 
+        activePane: nextPanes[nextPanes.length - 1] ?? null, 
+        primaryPane: nextPrimary,
+        cwd: nextPanes.length ? t.cwd : null, 
+        layout: nextLayout 
+      };
+      
       if (t.kind !== 'ssh' && t.panes.length > 0 && nextPanes.length === 0 && (t.status.fullPath || t.cwd)) {
         addRecentSession({ cwd: (t.status.fullPath ?? t.cwd) as string, closedAt: Date.now(), panes: t.panes.length, title: t.title ?? undefined, layoutShape: layoutToShape(t.layout as any) });
       }
@@ -489,20 +560,33 @@ export default function App() {
   // Track pending CWD updates and last update time to prevent race conditions
   const pendingCwdUpdates = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const lastCwdUpdate = React.useRef<Map<string, { dir: string; timestamp: number }>>(new Map());
+  const lastNormalizedPath = React.useRef<Map<string, string>>(new Map());
   
-  async function updateTabCwd(tabId: string, dir: string) {
+  async function updateTabCwd(tabId: string, dir: string, paneId?: string) {
     const now = Date.now();
     
     // Check if this is a stale update (same as last or going backwards)
     const last = lastCwdUpdate.current.get(tabId);
     if (last && last.dir === dir && (now - last.timestamp) < 1000) {
       // Same directory within 1 second, skip
+      console.info('[git] Skipping duplicate CWD update:', dir, 'paneId:', paneId);
       return;
     }
+    
+    // Check if this update is from the primary pane (for SSH tabs)
+    const tab = tabs.find(t => t.id === tabId);
+    if (tab && tab.kind === 'ssh' && paneId && tab.primaryPane && paneId !== tab.primaryPane) {
+      // This is not the primary pane, don't update Git/SFTP
+      console.info('[git] Skipping non-primary pane update:', dir, 'paneId:', paneId, 'primaryPane:', tab.primaryPane);
+      return;
+    }
+    
+    console.info('[git] updateTabCwd called:', dir, 'paneId:', paneId, 'previous:', last?.dir);
     
     // Cancel any pending update for this tab
     const pending = pendingCwdUpdates.current.get(tabId);
     if (pending) {
+      console.info('[git] Cancelling pending update for:', last?.dir);
       clearTimeout(pending);
       pendingCwdUpdates.current.delete(tabId);
     }
@@ -521,13 +605,14 @@ export default function App() {
         return;
       }
       
-      await doUpdateTabCwd(tabId, dir);
+      console.info('[git] Executing debounced update for:', dir);
+      await doUpdateTabCwd(tabId, dir, paneId);
     }, 150); // 150ms debounce
     
     pendingCwdUpdates.current.set(tabId, timeoutId);
   }
   
-  async function doUpdateTabCwd(tabId: string, dir: string) {
+  async function doUpdateTabCwd(tabId: string, dir: string, paneId?: string) {
     // Resolve to absolute for local sessions only; SSH paths are remote and should not be resolved locally
     let abs = dir;
     const tcur = tabs.find((x) => x.id === tabId);
@@ -555,6 +640,24 @@ export default function App() {
         }
       } catch {}
     }
+    
+    // Check if we've already processed this NORMALIZED path recently
+    const lastNormalized = lastNormalizedPath.current.get(tabId);
+    if (lastNormalized === abs) {
+      console.info('[git] Skipping duplicate normalized path:', abs, '(original:', dir, ')');
+      return;
+    }
+    
+    // Before doing any async work, check if this is still the latest directory
+    const beforeGitCheck = lastCwdUpdate.current.get(tabId);
+    if (!beforeGitCheck || beforeGitCheck.dir !== dir) {
+      console.info('[git] Aborting stale CWD update (pre-git):', dir, 'latest:', beforeGitCheck?.dir);
+      return;
+    }
+    
+    // Record the normalized path
+    lastNormalizedPath.current.set(tabId, abs);
+    
     // Store cwd and ensure helperPath for SSH if we derived a home
     setTabs((prev) => prev.map((t) => {
       if (t.id !== tabId) return t;
@@ -567,8 +670,19 @@ export default function App() {
     try {
       const t = tabs.find((x) => x.id === tabId);
       const helperPath = (t?.status?.helperPath as string | null) ?? (sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : null);
-      console.info('[git] doUpdateTabCwd git-status cwd=', abs, { tabId, kind: t?.kind, helperPath, sessionId: (t as any)?.sshSessionId });
-      const st = await gitStatusViaHelper({ kind: t?.kind === 'ssh' ? 'ssh' : 'local', sessionId: (t as any)?.sshSessionId, helperPath }, abs);
+      // IMPORTANT: Always use the original session for Git operations (it has the helper deployed)
+      // Split sessions don't have the helper, so we must use the original session ID
+      const gitSessionId = (t as any)?.sshSessionId; // Original session with helper
+      console.info('[git] doUpdateTabCwd git-status cwd=', abs, { tabId, kind: t?.kind, helperPath, sessionId: gitSessionId });
+      const st = await gitStatusViaHelper({ kind: t?.kind === 'ssh' ? 'ssh' : 'local', sessionId: gitSessionId, helperPath }, abs);
+      
+      // After the async git status call, check again if this is still current
+      const afterGitCheck = lastCwdUpdate.current.get(tabId);
+      if (!afterGitCheck || afterGitCheck.dir !== dir) {
+        console.info('[git] Aborting stale CWD update (post-git):', dir, 'latest:', afterGitCheck?.dir);
+        return;
+      }
+      
       setTabs((prev) => prev.map((t) => {
         if (t.id === tabId) {
           const newStatus = { ...t.status, cwd: abs, fullPath: abs, branch: st.branch, ahead: st.ahead, behind: st.behind, staged: st.staged, unstaged: st.unstaged, seenOsc7: true };
@@ -579,6 +693,16 @@ export default function App() {
         return t;
       }));
     } catch {
+      // After the async git status call failed, check again if this is still current
+      const afterGitCheck = lastCwdUpdate.current.get(tabId);
+      if (!afterGitCheck || afterGitCheck.dir !== dir) {
+        console.info('[git] Aborting stale CWD update (post-git-error):', dir, 'latest:', afterGitCheck?.dir);
+        return;
+      }
+      
+      // Clear the normalized path since this is not a git repo
+      lastNormalizedPath.current.set(tabId, abs + '_not_git');
+      
       setTabs((prev) => prev.map((t) => {
         if (t.id === tabId) {
           const newStatus = { ...t.status, fullPath: abs, branch: '-', ahead: 0, behind: 0, staged: 0, unstaged: 0 };
@@ -606,6 +730,11 @@ export default function App() {
 
   async function closeTab(id: string) {
     if (id === sessionsId) return; // fixed Sessions tab cannot be closed
+    // Clean up tracking for this tab
+    pendingCwdUpdates.current.delete(id);
+    lastCwdUpdate.current.delete(id);
+    lastNormalizedPath.current.delete(id);
+    
     // record session for the tab if it had a cwd
     const toRecord = tabs.find((t) => t.id === id);
     if (toRecord && toRecord.kind !== 'ssh' && (toRecord.status.cwd || toRecord.cwd)) {
@@ -821,12 +950,22 @@ export default function App() {
         (ensureHelper as any)?.(sessionId, { show, update, dismiss })?.then(async (res: any) => {
           setTabs((prev) => {
             const detectedOs = (!opts.os || opts.os === 'auto-detect') ? res?.os : opts.os;
-            const updated = prev.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, helperOk: !!res?.ok, helperVersion: res?.version, helperPath: res?.path, os: detectedOs } } : t));
+            // Keep existing helperPath if res.path is undefined
+            const updated = prev.map((t) => (t.id === tabId ? { 
+              ...t, 
+              status: { 
+                ...t.status, 
+                helperOk: !!res?.ok, 
+                helperVersion: res?.version, 
+                helperPath: res?.path || t.status.helperPath, // Keep existing path if undefined
+                os: detectedOs 
+              } 
+            } : t));
             const cur = updated.find((t) => t.id === tabId);
             if (cur?.status?.fullPath && cur.status.helperOk) {
-              gitStatusViaHelper(sessionId, cur.status.fullPath).then((st) => {
-                setTabs((p) => p.map((t) => (t.id === tabId ? { ...t, status: { ...t.status, gitStatus: st } } : t)));
-              }).catch(() => {});
+              // Skip this git status call - it will be triggered by CWD updates
+              // This was causing duplicate calls with stale paths
+              // gitStatusViaHelper now handled properly via updateTabCwd
               setTimeout(() => {
                 detectPorts(sessionId);
               }, 200);
@@ -844,7 +983,13 @@ export default function App() {
   // Continue SSH session after consent
   async function continueOpenSshFor(sessionId: string, tabId: string, opts: any) {
     try {
-      const chanId = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
+      const result = await sshOpenShell({ sessionId, cwd: opts.cwd, cols: 120, rows: 30 });
+      // Handle both new format (object) and old format (string)
+      const chanId = typeof result === 'string' ? result : result.channelId;
+      const newSessionId = typeof result === 'string' ? sessionId : result.sessionId;
+      
+      // Track the channel-to-session mapping
+      setChannelToSession(prev => ({ ...prev, [chanId]: newSessionId }));
       
       // Apply shell settings if provided
       if (opts.shell) {
@@ -910,7 +1055,8 @@ export default function App() {
         // Set the title to profile name if available, otherwise use user@host
         title: opts.profileName || `${opts.user}@${opts.host}`,
         panes: [chanId], 
-        activePane: chanId, 
+        activePane: chanId,
+        primaryPane: chanId, // Initial pane is primary for Git/SFTP
         status: { 
           ...t.status,
           // Set default helper path if we have home directory
@@ -1911,7 +2057,9 @@ export default function App() {
                           desiredCwd={undefined}
                           sessionId={(t as any).sshSessionId}
                           terminalSettings={(t as any).terminalSettings}
-                          onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
+                          isPrimary={t.primaryPane === pid}
+                          onSetPrimary={t.panes.length > 1 ? () => setPrimaryPane(pid) : undefined}
+                          onCwd={(pid, dir) => updateTabCwd(t.id, dir, pid)}
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
@@ -1930,7 +2078,9 @@ export default function App() {
                           desiredCwd={undefined}
                           sessionId={(t as any).sshSessionId}
                           terminalSettings={(t as any).terminalSettings}
-                          onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
+                          isPrimary={t.primaryPane === pid}
+                          onSetPrimary={t.panes.length > 1 ? () => setPrimaryPane(pid) : undefined}
+                          onCwd={(pid, dir) => updateTabCwd(t.id, dir, pid)}
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
@@ -1951,7 +2101,7 @@ export default function App() {
                           key={pid}
                           id={pid}
                           desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                          onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
+                          onCwd={(pid, dir) => updateTabCwd(t.id, dir, pid)}
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
@@ -1968,7 +2118,7 @@ export default function App() {
                           key={pid}
                           id={pid}
                           desiredCwd={t.status.fullPath ?? t.cwd ?? undefined}
-                          onCwd={(_pid, dir) => updateTabCwd(t.id, dir)}
+                          onCwd={(pid, dir) => updateTabCwd(t.id, dir, pid)}
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
