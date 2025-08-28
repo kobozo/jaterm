@@ -80,6 +80,9 @@ export default function App() {
     user: string;
   } | null>(null);
   
+  // SSH profiles state for passing to Sessions component
+  const [sshProfiles, setSshProfiles] = useState<any[]>([]);
+  
   // Updater state
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState<null | { version?: string }>(null);
@@ -149,6 +152,32 @@ export default function App() {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load SSH profiles on startup and when unlocked
+  React.useEffect(() => {
+    const loadProfiles = async () => {
+      try {
+        const { getSshProfiles } = await import('@/store/persist');
+        const profiles = await getSshProfiles();
+        setSshProfiles(profiles);
+      } catch (e) {
+        console.warn('Failed to load SSH profiles:', e);
+      }
+    };
+
+    loadProfiles();
+
+    // Listen for profiles unlocked event
+    const handleProfilesUnlocked = () => {
+      console.log('Profiles unlocked, reloading SSH profiles...');
+      loadProfiles();
+    };
+
+    window.addEventListener('profiles-unlocked', handleProfilesUnlocked);
+    return () => {
+      window.removeEventListener('profiles-unlocked', handleProfilesUnlocked);
+    };
   }, []);
 
   async function checkForUpdatesInteractive() {
@@ -814,9 +843,16 @@ export default function App() {
             }
           }
         } catch {}
-        // Only prefer title candidate if it was normalized (i.e., not starting with '~') and is deeper
-        if (titleCandidate && !titleCandidate.startsWith('~/') && (!path || titleCandidate.length > path.length)) {
-          path = titleCandidate;
+        // Use the actual current working directory from status.fullPath if available
+        // This is the last known CWD tracked via OSC7 sequences
+        if (toRecord.status?.fullPath) {
+          path = toRecord.status.fullPath;
+          console.info('[ssh][recents] Using fullPath from status:', path);
+        } else {
+          // Fall back to title parsing only if no fullPath available
+          if (titleCandidate && !titleCandidate.startsWith('~/') && (!path || titleCandidate.length > path.length)) {
+            path = titleCandidate;
+          }
         }
         console.info('[ssh][recents] save final path=', path);
         const { addRecentSshSession } = await import('@/store/sessions');
@@ -2130,6 +2166,7 @@ export default function App() {
                   )
                 ) : (
                   <Sessions
+                    sshProfiles={sshProfiles}
                     onOpenFolder={(p) => {
                       const id = crypto.randomUUID();
                       setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
