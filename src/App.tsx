@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import SplitView from '@/components/SplitView';
 import FileExplorerWithEditor from '@/components/FileExplorerWithEditor';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
@@ -18,7 +18,7 @@ import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
 import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, sshSetPrimary, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
-import { getCachedConfig } from '@/services/settings';
+import { getCachedConfig, loadGlobalConfig } from '@/services/settings';
 import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
 import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
@@ -26,6 +26,9 @@ import { gitStatusViaHelper } from '@/services/git';
 import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
 import HelperConsentModal from '@/components/HelperConsentModal';
 import KeyGenerationModal from '@/components/KeyGenerationModal';
+import { logger } from '@/services/logger';
+import { telemetry, TelemetryEvent } from '@/services/telemetry';
+import { featureFlags } from '@/services/features';
 
 export default function App() {
   // imported above
@@ -128,14 +131,22 @@ export default function App() {
   // Load global settings and check updates on startup
   React.useEffect(() => {
     (async () => {
+      // Initialize services
+      const startTime = performance.now();
+      
       // Load global configuration
       let config;
       try {
-        const { loadGlobalConfig } = await import('@/services/settings');
         config = await loadGlobalConfig();
+        logger.info('Global configuration loaded');
       } catch (error) {
-        console.warn('Failed to load global config:', error);
+        logger.error('Failed to load global config', error);
       }
+      
+      // Track app startup
+      const loadTime = performance.now() - startTime;
+      telemetry.trackPerformance('app_startup', loadTime);
+      logger.info(`App initialized in ${loadTime.toFixed(2)}ms`);
 
       // Check for updates if enabled in settings
       if (config?.general?.autoCheckUpdates !== false) { // Default to true if not set
@@ -204,7 +215,7 @@ export default function App() {
         const profiles = await getSshProfiles();
         setSshProfiles(profiles);
       } catch (e) {
-        console.warn('Failed to load SSH profiles:', e);
+        logger.warn('Failed to load SSH profiles:', e);
       }
     };
 
@@ -212,7 +223,7 @@ export default function App() {
 
     // Listen for profiles unlocked event
     const handleProfilesUnlocked = () => {
-      console.log('Profiles unlocked, reloading SSH profiles...');
+      logger.info('Profiles unlocked, reloading SSH profiles...');
       loadProfiles();
     };
 
@@ -328,7 +339,7 @@ export default function App() {
         try {
           return await resolvePathAbsolute('~');
         } catch {
-          console.warn('Failed to resolve home directory');
+          logger.warn('Failed to resolve home directory');
           return null;
         }
       
@@ -339,7 +350,7 @@ export default function App() {
             return await resolvePathAbsolute(lastUsed);
           }
         } catch {
-          console.warn('Failed to resolve last used directory');
+          logger.warn('Failed to resolve last used directory');
         }
         // If no last used, fall back to home
         try {
@@ -353,7 +364,7 @@ export default function App() {
           try {
             return await resolvePathAbsolute(config.general.customWorkingDir);
           } catch {
-            console.warn('Failed to resolve custom directory:', config.general.customWorkingDir);
+            logger.warn('Failed to resolve custom directory:', config.general.customWorkingDir);
           }
         }
         return null;
@@ -440,7 +451,7 @@ export default function App() {
       } catch {}
       // No fallback cd: we rely on PTY cwd and shell OSC7 hooks
     } catch (e) {
-      console.error('ptyOpen failed', e);
+      logger.error('ptyOpen failed', e);
     }
   }
 
@@ -496,7 +507,7 @@ export default function App() {
       const sid = String(id);
       setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, panes: [...tb.panes, sid], activePane: sid } : tb)));
     } catch (e) {
-      console.error('ptyOpen failed', e);
+      logger.error('ptyOpen failed', e);
     }
   }
 
@@ -539,7 +550,7 @@ export default function App() {
         const newLayout: LayoutNode = t.layout ? replaceLeaf(t.layout as any, paneId, replacement) : replacement;
         setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, panes: [...tb.panes, channelId], activePane: channelId, layout: newLayout } : tb)));
       } catch (e) {
-        console.error('ssh split failed', e);
+        logger.error('ssh split failed', e);
       }
       return;
     }
@@ -551,7 +562,7 @@ export default function App() {
       const newLayout: LayoutNode = t.layout ? replaceLeaf(t.layout as any, paneId, replacement) : replacement;
       setTabs((prev) => prev.map((tb) => (tb.id === activeTab ? { ...tb, panes: [...tb.panes, newId], activePane: newId, layout: newLayout } : tb)));
     } catch (e) {
-      console.error('split failed', e);
+      logger.error('split failed', e);
     }
   }
 
@@ -1001,7 +1012,7 @@ export default function App() {
         });
       } catch {}
     } catch (e) {
-      console.error('open session failed', e);
+      logger.error('open session failed', e);
     }
   }
 
@@ -1042,7 +1053,7 @@ export default function App() {
         return (effective as any).ssh?.helperConsent;
       }
     } catch (e) {
-      console.error('Failed to resolve helper consent:', e);
+      logger.error('Failed to resolve helper consent:', e);
     }
     
     return undefined;
@@ -1066,7 +1077,7 @@ export default function App() {
           console.info('[Helper] Saved consent to profile:', profileId, consent);
         }
       } catch (e) {
-        console.error('[Helper] Failed to save consent to profile:', e);
+        logger.error('[Helper] Failed to save consent to profile:', e);
       }
     }
     
@@ -1159,7 +1170,7 @@ export default function App() {
               } as any
             });
           } catch (e) {
-            console.error('Failed to setup default forward:', e);
+            logger.error('Failed to setup default forward:', e);
           }
         }
       }
@@ -1207,7 +1218,7 @@ export default function App() {
       } : t)));
       setActiveTab(tabId);
     } catch (e) {
-      console.error('Failed to continue SSH session:', e);
+      logger.error('Failed to continue SSH session:', e);
       addToast({ 
         title: 'SSH Session Failed', 
         message: `Failed to open shell on ${opts.host}: ${String(e)}`,
@@ -1365,7 +1376,7 @@ export default function App() {
       
       console.info('[ssh][reconnect] Successfully reconnected to', opts.host);
     } catch (error) {
-      console.error('[ssh][reconnect] Reconnection failed:', error);
+      logger.error('[ssh][reconnect] Reconnection failed:', error);
       
       // Schedule next attempt if not at max
       const updatedTab = tabsRef.current.find(t => t.id === tabId);
@@ -1480,7 +1491,7 @@ export default function App() {
             // Continue with the connection but modal will be shown
           }
         } catch (e) {
-          console.error('Failed to check key generation status:', e);
+          logger.error('Failed to check key generation status:', e);
         }
       }
       
@@ -1542,7 +1553,7 @@ export default function App() {
                 console.info('[SSH] Saved detected OS to profile:', opts.profileId, res.os);
               }
             } catch (e) {
-              console.error('[SSH] Failed to save detected OS to profile:', e);
+              logger.error('[SSH] Failed to save detected OS to profile:', e);
             }
           }
         });
@@ -1554,7 +1565,7 @@ export default function App() {
         await continueOpenSshFor(sessionId, tabId, opts);
       }
     } catch (e) {
-      console.error('SSH connection failed:', e);
+      logger.error('SSH connection failed:', e);
       
       // Parse error message for better user feedback
       let errorMessage = String(e);
@@ -1608,7 +1619,7 @@ export default function App() {
         const { onTunnelState } = await import('@/types/ipc');
         const un = await onTunnelState((e) => {
           const { forwardId, status } = e as any;
-          console.log('Tunnel state event:', forwardId, status);
+          logger.info('Tunnel state event:', forwardId, status);
           setTabs((prev) => prev.map((tb) => {
             const t = tb;
             const f = (t.forwards || []).map((x) => x.id === forwardId ? { ...x, status } : x);
@@ -1630,7 +1641,7 @@ export default function App() {
         const { listen } = await import('@tauri-apps/api/event');
         const unlisten = await listen('ssh_detected_ports', (event) => {
           const { sessionId, ports } = event.payload as any;
-          console.log(`Detected ${ports.length} open ports on session ${sessionId}`);
+          logger.info(`Detected ${ports.length} open ports on session ${sessionId}`);
           
           // Get or create the set of already notified ports for this session
           if (!notifiedPortsRef.current.has(sessionId)) {
@@ -1742,10 +1753,10 @@ export default function App() {
     try {
       const { sshDetectPorts } = await import('@/types/ipc');
       const ports = await sshDetectPorts(sessionId);
-      console.log(`Event-driven port detection found ${ports.length} ports`);
+      logger.info(`Event-driven port detection found ${ports.length} ports`);
       // The event handler will update the state
     } catch (e) {
-      console.error('Port detection failed:', e);
+      logger.error('Port detection failed:', e);
     }
   }, 1000), []); // Debounce for 1 second
   
@@ -1830,7 +1841,7 @@ export default function App() {
       const tab = tabs.find(t => t.id === tabId);
       if (!tab) return;
       
-      // console.log(`Terminal event in pane ${paneId}:`, event);
+      // logger.info(`Terminal event in pane ${paneId}:`, event);
       
       switch (event.type) {
         case 'git-command':
@@ -2010,7 +2021,7 @@ export default function App() {
           }
         }
       } catch (e) {
-        console.warn('workspace restore failed', e);
+        logger.warn('workspace restore failed', e);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2330,9 +2341,9 @@ export default function App() {
                     try {
                       const { sshDetectPorts } = await import('@/types/ipc');
                       const ports = await sshDetectPorts(t.sshSessionId);
-                      console.log(`Manual refresh found ${ports.length} ports`);
+                      logger.info(`Manual refresh found ${ports.length} ports`);
                     } catch (e) {
-                      console.error('Port refresh failed:', e);
+                      logger.error('Port refresh failed:', e);
                     }
                   }}
                   onAdd={async (fwd) => {
@@ -2491,7 +2502,7 @@ export default function App() {
                       } else if (p && typeof p === 'object' && p.path) {
                         openFolderFor(id, p.path, { terminal: (p as any).terminal, shell: (p as any).shell });
                       } else {
-                        console.error('Invalid path provided to onOpenFolder:', p);
+                        logger.error('Invalid path provided to onOpenFolder:', p);
                       }
                     }}
                     onOpenSession={(s) => {
@@ -2755,7 +2766,7 @@ export default function App() {
                 });
               }
             } catch (e) {
-              console.error('Failed to update profile with key:', e);
+              logger.error('Failed to update profile with key:', e);
             }
             setKeyGenerationModal(null);
           }}
@@ -2774,7 +2785,7 @@ export default function App() {
                 await saveSshProfile(profile);
               }
             } catch (e) {
-              console.error('Failed to update profile skip flag:', e);
+              logger.error('Failed to update profile skip flag:', e);
             }
             setKeyGenerationModal(null);
           }}
@@ -2796,9 +2807,9 @@ export default function App() {
           try {
             const freshState = await loadAppState();
             // If we're on the sessions tab, it will reload via the event listener
-            console.log('Profiles reloaded after unlock');
+            logger.info('Profiles reloaded after unlock');
           } catch (e) {
-            console.error('Failed to reload profiles:', e);
+            logger.error('Failed to reload profiles:', e);
           }
         }}
       />
