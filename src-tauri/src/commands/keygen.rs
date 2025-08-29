@@ -271,6 +271,10 @@ pub async fn test_key_auth(
         }),
         trust_host: Some(true),
         timeout_ms: Some(10000),
+        keepalive_interval: None,
+        compression: None,
+        x11_forwarding: None,
+        agent_forwarding: None,
     };
 
     match crate::commands::ssh::ssh_connect(app, state.clone(), profile).await {

@@ -34,6 +34,14 @@ pub struct SshProfile {
     pub timeout_ms: Option<u64>,
     #[serde(default)]
     pub trust_host: Option<bool>,
+    #[serde(default)]
+    pub keepalive_interval: Option<u32>,
+    #[serde(default)]
+    pub compression: Option<bool>,
+    #[serde(default)]
+    pub x11_forwarding: Option<bool>,
+    #[serde(default)]
+    pub agent_forwarding: Option<bool>,
 }
 
 fn default_port() -> u16 {
@@ -150,8 +158,19 @@ pub async fn ssh_connect(
     // Disable Nagle's algorithm for better responsiveness (TCP_NODELAY)
     tcp.set_nodelay(true).ok();
     let mut sess = ssh2::Session::new().map_err(|e| format!("session: {e}"))?;
+    
+    // Enable/disable compression (must be set before handshake)
+    if let Some(compression) = profile.compression {
+        sess.set_compress(compression);
+    }
+    
     sess.set_tcp_stream(tcp.try_clone().map_err(|e| e.to_string())?);
     sess.handshake().map_err(|e| format!("handshake: {e}"))?;
+    
+    // Apply keepalive settings after handshake
+    if let Some(keepalive) = profile.keepalive_interval {
+        sess.set_keepalive(true, keepalive);
+    }
     // Verify known_hosts (best-effort) before user authentication
     if let Ok(mut kh) = sess.known_hosts() {
         if let Ok(home) = std::env::var("HOME") {
@@ -341,8 +360,21 @@ pub async fn ssh_connect(
     }
 
     // Configure session for optimal performance
-    // Keepalive to avoid idle disconnects
-    let _ = sess.set_keepalive(true, 30);
+    // Agent forwarding if requested (must be after authentication)
+    if profile.agent_forwarding.unwrap_or(false) {
+        // Note: SSH agent forwarding requires the agent channel to be requested
+        // This is typically done per-channel in SSH2 protocol
+    }
+    
+    // X11 forwarding if requested (must be after authentication)
+    if profile.x11_forwarding.unwrap_or(false) {
+        // Note: X11 forwarding requires per-channel configuration in SSH2
+    }
+    
+    // Keepalive to avoid idle disconnects (only if not already set)
+    if profile.keepalive_interval.is_none() {
+        let _ = sess.set_keepalive(true, 30);
+    }
 
     // Explicitly set NO timeout (0 means infinite) - crucial for channel creation
     sess.set_timeout(0);

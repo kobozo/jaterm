@@ -85,7 +85,18 @@ export function ptyKill(args: { ptyId: string }) {
 }
 
 export type JsSshAuth = { password?: string; key_path?: string; passphrase?: string; agent?: boolean };
-export type JsSshProfile = { host: string; port?: number; user: string; auth?: JsSshAuth; timeout_ms?: number; trust_host?: boolean };
+export type JsSshProfile = { 
+  host: string; 
+  port?: number; 
+  user: string; 
+  auth?: JsSshAuth; 
+  timeout_ms?: number; 
+  trust_host?: boolean;
+  keepalive_interval?: number;
+  compression?: boolean;
+  x11_forwarding?: boolean;
+  agent_forwarding?: boolean;
+};
 
 export async function sshConnect(profile: JsSshProfile): Promise<string> {
   // Normalize hostnames to lowercase

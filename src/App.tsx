@@ -50,6 +50,19 @@ export default function App() {
     sftpCwd?: string;
     indicator?: 'activity' | 'bell';
     terminalSettings?: { theme?: string; fontSize?: number; fontFamily?: string };
+    reconnectState?: {
+      isReconnecting: boolean;
+      attempts: number;
+      lastAttempt?: number;
+      scheduledReconnect?: NodeJS.Timeout;
+      maxAttempts?: number;
+    };
+    reconnectSettings?: {
+      enabled: boolean;
+      delay: number;
+      auth: any;
+      opts: any;
+    };
   };
   const [sessionsId] = useState<string>(() => crypto.randomUUID());
   const [tabs, setTabs] = useState<Tab[]>([{ id: sessionsId, cwd: null, panes: [], activePane: null, status: {} }]);
@@ -558,6 +571,20 @@ export default function App() {
     if (t.kind === 'ssh' && channelToSession[paneId]) {
       const sessionId = channelToSession[paneId];
       await sshSetPrimary(sessionId);
+    }
+  }
+  
+  // Wrapper function that decides between reconnection and normal close
+  async function closePaneOrReconnect(id: string, isUnexpectedExit: boolean = false) {
+    const t = tabs.find((x) => x.id === activeTab);
+    
+    // Check if this is an SSH pane that should auto-reconnect
+    if (isUnexpectedExit && t?.kind === 'ssh' && t.reconnectSettings?.enabled && !t.reconnectState?.isReconnecting) {
+      // Handle with reconnection
+      await handleSshDisconnection(id);
+    } else {
+      // Normal close
+      await closePane(id);
     }
   }
   
@@ -1144,6 +1171,10 @@ export default function App() {
         sshHome = await sshHomeDir(sessionId);
       } catch {}
       
+      // Load global config for reconnect settings
+      const { loadGlobalConfig } = await import('@/services/settings');
+      const globalConfig = await loadGlobalConfig();
+      
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { 
         ...t, 
         kind: 'ssh', 
@@ -1164,6 +1195,13 @@ export default function App() {
           // Set default helper path if we have home directory
           helperPath: sshHome ? sshHome.replace(/\/$/, '') + '/.jaterm-helper/jaterm-agent' : undefined
         },
+        // Store reconnection settings for potential auto-reconnect
+        reconnectSettings: globalConfig.ssh.autoReconnect ? {
+          enabled: true,
+          delay: globalConfig.ssh.reconnectDelay,
+          auth: opts.auth,
+          opts: opts
+        } : undefined,
         // Store terminal settings
         terminalSettings: opts.terminal
       } : t)));
@@ -1183,6 +1221,176 @@ export default function App() {
       } catch {}
       closeTab(tabId);
     }
+  }
+
+  // Handle SSH disconnection with potential auto-reconnect
+  async function handleSshDisconnection(paneId: string) {
+    const tab = tabsRef.current.find(t => t.panes.includes(paneId));
+    if (!tab || !tab.reconnectSettings?.enabled) {
+      // Fall back to normal close if not configured for auto-reconnect
+      removePane(paneId);
+      return;
+    }
+
+    // Get the last working directory - the key advantage!
+    const lastCwd = tab.status?.fullPath || tab.cwd;
+    console.info('[ssh][reconnect] Disconnected from', tab.title, 'at', lastCwd);
+    
+    // Check if we're already reconnecting (avoid duplicate attempts)
+    if (tab.reconnectState?.isReconnecting) {
+      console.info('[ssh][reconnect] Already reconnecting, skipping');
+      return;
+    }
+    
+    // Mark as reconnecting (visual feedback)
+    const maxAttempts = 5; // Could be made configurable
+    setTabs(prev => prev.map(t => 
+      t.id === tab.id 
+        ? { 
+            ...t, 
+            reconnectState: { 
+              isReconnecting: true, 
+              attempts: 0,
+              maxAttempts 
+            }
+          }
+        : t
+    ));
+    
+    // Schedule first reconnection attempt
+    scheduleReconnection(tab.id, lastCwd);
+  }
+  
+  // Schedule a reconnection attempt with exponential backoff
+  function scheduleReconnection(tabId: string, lastCwd: string | null) {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    if (!tab?.reconnectSettings || !tab.reconnectState) return;
+    
+    const { delay } = tab.reconnectSettings;
+    const { attempts, maxAttempts = 5 } = tab.reconnectState;
+    
+    if (attempts >= maxAttempts) {
+      console.info('[ssh][reconnect] Max attempts reached, giving up');
+      addToast({
+        title: 'SSH Reconnection Failed',
+        message: `Failed to reconnect to ${tab.title} after ${maxAttempts} attempts`,
+        kind: 'error',
+        timeout: 10000
+      });
+      // Clean up and close the tab
+      setTabs(prev => prev.map(t => 
+        t.id === tabId ? { ...t, reconnectState: undefined } : t
+      ));
+      closeTab(tabId);
+      return;
+    }
+    
+    // Calculate delay with exponential backoff (1.5x multiplier)
+    const backoffDelay = delay * 1000 * Math.pow(1.5, attempts);
+    const nextAttemptTime = Date.now() + backoffDelay;
+    
+    console.info(`[ssh][reconnect] Scheduling attempt ${attempts + 1}/${maxAttempts} in ${backoffDelay}ms`);
+    
+    const timeoutId = setTimeout(() => {
+      attemptReconnection(tabId, lastCwd);
+    }, backoffDelay);
+    
+    // Store the timeout ID so it can be cancelled if needed
+    setTabs(prev => prev.map(t => 
+      t.id === tabId && t.reconnectState
+        ? { 
+            ...t, 
+            reconnectState: { 
+              ...t.reconnectState, 
+              scheduledReconnect: timeoutId,
+              lastAttempt: nextAttemptTime
+            }
+          }
+        : t
+    ));
+  }
+  
+  // Attempt to reconnect to SSH with the last known directory
+  async function attemptReconnection(tabId: string, lastCwd: string | null) {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    if (!tab?.reconnectSettings || !tab.reconnectState) return;
+    
+    const { opts, auth } = tab.reconnectSettings;
+    const { attempts, maxAttempts = 5 } = tab.reconnectState;
+    
+    console.info(`[ssh][reconnect] Attempting reconnection ${attempts + 1}/${maxAttempts} to ${opts.host}`);
+    
+    // Update attempt counter
+    setTabs(prev => prev.map(t => 
+      t.id === tabId && t.reconnectState
+        ? { 
+            ...t, 
+            reconnectState: { 
+              ...t.reconnectState, 
+              attempts: attempts + 1,
+              scheduledReconnect: undefined
+            }
+          }
+        : t
+    ));
+    
+    try {
+      // Clear existing panes (they're disconnected anyway)
+      setTabs(prev => prev.map(t => 
+        t.id === tabId ? { ...t, panes: [], activePane: null } : t
+      ));
+      
+      // Reconnect with the last known directory
+      const reconnectOpts = {
+        ...opts,
+        auth: auth,
+        cwd: lastCwd, // This ensures we reconnect to where the user was!
+        _isReconnection: true // Flag to skip certain initialization
+      };
+      
+      // Attempt to reconnect
+      await openSshFor(tabId, reconnectOpts);
+      
+      // Success! Clear reconnection state
+      setTabs(prev => prev.map(t => 
+        t.id === tabId ? { ...t, reconnectState: undefined } : t
+      ));
+      
+      addToast({
+        title: 'SSH Reconnected',
+        message: `Successfully reconnected to ${opts.host}`,
+        kind: 'success',
+        timeout: 5000
+      });
+      
+      console.info('[ssh][reconnect] Successfully reconnected to', opts.host);
+    } catch (error) {
+      console.error('[ssh][reconnect] Reconnection failed:', error);
+      
+      // Schedule next attempt if not at max
+      const updatedTab = tabsRef.current.find(t => t.id === tabId);
+      if (updatedTab?.reconnectState && updatedTab.reconnectState.attempts < (updatedTab.reconnectState.maxAttempts || 5)) {
+        scheduleReconnection(tabId, lastCwd);
+      } else {
+        // Max attempts reached
+        handleSshDisconnection(tabId);
+      }
+    }
+  }
+  
+  // Cancel ongoing reconnection attempts
+  function cancelReconnection(tabId: string) {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    if (tab?.reconnectState?.scheduledReconnect) {
+      clearTimeout(tab.reconnectState.scheduledReconnect);
+    }
+    
+    setTabs(prev => prev.map(t => 
+      t.id === tabId ? { ...t, reconnectState: undefined } : t
+    ));
+    
+    // Close the tab normally
+    closeTab(tabId);
   }
 
   async function openSshFor(tabId: string, opts: { 
@@ -1229,8 +1437,26 @@ export default function App() {
       // Final fallback to agent if still no usable auth
       if (!hasUsableAuth(authToUse)) authToUse = { agent: true } as any;
 
+      // Load global SSH settings
+      const { loadGlobalConfig } = await import('@/services/settings');
+      const globalConfig = await loadGlobalConfig();
+      const sshSettings = globalConfig.ssh;
+
+      // Use port from options first, then from global settings, then default to 22
+      const port = opts.port ?? sshSettings.defaultPort ?? 22;
+
       const { sshConnectWithTrustPrompt } = await import('@/types/ipc');
-      const sessionId = await sshConnectWithTrustPrompt({ host: opts.host, port: opts.port ?? 22, user: opts.user, auth: { password: authToUse.password, key_path: (authToUse as any).keyPath, passphrase: authToUse.passphrase, agent: authToUse.agent } as any, timeout_ms: 15000 });
+      const sessionId = await sshConnectWithTrustPrompt({ 
+        host: opts.host, 
+        port, 
+        user: opts.user, 
+        auth: { password: authToUse.password, key_path: (authToUse as any).keyPath, passphrase: authToUse.passphrase, agent: authToUse.agent } as any, 
+        timeout_ms: 15000,
+        keepalive_interval: sshSettings.keepaliveInterval,
+        compression: sshSettings.compression,
+        x11_forwarding: sshSettings.x11Forwarding,
+        agent_forwarding: sshSettings.agentForwarding
+      } as any);
       
       // Check if password auth was used and we have a profile that could be upgraded
       if (authToUse.password && opts.profileId && opts.profileName) {
@@ -1258,20 +1484,27 @@ export default function App() {
         }
       }
       
-      // Check helper consent
-      const consent = await resolveHelperConsent(opts.profileId);
+      // Check helper consent - use global setting if no profile-specific consent
+      let consent = await resolveHelperConsent(opts.profileId);
       
+      // If no profile-specific consent, check global setting
       if (consent === undefined) {
-        // No consent recorded, show modal
-        setHelperConsentModal({
-          sessionId,
-          profileId: opts.profileId,
-          profileName: opts.profileName || opts.host,
-          host: opts.host,
-          tabId,
-          opts
-        });
-        return; // Will continue in handleHelperConsent
+        if (sshSettings.helperAutoConsent === 'always') {
+          consent = 'yes';
+        } else if (sshSettings.helperAutoConsent === 'never') {
+          consent = 'no';
+        } else {
+          // 'ask' - show modal
+          setHelperConsentModal({
+            sessionId,
+            profileId: opts.profileId,
+            profileName: opts.profileName || opts.host,
+            host: opts.host,
+            tabId,
+            opts
+          });
+          return; // Will continue in handleHelperConsent
+        }
       }
       
       // Ensure helper in background (non-blocking) and record status in tab
@@ -2165,6 +2398,14 @@ export default function App() {
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
+                          onDisconnected={t.reconnectSettings?.enabled ? handleSshDisconnection : undefined}
+                          isReconnecting={t.reconnectState?.isReconnecting}
+                          reconnectInfo={t.reconnectState ? {
+                            attempts: t.reconnectState.attempts,
+                            maxAttempts: t.reconnectState.maxAttempts || 5,
+                            nextAttempt: t.reconnectState.lastAttempt
+                          } : undefined}
+                          onCancelReconnect={() => cancelReconnection(t.id)}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
                           onCompose={() => setComposeOpen(true)}
                           onTerminalEvent={handleTerminalData}
@@ -2186,6 +2427,14 @@ export default function App() {
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
+                          onDisconnected={t.reconnectSettings?.enabled ? handleSshDisconnection : undefined}
+                          isReconnecting={t.reconnectState?.isReconnecting}
+                          reconnectInfo={t.reconnectState ? {
+                            attempts: t.reconnectState.attempts,
+                            maxAttempts: t.reconnectState.maxAttempts || 5,
+                            nextAttempt: t.reconnectState.lastAttempt
+                          } : undefined}
+                          onCancelReconnect={() => cancelReconnection(t.id)}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
                           onCompose={() => setComposeOpen(true)}
                           onTerminalEvent={handleTerminalData}
