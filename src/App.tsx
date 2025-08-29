@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import SplitView from '@/components/SplitView';
 import FileExplorerWithEditor from '@/components/FileExplorerWithEditor';
 import TerminalPane from '@/components/TerminalPane/TerminalPane';
@@ -53,6 +53,7 @@ export default function App() {
   };
   const [sessionsId] = useState<string>(() => crypto.randomUUID());
   const [tabs, setTabs] = useState<Tab[]>([{ id: sessionsId, cwd: null, panes: [], activePane: null, status: {} }]);
+  const tabsRef = useRef<Tab[]>(tabs);
   const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
   // Map channel IDs to SSH session IDs (for splits with independent connections)
@@ -79,6 +80,9 @@ export default function App() {
     port: number;
     user: string;
   } | null>(null);
+  
+  // SSH profiles state for passing to Sessions component
+  const [sshProfiles, setSshProfiles] = useState<any[]>([]);
   
   // Updater state
   const [updateChecking, setUpdateChecking] = useState(false);
@@ -172,6 +176,37 @@ export default function App() {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep tabsRef in sync with tabs state
+  React.useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  // Load SSH profiles on startup and when unlocked
+  React.useEffect(() => {
+    const loadProfiles = async () => {
+      try {
+        const { getSshProfiles } = await import('@/store/persist');
+        const profiles = await getSshProfiles();
+        setSshProfiles(profiles);
+      } catch (e) {
+        console.warn('Failed to load SSH profiles:', e);
+      }
+    };
+
+    loadProfiles();
+
+    // Listen for profiles unlocked event
+    const handleProfilesUnlocked = () => {
+      console.log('Profiles unlocked, reloading SSH profiles...');
+      loadProfiles();
+    };
+
+    window.addEventListener('profiles-unlocked', handleProfilesUnlocked);
+    return () => {
+      window.removeEventListener('profiles-unlocked', handleProfilesUnlocked);
+    };
   }, []);
 
   async function checkForUpdatesInteractive() {
@@ -787,9 +822,11 @@ export default function App() {
     lastNormalizedPath.current.delete(id);
     
     // record session for the tab if it had a cwd
-    const toRecord = tabs.find((t) => t.id === id);
+    const toRecord = tabsRef.current.find((t) => t.id === id);
     if (toRecord && toRecord.kind !== 'ssh' && (toRecord.status.cwd || toRecord.cwd)) {
       addRecentSession({ cwd: (toRecord.status.cwd ?? toRecord.cwd) as string, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
+      // Dispatch event so Sessions component can refresh
+      window.dispatchEvent(new CustomEvent('recent-sessions-updated'));
     }
     // SSH recents recorded below in a unified normalized form
     if (toRecord?.activePane) {
@@ -865,13 +902,27 @@ export default function App() {
             }
           }
         } catch {}
-        // Only prefer title candidate if it was normalized (i.e., not starting with '~') and is deeper
-        if (titleCandidate && !titleCandidate.startsWith('~/') && (!path || titleCandidate.length > path.length)) {
-          path = titleCandidate;
+        // Use the actual current working directory from status.fullPath or status.cwd
+        // This is the last known CWD tracked via OSC7 sequences
+        if (toRecord.status?.fullPath) {
+          path = toRecord.status.fullPath;
+          console.info('[ssh][recents] Using fullPath from status:', path);
+        } else if (toRecord.status?.cwd) {
+          // Fall back to status.cwd if fullPath is not available
+          path = toRecord.status.cwd;
+          console.info('[ssh][recents] Using cwd from status:', path);
+        } else {
+          // Final fallback to title parsing only if no status paths available
+          if (titleCandidate && !titleCandidate.startsWith('~/') && (!path || titleCandidate.length > path.length)) {
+            path = titleCandidate;
+          }
+          console.info('[ssh][recents] Using title/initial path:', path);
         }
-        console.info('[ssh][recents] save final path=', path);
+        console.info('[ssh][recents] save final path=', path, 'status:', toRecord.status);
         const { addRecentSshSession } = await import('@/store/sessions');
         await addRecentSshSession({ profileId: toRecord.profileId, path, closedAt: Date.now(), panes: toRecord.panes.length, title: toRecord.title ?? undefined, layoutShape: layoutToShape(toRecord.layout as any) });
+        // Dispatch event so Sessions component can refresh
+        window.dispatchEvent(new CustomEvent('recent-sessions-updated'));
       }
     }
   }
@@ -2026,7 +2077,7 @@ export default function App() {
                 <FileExplorerWithEditor
                   isLocal={!(t.kind === 'ssh' && t.sshSessionId)}
                   sessionId={t.kind === 'ssh' ? t.sshSessionId : undefined}
-                  cwd={(t as any).sftpCwd || t.status.cwd || t.cwd || undefined}
+                  cwd={(t as any).sftpCwd || t.status.fullPath || t.status.cwd || t.cwd || undefined}
                   isActive={t.view === 'files'}
                   onCwdChange={(next) => {
                     setTabs((prev) => prev.map((tb) => 
@@ -2181,6 +2232,7 @@ export default function App() {
                   )
                 ) : (
                   <Sessions
+                    sshProfiles={sshProfiles}
                     onOpenFolder={(p) => {
                       const id = crypto.randomUUID();
                       setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);

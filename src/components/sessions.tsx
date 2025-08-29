@@ -140,9 +140,10 @@ type Props = {
   onOpenFolder: (arg: string | { path: string; terminal?: any; shell?: any }) => void;
   onOpenSession?: (session: RecentSession) => void;
   onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string; profileName?: string; os?: string; terminal?: any; shell?: any; advanced?: any; _resolved?: boolean }) => void;
+  sshProfiles?: SshProfileStored[];
 };
 
-export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Props) {
+export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshProfiles: passedSshProfiles }: Props) {
   const { show, update, dismiss } = useToasts();
   const [recentSessions, setRecentSessions] = useState<{ cwd: string; closedAt: number; panes?: number }[]>([]);
   const [recentSsh, setRecentSsh] = useState<RecentSshSession[]>([]);
@@ -572,7 +573,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
         setRecentSessions(await getRecentSessions());
         setRecentSsh(await getRecentSshSessions());
         const localProfs = await getLocalProfiles();
-        const sshProfs = await getSshProfiles();
+        // Use passed profiles if available, otherwise load from disk
+        const sshProfs = passedSshProfiles || await getSshProfiles();
         setLocalProfiles(localProfs);
         setSshProfiles(sshProfs);
         
@@ -610,6 +612,14 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     };
     window.addEventListener('profiles-unlocked', handleProfilesUnlocked);
     
+    // Listen for recent sessions updates
+    const handleRecentSessionsUpdated = async () => {
+      console.log('Recent sessions updated, refreshing...');
+      setRecentSessions(await getRecentSessions());
+      setRecentSsh(await getRecentSshSessions());
+    };
+    window.addEventListener('recent-sessions-updated', handleRecentSessionsUpdated);
+    
     // Refresh profiles periodically to catch external updates (e.g., OS detection)
     const interval = setInterval(async () => {
       setSshProfiles(await getSshProfiles());
@@ -618,8 +628,16 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
     return () => {
       clearInterval(interval);
       window.removeEventListener('profiles-unlocked', handleProfilesUnlocked);
+      window.removeEventListener('recent-sessions-updated', handleRecentSessionsUpdated);
     };
   }, []);
+
+  // Update SSH profiles when passed profiles change
+  useEffect(() => {
+    if (passedSshProfiles) {
+      setSshProfiles(passedSshProfiles);
+    }
+  }, [passedSshProfiles]);
 
   const handleHome = async () => {
     try {
@@ -945,13 +963,13 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                           onClick={(e) => {
                             e.preventDefault();
                             (async () => {
-                              const all = await getSshProfiles();
-                              const p = r.s.profileId ? all.find((x) => x.id === r.s.profileId) : undefined;
+                              // Use already loaded profiles instead of fetching from disk
+                              const p = r.s.profileId ? sshProfiles.find((x) => x.id === r.s.profileId) : undefined;
                               if (p) {
                                 // Try to resolve effective settings from the first occurrence in the tree
                                 let term = p.terminal, shell = p.shell, advanced = p.advanced, ssh: any = { host: p.host, port: p.port, user: p.user, auth: p.auth };
                                 try {
-                                  const t = tree ?? (await ensureProfilesTree());
+                                  const t = tree;
                                   // Find first tree node referencing this profile
                                   function findNode(n: ProfilesTreeNode, kind: 'ssh'|'local', id: string): Extract<ProfilesTreeNode, { type: 'profile' }> | null {
                                     if (n.type === 'profile' && n.ref.kind === kind && n.ref.id === id) return n as any;
@@ -966,7 +984,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh }: Prop
                                     term = eff.terminal; shell = eff.shell; advanced = eff.advanced; ssh = eff.ssh ? { ...ssh, ...eff.ssh } : ssh;
                                   }
                                 } catch {}
-                                onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.s.path, profileId: p.id, profileName: p.name, terminal: term, shell, advanced, os: p.os });
+                                onOpenSsh?.({ host: ssh.host, port: ssh.port, user: ssh.user, auth: ssh.auth || { agent: true }, cwd: r.s.path, profileId: p.id, profileName: p.name, terminal: term, shell, advanced, os: p.os, _resolved: true } as any);
                               } else if (r.s.host && r.s.user) {
                                 onOpenSsh?.({ host: r.s.host, port: r.s.port ?? 22, user: r.s.user, auth: { agent: true } as any, cwd: r.s.path });
                               } else {
