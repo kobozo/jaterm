@@ -691,16 +691,39 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
                 <h3 style={{ marginBottom: '12px', fontSize: '14px', fontWeight: 'bold' }}>Debugging</h3>
                 <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                   <button
-                    onClick={() => {
-                      const logs = logger.exportLogs();
-                      const blob = new Blob([logs], { type: 'text/plain' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `jaterm-logs-${new Date().toISOString()}.txt`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      show({ title: 'Logs exported', message: 'Check your downloads folder', kind: 'success' });
+                    onClick={async () => {
+                      try {
+                        const logs = logger.exportLogs();
+                        const filename = `jaterm-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+                        
+                        // Use Tauri's save dialog
+                        const { save } = await import('@tauri-apps/plugin-dialog');
+                        const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+                        
+                        const filePath = await save({
+                          defaultPath: filename,
+                          filters: [{
+                            name: 'Text Files',
+                            extensions: ['txt']
+                          }]
+                        });
+                        
+                        if (filePath) {
+                          await writeTextFile(filePath, logs);
+                          show({ 
+                            title: 'Logs exported', 
+                            message: `Saved to ${filePath}`, 
+                            kind: 'success' 
+                          });
+                        }
+                      } catch (error) {
+                        logger.error('Failed to export logs', error);
+                        show({ 
+                          title: 'Export failed', 
+                          message: String(error), 
+                          kind: 'error' 
+                        });
+                      }
                     }}
                     style={{
                       padding: '8px 16px',
@@ -712,6 +735,32 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
                     }}
                   >
                     Export Logs
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      const logs = logger.getLogBuffer();
+                      const logCount = logs.length;
+                      if (logCount === 0) {
+                        alert('No logs in buffer');
+                      } else {
+                        const recentLogs = logs.slice(-10).map(log => {
+                          const time = new Date(log.timestamp).toLocaleTimeString();
+                          return `${time} [${log.level.toUpperCase()}] ${log.message}`;
+                        }).join('\n');
+                        alert(`Last ${Math.min(10, logCount)} of ${logCount} logs:\n\n${recentLogs}`);
+                      }
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#4caf50',
+                      border: 'none',
+                      color: '#fff',
+                      borderRadius: 4,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    View Logs
                   </button>
                   
                   <button
