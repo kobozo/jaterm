@@ -11,6 +11,9 @@ import { GlobalConfig, DEFAULT_CONFIG } from '@/types/settings';
 import { getThemeList, themes } from '@/config/themes';
 import { useToasts } from '@/store/toasts';
 import { getAvailableShells, ShellInfo } from '@/types/ipc';
+import { logger } from '@/services/logger';
+import { telemetry, TelemetryEvent } from '@/services/telemetry';
+import { featureFlags, ExperimentalFeature } from '@/services/features';
 
 interface SettingsPaneProps {
   onClose?: () => void;
@@ -627,7 +630,12 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
               <select
                 style={{ ...inputStyle, marginBottom: '12px' }}
                 value={config.advanced.logLevel}
-                onChange={(e) => updateConfig(c => { c.advanced.logLevel = e.target.value as any; })}
+                onChange={(e) => {
+                  const newLevel = e.target.value as any;
+                  updateConfig(c => { c.advanced.logLevel = newLevel; });
+                  logger.updateLogLevel(newLevel);
+                  logger.info(`Log level changed to: ${newLevel}`);
+                }}
               >
                 <option value="error">Error</option>
                 <option value="warn">Warning</option>
@@ -639,19 +647,159 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
                 <input
                   type="checkbox"
                   checked={config.advanced.enableTelemetry}
-                  onChange={(e) => updateConfig(c => { c.advanced.enableTelemetry = e.target.checked; })}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    if (enabled) {
+                      // Show privacy notice when enabling
+                      if (confirm(telemetry.getPrivacyNotice() + '\n\nDo you agree to enable telemetry?')) {
+                        updateConfig(c => { c.advanced.enableTelemetry = true; });
+                        telemetry.setEnabled(true);
+                        logger.info('Telemetry enabled');
+                      }
+                    } else {
+                      updateConfig(c => { c.advanced.enableTelemetry = false; });
+                      telemetry.setEnabled(false);
+                      logger.info('Telemetry disabled');
+                    }
+                  }}
                 />
-                <span>Enable Telemetry</span>
+                <span>Enable Telemetry (Anonymous usage data)</span>
               </label>
 
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <input
                   type="checkbox"
                   checked={config.advanced.experimentalFeatures}
-                  onChange={(e) => updateConfig(c => { c.advanced.experimentalFeatures = e.target.checked; })}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    updateConfig(c => { c.advanced.experimentalFeatures = enabled; });
+                    featureFlags.updateExperimentalEnabled(enabled);
+                    logger.info(`Experimental features ${enabled ? 'enabled' : 'disabled'}`);
+                    if (enabled) {
+                      show({
+                        title: 'Experimental Features Enabled',
+                        message: 'Some features may require restart. Check the logs for available features.',
+                        kind: 'info'
+                      });
+                    }
+                  }}
                 />
                 <span>Enable Experimental Features</span>
               </label>
+
+              <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #333' }}>
+                <h3 style={{ marginBottom: '12px', fontSize: '14px', fontWeight: 'bold' }}>Debugging</h3>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const logs = logger.exportLogs();
+                        const filename = `jaterm-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+                        
+                        // Use Tauri's save dialog
+                        const { save } = await import('@tauri-apps/plugin-dialog');
+                        const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+                        
+                        const filePath = await save({
+                          defaultPath: filename,
+                          filters: [{
+                            name: 'Text Files',
+                            extensions: ['txt']
+                          }]
+                        });
+                        
+                        if (filePath) {
+                          await writeTextFile(filePath, logs);
+                          show({ 
+                            title: 'Logs exported', 
+                            message: `Saved to ${filePath}`, 
+                            kind: 'success' 
+                          });
+                        }
+                      } catch (error) {
+                        logger.error('Failed to export logs', error);
+                        show({ 
+                          title: 'Export failed', 
+                          message: String(error), 
+                          kind: 'error' 
+                        });
+                      }
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#1976d2',
+                      border: 'none',
+                      color: '#fff',
+                      borderRadius: 4,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Export Logs
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      const logs = logger.getLogBuffer();
+                      const logCount = logs.length;
+                      if (logCount === 0) {
+                        alert('No logs in buffer');
+                      } else {
+                        const recentLogs = logs.slice(-10).map(log => {
+                          const time = new Date(log.timestamp).toLocaleTimeString();
+                          return `${time} [${log.level.toUpperCase()}] ${log.message}`;
+                        }).join('\n');
+                        alert(`Last ${Math.min(10, logCount)} of ${logCount} logs:\n\n${recentLogs}`);
+                      }
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#4caf50',
+                      border: 'none',
+                      color: '#fff',
+                      borderRadius: 4,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    View Logs
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      logger.clearBuffer();
+                      show({ title: 'Logs cleared', message: 'Log buffer has been cleared', kind: 'success' });
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#666',
+                      border: 'none',
+                      color: '#fff',
+                      borderRadius: 4,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Clear Logs
+                  </button>
+                  
+                  {config.advanced.enableTelemetry && (
+                    <button
+                      onClick={() => {
+                        const stats = telemetry.getStatistics();
+                        alert(`Telemetry Statistics:\n\nSession ID: ${stats.sessionId}\nQueued Events: ${stats.queuedEvents}\nTotal Events: ${stats.totalEvents}`);
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        background: '#388e3c',
+                        border: 'none',
+                        color: '#fff',
+                        borderRadius: 4,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      View Telemetry Stats
+                    </button>
+                  )}
+                </div>
+              </div>
 
               <div style={{ marginTop: '30px' }}>
                 <button
