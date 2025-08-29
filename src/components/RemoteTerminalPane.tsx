@@ -21,9 +21,17 @@ type Props = {
   terminalSettings?: { theme?: string; fontSize?: number; fontFamily?: string };
   isPrimary?: boolean;
   onSetPrimary?: () => void;
+  onDisconnected?: (id: string) => void; // Called on unexpected disconnect
+  isReconnecting?: boolean; // Visual state for reconnection
+  reconnectInfo?: { attempts: number; maxAttempts: number; nextAttempt?: number };
+  onCancelReconnect?: () => void;
 };
 
-export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId, onCompose, onTerminalEvent, terminalSettings, isPrimary, onSetPrimary }: Props) {
+export default function RemoteTerminalPane({ 
+  id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, sessionId, 
+  onCompose, onTerminalEvent, terminalSettings, isPrimary, onSetPrimary,
+  onDisconnected, isReconnecting, reconnectInfo, onCancelReconnect 
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { attach, dispose, term } = useTerminal(id, terminalSettings);
   const fitRef = useRef<FitAddon | null>(null);
@@ -308,7 +316,18 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
         onTerminalEvent?.(id, { type: 'output', data });
       }
     }).then((u) => (unlisten = u));
-    onSshExit((e) => { if (e.channelId === id) { if (IS_DEV) console.info('[ssh] exit', id); onClose?.(id); } }).then((u) => (unlistenExit = u));
+    onSshExit((e) => { 
+      if (e.channelId === id) { 
+        if (IS_DEV) console.info('[ssh] exit', id); 
+        // Check if we should attempt reconnection (unexpected exit)
+        // We consider it unexpected if onDisconnected is provided
+        if (onDisconnected) {
+          onDisconnected(id);
+        } else {
+          onClose?.(id);
+        }
+      } 
+    }).then((u) => (unlistenExit = u));
     return () => {
       // Clean up subscriptions
       sub.dispose();
@@ -403,6 +422,59 @@ export default function RemoteTerminalPane({ id, desiredCwd, onCwd, onFocusPane,
       onContextMenu={onCtx}
     >
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
+      
+      {/* Reconnection overlay */}
+      {isReconnecting && reconnectInfo && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          color: '#fff',
+          fontSize: 14,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+        }}>
+          <div style={{ marginBottom: 20, fontSize: 16, fontWeight: 'bold' }}>
+            SSH Connection Lost
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            Attempting to reconnect...
+          </div>
+          <div style={{ marginBottom: 20, color: '#888' }}>
+            Attempt {reconnectInfo.attempts} of {reconnectInfo.maxAttempts}
+          </div>
+          {reconnectInfo.nextAttempt && (
+            <div style={{ marginBottom: 20, color: '#888', fontSize: 12 }}>
+              Next attempt in {Math.max(0, Math.ceil((reconnectInfo.nextAttempt - Date.now()) / 1000))} seconds
+            </div>
+          )}
+          {onCancelReconnect && (
+            <button 
+              onClick={onCancelReconnect}
+              style={{ 
+                padding: '8px 16px', 
+                background: '#444', 
+                color: '#fff', 
+                border: '1px solid #666',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: 12
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#555'}
+              onMouseLeave={(e) => e.currentTarget.style.background = '#444'}
+            >
+              Cancel Reconnection
+            </button>
+          )}
+        </div>
+      )}
       {onClose && (
         <button onClick={() => onClose(id)} style={{ position: 'absolute', right: 6, top: 6, fontSize: 12 }} title="Close SSH terminal">×</button>
       )}

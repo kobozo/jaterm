@@ -159,19 +159,18 @@ pub async fn ssh_connect(
     tcp.set_nodelay(true).ok();
     let mut sess = ssh2::Session::new().map_err(|e| format!("session: {e}"))?;
     
-    // Apply SSH settings before handshake
-    // Set keepalive interval if provided
-    if let Some(keepalive) = profile.keepalive_interval {
-        sess.set_keepalive(true, keepalive);
-    }
-    
-    // Enable/disable compression
+    // Enable/disable compression (must be set before handshake)
     if let Some(compression) = profile.compression {
         sess.set_compress(compression);
     }
     
     sess.set_tcp_stream(tcp.try_clone().map_err(|e| e.to_string())?);
     sess.handshake().map_err(|e| format!("handshake: {e}"))?;
+    
+    // Apply keepalive settings after handshake
+    if let Some(keepalive) = profile.keepalive_interval {
+        sess.set_keepalive(true, keepalive);
+    }
     // Verify known_hosts (best-effort) before user authentication
     if let Ok(mut kh) = sess.known_hosts() {
         if let Ok(home) = std::env::var("HOME") {

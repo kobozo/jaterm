@@ -50,6 +50,19 @@ export default function App() {
     sftpCwd?: string;
     indicator?: 'activity' | 'bell';
     terminalSettings?: { theme?: string; fontSize?: number; fontFamily?: string };
+    reconnectState?: {
+      isReconnecting: boolean;
+      attempts: number;
+      lastAttempt?: number;
+      scheduledReconnect?: NodeJS.Timeout;
+      maxAttempts?: number;
+    };
+    reconnectSettings?: {
+      enabled: boolean;
+      delay: number;
+      auth: any;
+      opts: any;
+    };
   };
   const [sessionsId] = useState<string>(() => crypto.randomUUID());
   const [tabs, setTabs] = useState<Tab[]>([{ id: sessionsId, cwd: null, panes: [], activePane: null, status: {} }]);
@@ -507,6 +520,20 @@ export default function App() {
     if (t.kind === 'ssh' && channelToSession[paneId]) {
       const sessionId = channelToSession[paneId];
       await sshSetPrimary(sessionId);
+    }
+  }
+  
+  // Wrapper function that decides between reconnection and normal close
+  async function closePaneOrReconnect(id: string, isUnexpectedExit: boolean = false) {
+    const t = tabs.find((x) => x.id === activeTab);
+    
+    // Check if this is an SSH pane that should auto-reconnect
+    if (isUnexpectedExit && t?.kind === 'ssh' && t.reconnectSettings?.enabled && !t.reconnectState?.isReconnecting) {
+      // Handle with reconnection
+      await handleSshDisconnection(id);
+    } else {
+      // Normal close
+      await closePane(id);
     }
   }
   
@@ -1143,6 +1170,176 @@ export default function App() {
       } catch {}
       closeTab(tabId);
     }
+  }
+
+  // Handle SSH disconnection with potential auto-reconnect
+  async function handleSshDisconnection(paneId: string) {
+    const tab = tabsRef.current.find(t => t.panes.includes(paneId));
+    if (!tab || !tab.reconnectSettings?.enabled) {
+      // Fall back to normal close if not configured for auto-reconnect
+      removePane(paneId);
+      return;
+    }
+
+    // Get the last working directory - the key advantage!
+    const lastCwd = tab.status?.fullPath || tab.cwd;
+    console.info('[ssh][reconnect] Disconnected from', tab.title, 'at', lastCwd);
+    
+    // Check if we're already reconnecting (avoid duplicate attempts)
+    if (tab.reconnectState?.isReconnecting) {
+      console.info('[ssh][reconnect] Already reconnecting, skipping');
+      return;
+    }
+    
+    // Mark as reconnecting (visual feedback)
+    const maxAttempts = 5; // Could be made configurable
+    setTabs(prev => prev.map(t => 
+      t.id === tab.id 
+        ? { 
+            ...t, 
+            reconnectState: { 
+              isReconnecting: true, 
+              attempts: 0,
+              maxAttempts 
+            }
+          }
+        : t
+    ));
+    
+    // Schedule first reconnection attempt
+    scheduleReconnection(tab.id, lastCwd);
+  }
+  
+  // Schedule a reconnection attempt with exponential backoff
+  function scheduleReconnection(tabId: string, lastCwd: string | null) {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    if (!tab?.reconnectSettings || !tab.reconnectState) return;
+    
+    const { delay } = tab.reconnectSettings;
+    const { attempts, maxAttempts = 5 } = tab.reconnectState;
+    
+    if (attempts >= maxAttempts) {
+      console.info('[ssh][reconnect] Max attempts reached, giving up');
+      addToast({
+        title: 'SSH Reconnection Failed',
+        message: `Failed to reconnect to ${tab.title} after ${maxAttempts} attempts`,
+        kind: 'error',
+        timeout: 10000
+      });
+      // Clean up and close the tab
+      setTabs(prev => prev.map(t => 
+        t.id === tabId ? { ...t, reconnectState: undefined } : t
+      ));
+      closeTab(tabId);
+      return;
+    }
+    
+    // Calculate delay with exponential backoff (1.5x multiplier)
+    const backoffDelay = delay * 1000 * Math.pow(1.5, attempts);
+    const nextAttemptTime = Date.now() + backoffDelay;
+    
+    console.info(`[ssh][reconnect] Scheduling attempt ${attempts + 1}/${maxAttempts} in ${backoffDelay}ms`);
+    
+    const timeoutId = setTimeout(() => {
+      attemptReconnection(tabId, lastCwd);
+    }, backoffDelay);
+    
+    // Store the timeout ID so it can be cancelled if needed
+    setTabs(prev => prev.map(t => 
+      t.id === tabId && t.reconnectState
+        ? { 
+            ...t, 
+            reconnectState: { 
+              ...t.reconnectState, 
+              scheduledReconnect: timeoutId,
+              lastAttempt: nextAttemptTime
+            }
+          }
+        : t
+    ));
+  }
+  
+  // Attempt to reconnect to SSH with the last known directory
+  async function attemptReconnection(tabId: string, lastCwd: string | null) {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    if (!tab?.reconnectSettings || !tab.reconnectState) return;
+    
+    const { opts, auth } = tab.reconnectSettings;
+    const { attempts, maxAttempts = 5 } = tab.reconnectState;
+    
+    console.info(`[ssh][reconnect] Attempting reconnection ${attempts + 1}/${maxAttempts} to ${opts.host}`);
+    
+    // Update attempt counter
+    setTabs(prev => prev.map(t => 
+      t.id === tabId && t.reconnectState
+        ? { 
+            ...t, 
+            reconnectState: { 
+              ...t.reconnectState, 
+              attempts: attempts + 1,
+              scheduledReconnect: undefined
+            }
+          }
+        : t
+    ));
+    
+    try {
+      // Clear existing panes (they're disconnected anyway)
+      setTabs(prev => prev.map(t => 
+        t.id === tabId ? { ...t, panes: [], activePane: null } : t
+      ));
+      
+      // Reconnect with the last known directory
+      const reconnectOpts = {
+        ...opts,
+        auth: auth,
+        cwd: lastCwd, // This ensures we reconnect to where the user was!
+        _isReconnection: true // Flag to skip certain initialization
+      };
+      
+      // Attempt to reconnect
+      await openSshFor(tabId, reconnectOpts);
+      
+      // Success! Clear reconnection state
+      setTabs(prev => prev.map(t => 
+        t.id === tabId ? { ...t, reconnectState: undefined } : t
+      ));
+      
+      addToast({
+        title: 'SSH Reconnected',
+        message: `Successfully reconnected to ${opts.host}`,
+        kind: 'success',
+        timeout: 5000
+      });
+      
+      console.info('[ssh][reconnect] Successfully reconnected to', opts.host);
+    } catch (error) {
+      console.error('[ssh][reconnect] Reconnection failed:', error);
+      
+      // Schedule next attempt if not at max
+      const updatedTab = tabsRef.current.find(t => t.id === tabId);
+      if (updatedTab?.reconnectState && updatedTab.reconnectState.attempts < (updatedTab.reconnectState.maxAttempts || 5)) {
+        scheduleReconnection(tabId, lastCwd);
+      } else {
+        // Max attempts reached
+        handleSshDisconnection(tabId);
+      }
+    }
+  }
+  
+  // Cancel ongoing reconnection attempts
+  function cancelReconnection(tabId: string) {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    if (tab?.reconnectState?.scheduledReconnect) {
+      clearTimeout(tab.reconnectState.scheduledReconnect);
+    }
+    
+    setTabs(prev => prev.map(t => 
+      t.id === tabId ? { ...t, reconnectState: undefined } : t
+    ));
+    
+    // Close the tab normally
+    closeTab(tabId);
   }
 
   async function openSshFor(tabId: string, opts: { 
@@ -2150,6 +2347,14 @@ export default function App() {
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
+                          onDisconnected={t.reconnectSettings?.enabled ? handleSshDisconnection : undefined}
+                          isReconnecting={t.reconnectState?.isReconnecting}
+                          reconnectInfo={t.reconnectState ? {
+                            attempts: t.reconnectState.attempts,
+                            maxAttempts: t.reconnectState.maxAttempts || 5,
+                            nextAttempt: t.reconnectState.lastAttempt
+                          } : undefined}
+                          onCancelReconnect={() => cancelReconnection(t.id)}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
                           onCompose={() => setComposeOpen(true)}
                           onTerminalEvent={handleTerminalData}
@@ -2171,6 +2376,14 @@ export default function App() {
                           onTitle={(_pid, title) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, title } : tt)))}
                           onFocusPane={(pane) => setTabs((prev) => prev.map((tt) => (tt.id === t.id ? { ...tt, activePane: pane } : tt)))}
                           onClose={closePane}
+                          onDisconnected={t.reconnectSettings?.enabled ? handleSshDisconnection : undefined}
+                          isReconnecting={t.reconnectState?.isReconnecting}
+                          reconnectInfo={t.reconnectState ? {
+                            attempts: t.reconnectState.attempts,
+                            maxAttempts: t.reconnectState.maxAttempts || 5,
+                            nextAttempt: t.reconnectState.lastAttempt
+                          } : undefined}
+                          onCancelReconnect={() => cancelReconnection(t.id)}
                           onSplit={(pane, dir) => splitPane(pane, dir)}
                           onCompose={() => setComposeOpen(true)}
                           onTerminalEvent={handleTerminalData}
