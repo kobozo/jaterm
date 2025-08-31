@@ -14,6 +14,7 @@ import { getAvailableShells, ShellInfo } from '@/types/ipc';
 import { logger } from '@/services/logger';
 import { telemetry, TelemetryEvent } from '@/services/telemetry';
 import { featureFlags, ExperimentalFeature } from '@/services/features';
+import { LogViewerModal } from './LogViewerModal';
 
 interface SettingsPaneProps {
   onClose?: () => void;
@@ -27,6 +28,7 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
   const [isDirty, setIsDirty] = useState(false);
   const [availableShells, setAvailableShells] = useState<ShellInfo[]>([]);
   const [showCustomShell, setShowCustomShell] = useState(false);
+  const [showLogViewer, setShowLogViewer] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -738,19 +740,7 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
                   </button>
                   
                   <button
-                    onClick={() => {
-                      const logs = logger.getLogBuffer();
-                      const logCount = logs.length;
-                      if (logCount === 0) {
-                        alert('No logs in buffer');
-                      } else {
-                        const recentLogs = logs.slice(-10).map(log => {
-                          const time = new Date(log.timestamp).toLocaleTimeString();
-                          return `${time} [${log.level.toUpperCase()}] ${log.message}`;
-                        }).join('\n');
-                        alert(`Last ${Math.min(10, logCount)} of ${logCount} logs:\n\n${recentLogs}`);
-                      }
-                    }}
+                    onClick={() => setShowLogViewer(true)}
                     style={{
                       padding: '8px 16px',
                       background: '#4caf50',
@@ -884,6 +874,11 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
           51%, 100% { opacity: 0; }
         }
       `}</style>
+      
+      <LogViewerModal 
+        isOpen={showLogViewer}
+        onClose={() => setShowLogViewer(false)}
+      />
     </div>
   );
 };

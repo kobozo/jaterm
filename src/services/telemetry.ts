@@ -96,7 +96,15 @@ class TelemetryService {
   }
 
   private generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // Use crypto.randomUUID for secure random generation
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return `session_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
+    }
+    // Fallback to crypto.getRandomValues for better randomness than Math.random
+    const array = new Uint8Array(16);
+    crypto.getRandomValues(array);
+    const hex = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `session_${Date.now()}_${hex.substring(0, 9)}`;
   }
 
   /**
