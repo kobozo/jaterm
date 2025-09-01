@@ -331,11 +331,11 @@ export default function App() {
   async function getDefaultWorkingDirectory(): Promise<string | null> {
     const config = getCachedConfig();
     
-    if (!config?.general?.defaultWorkingDir) {
+    if (!config?.shell?.defaultWorkingDir) {
       return null;
     }
     
-    switch (config.general.defaultWorkingDir) {
+    switch (config.shell.defaultWorkingDir) {
       case 'home':
         try {
           return await resolvePathAbsolute('~');
@@ -361,11 +361,11 @@ export default function App() {
         }
       
       case 'custom':
-        if (config.general.customWorkingDir) {
+        if (config.shell.customWorkingDir) {
           try {
-            return await resolvePathAbsolute(config.general.customWorkingDir);
+            return await resolvePathAbsolute(config.shell.customWorkingDir);
           } catch {
-            logger.warn('Failed to resolve custom directory:', config.general.customWorkingDir);
+            logger.warn('Failed to resolve custom directory:', config.shell.customWorkingDir);
           }
         }
         return null;
@@ -402,7 +402,7 @@ export default function App() {
       
       // Use default shell from settings if no profile shell specified
       const config = getCachedConfig();
-      const defaultShell = config?.general?.defaultShell;
+      const defaultShell = config?.shell?.defaultShell;
       
       const res = await ptyOpen({ 
         cwd: abs,
@@ -499,8 +499,8 @@ export default function App() {
       const config = getCachedConfig();
       let cwd = t.cwd;
       
-      if (config?.general?.defaultWorkingDir) {
-        switch (config.general.defaultWorkingDir) {
+      if (config?.shell?.defaultWorkingDir) {
+        switch (config.shell.defaultWorkingDir) {
           case 'home':
             // Use home directory
             try {
@@ -522,9 +522,9 @@ export default function App() {
             break;
           case 'custom':
             // Use custom directory if configured
-            if (config.general.customWorkingDir) {
+            if (config.shell.customWorkingDir) {
               try {
-                cwd = await resolvePathAbsolute(config.general.customWorkingDir);
+                cwd = await resolvePathAbsolute(config.shell.customWorkingDir);
               } catch {
                 // Fallback to current directory if custom path is invalid
               }
@@ -533,7 +533,7 @@ export default function App() {
         }
       }
       
-      const defaultShell = config?.general?.defaultShell;
+      const defaultShell = config?.shell?.defaultShell;
       const res = await ptyOpen({ 
         cwd,
         shell: defaultShell || undefined

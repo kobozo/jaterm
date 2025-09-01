@@ -1,6 +1,8 @@
 import React from 'react';
 import { TerminalSettings, ShellSettings } from '@/store/persist';
 import { getThemeList } from '@/config/themes';
+import { getCachedConfig } from '@/services/settings';
+import { DEFAULT_CONFIG } from '@/types/settings';
 
 interface TerminalSettingsEditorProps {
   terminalSettings?: TerminalSettings;
@@ -16,6 +18,11 @@ export function TerminalSettingsEditor({
   onShellChange
 }: TerminalSettingsEditorProps) {
   const themes = getThemeList();
+  
+  // Get global defaults from settings
+  const globalConfig = getCachedConfig();
+  const terminalDefaults = globalConfig?.terminal || DEFAULT_CONFIG.terminal;
+  const shellDefaults = globalConfig?.shell || DEFAULT_CONFIG.shell;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -33,7 +40,7 @@ export function TerminalSettingsEditor({
               min="8"
               max="32"
               value={terminalSettings.fontSize || ''}
-              placeholder="14"
+              placeholder={terminalDefaults.fontSize.toString()}
               onChange={(e) => onTerminalChange({
                 ...terminalSettings,
                 fontSize: e.target.value ? parseInt(e.target.value) : undefined
@@ -47,7 +54,7 @@ export function TerminalSettingsEditor({
             <input
               type="text"
               value={terminalSettings.fontFamily || ''}
-              placeholder="JetBrains Mono, monospace"
+              placeholder={terminalDefaults.fontFamily}
               onChange={(e) => onTerminalChange({
                 ...terminalSettings,
                 fontFamily: e.target.value || undefined
@@ -64,7 +71,7 @@ export function TerminalSettingsEditor({
               max="3"
               step="0.1"
               value={terminalSettings.lineHeight || ''}
-              placeholder="1.2"
+              placeholder={terminalDefaults.lineHeight.toString()}
               onChange={(e) => onTerminalChange({
                 ...terminalSettings,
                 lineHeight: e.target.value ? parseFloat(e.target.value) : undefined
@@ -126,7 +133,7 @@ export function TerminalSettingsEditor({
               min="100"
               max="100000"
               value={terminalSettings.scrollback || ''}
-              placeholder="10000"
+              placeholder={terminalDefaults.scrollback.toString()}
               onChange={(e) => onTerminalChange({
                 ...terminalSettings,
                 scrollback: e.target.value ? parseInt(e.target.value) : undefined
@@ -167,7 +174,7 @@ export function TerminalSettingsEditor({
             <input
               type="text"
               value={shellSettings.shell || ''}
-              placeholder="/bin/bash, /bin/zsh, etc."
+              placeholder={shellDefaults.defaultShell || "/bin/bash, /bin/zsh, etc."}
               onChange={(e) => onShellChange({
                 ...shellSettings,
                 shell: e.target.value || undefined
@@ -197,7 +204,7 @@ export function TerminalSettingsEditor({
             <span style={{ fontSize: '12px', color: '#999' }}>Environment Variables (KEY=value, one per line)</span>
             <textarea
               value={shellSettings.env ? Object.entries(shellSettings.env).map(([k, v]) => `${k}=${v}`).join('\n') : ''}
-              placeholder="TERM=xterm-256color&#10;EDITOR=vim"
+              placeholder={shellDefaults.defaultEnv ? Object.entries(shellDefaults.defaultEnv).map(([k, v]) => `${k}=${v}`).join('\n') : "TERM=xterm-256color\nEDITOR=vim"}
               onChange={(e) => {
                 const env: Record<string, string> = {};
                 e.target.value.split('\n').forEach(line => {
@@ -220,7 +227,7 @@ export function TerminalSettingsEditor({
             <span style={{ fontSize: '12px', color: '#999' }}>Startup Commands (one per line)</span>
             <textarea
               value={shellSettings.initCommands?.join('\n') || ''}
-              placeholder="cd ~/projects&#10;source ~/.bashrc"
+              placeholder={shellDefaults.defaultInitCommands?.length ? shellDefaults.defaultInitCommands.join('\n') : "cd ~/projects\nsource ~/.bashrc"}
               onChange={(e) => {
                 const commands = e.target.value.split('\n').filter(cmd => cmd.trim());
                 onShellChange({

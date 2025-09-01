@@ -83,6 +83,7 @@ function mergeWithDefaults(partial: Partial<GlobalConfig>): GlobalConfig {
   return {
     general: { ...DEFAULT_CONFIG.general, ...partial.general },
     terminal: { ...DEFAULT_CONFIG.terminal, ...partial.terminal },
+    shell: { ...DEFAULT_CONFIG.shell, ...partial.shell },
     editor: { ...DEFAULT_CONFIG.editor, ...partial.editor },
     ssh: { ...DEFAULT_CONFIG.ssh, ...partial.ssh },
     advanced: { ...DEFAULT_CONFIG.advanced, ...partial.advanced }
