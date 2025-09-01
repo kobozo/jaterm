@@ -10,6 +10,9 @@ import PortsPanel from '@/components/PortsPanel';
 import Sessions from '@/components/sessions';
 import type { LayoutShape } from '@/store/sessions';
 import ComposeDrawer from '@/components/ComposeDrawer';
+import { CommandPalette } from '@/components/CommandPalette';
+import { commandRegistry } from '@/services/commandRegistry';
+import { Command, CommandCategory } from '@/types/commands';
 import TabsBar from '@/components/TabsBar';
 import SplitTree, { LayoutNode, LayoutSplit, LayoutLeaf } from '@/components/SplitTree';
 import Toaster from '@/components/Toaster';
@@ -18,12 +21,14 @@ import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
 import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, sshSetPrimary, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
-import { getCachedConfig, loadGlobalConfig } from '@/services/settings';
+import { getCachedConfig, loadGlobalConfig, saveGlobalConfig } from '@/services/settings';
+import { getThemeList } from '@/config/themes';
 import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
 import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
 import { gitStatusViaHelper } from '@/services/git';
 import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
+import { homeDir } from '@tauri-apps/api/path';
 import HelperConsentModal from '@/components/HelperConsentModal';
 import KeyGenerationModal from '@/components/KeyGenerationModal';
 import { logger } from '@/services/logger';
@@ -72,6 +77,7 @@ export default function App() {
   const tabsRef = useRef<Tab[]>(tabs);
   const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   // Map channel IDs to SSH session IDs (for splits with independent connections)
   const [channelToSession, setChannelToSession] = useState<Record<string, string>>({});
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
@@ -105,6 +111,522 @@ export default function App() {
   const [updateAvailable, setUpdateAvailable] = useState<null | { version?: string }>(null);
   const { show, update, dismiss } = useToasts();
   const addToast = show;
+  
+  // Register commands for command palette
+  const registerCommands = React.useCallback(() => {
+    const commands: Command[] = [
+      // Terminal commands
+      {
+        id: 'terminal.newTab',
+        label: 'New Tab',
+        category: CommandCategory.Terminal,
+        icon: '➕',
+        shortcut: 'Cmd/Ctrl+T',
+        description: 'Open a new terminal tab',
+        action: () => newTab(),
+        subCommands: async () => {
+          const { getLocalProfiles, getSshProfiles } = await import('@/store/persist');
+          const localProfiles = await getLocalProfiles();
+          const sshProfiles = await getSshProfiles();
+          
+          const profileCommands: Command[] = [];
+          
+          // Add local terminal option
+          profileCommands.push({
+            id: 'terminal.newTab.local',
+            label: 'Local Terminal',
+            category: CommandCategory.Terminal,
+            icon: '💻',
+            description: 'Open a local terminal',
+            action: async () => {
+              const cwd = await homeDir();
+              const id = crypto.randomUUID();
+              setTabs(prev => [...prev, { 
+                id, 
+                kind: 'local',
+                cwd: null, 
+                panes: [], 
+                activePane: null, 
+                status: {} 
+              }]);
+              setActiveTab(id);
+              await openSessionFor(id, { cwd });
+            },
+          });
+          
+          // Add local profiles
+          localProfiles.forEach(profile => {
+            profileCommands.push({
+              id: `terminal.profile.local.${profile.id}`,
+              label: profile.name,
+              category: CommandCategory.Terminal,
+              icon: '📁',
+              description: `Open at ${profile.path}`,
+              keywords: [profile.path],
+              action: async () => {
+                const id = crypto.randomUUID();
+                setTabs(prev => [...prev, { 
+                  id, 
+                  kind: 'local',
+                  cwd: null, 
+                  panes: [], 
+                  activePane: null, 
+                  status: {} 
+                }]);
+                setActiveTab(id);
+                await openSessionFor(id, { cwd: profile.path });
+              },
+            });
+          });
+          
+          // Add SSH profiles
+          sshProfiles.forEach(profile => {
+            profileCommands.push({
+              id: `terminal.profile.ssh.${profile.id}`,
+              label: profile.name,
+              category: CommandCategory.Terminal,
+              icon: '🔐',
+              description: `SSH to ${profile.user}@${profile.host}`,
+              keywords: [profile.host, profile.user],
+              action: async () => {
+                const id = crypto.randomUUID();
+                setTabs(prev => [...prev, { 
+                  id, 
+                  kind: 'ssh',
+                  profileId: profile.id,
+                  cwd: null, 
+                  panes: [], 
+                  activePane: null, 
+                  status: {} 
+                }]);
+                setActiveTab(id);
+                
+                // Resolve effective settings with inheritance
+                try {
+                  const { getProfilesTree, resolveEffectiveSettings, findPathToNode } = await import('@/store/persist');
+                  const tree = await getProfilesTree();
+                  
+                  // Find the profile node in the tree
+                  let profileNodeId = null;
+                  const findProfileNode = (node: any, path: string[]) => {
+                    if (node.type === 'profile' && node.ref?.id === profile.id) {
+                      profileNodeId = node.id;
+                      return;
+                    }
+                    if (node.children) {
+                      for (const child of node.children) {
+                        findProfileNode(child, [...path, node.id]);
+                      }
+                    }
+                  };
+                  if (tree) {
+                    findProfileNode(tree, []);
+                  }
+                  
+                  if (profileNodeId && tree) {
+                    const effective = resolveEffectiveSettings({ 
+                      root: tree, 
+                      nodeId: profileNodeId, 
+                      profileKind: 'ssh', 
+                      profileSettings: { 
+                        terminal: profile.terminal, 
+                        shell: profile.shell, 
+                        advanced: profile.advanced, 
+                        ssh: { 
+                          host: profile.host, 
+                          port: profile.port, 
+                          user: profile.user, 
+                          auth: profile.auth 
+                        } 
+                      } 
+                    });
+                    
+                    await openSshFor(id, {
+                      host: effective.ssh?.host ?? profile.host,
+                      port: effective.ssh?.port ?? profile.port,
+                      user: effective.ssh?.user ?? profile.user,
+                      auth: effective.ssh?.auth ?? (profile.auth || { agent: true }),
+                      cwd: profile.path,
+                      profileId: profile.id,
+                      profileName: profile.name,
+                      terminal: effective.terminal,
+                      shell: effective.shell,
+                      advanced: effective.advanced,
+                      os: profile.os,
+                      _resolved: true // Mark that settings are already resolved
+                    });
+                  } else {
+                    // Fallback if profile not in tree
+                    await openSshFor(id, {
+                      profileId: profile.id,
+                      profileName: profile.name,
+                      host: profile.host,
+                      port: profile.port,
+                      user: profile.user,
+                      path: profile.path,
+                      auth: profile.auth || { agent: true },
+                      _resolved: true // Still mark as resolved to avoid re-fetching
+                    });
+                  }
+                } catch (err) {
+                  console.error('Failed to resolve effective settings:', err);
+                  // Fallback
+                  await openSshFor(id, {
+                    profileId: profile.id,
+                    profileName: profile.name,
+                    host: profile.host,
+                    port: profile.port,
+                    user: profile.user,
+                    path: profile.path,
+                    auth: profile.auth || { agent: true },
+                    _resolved: true
+                  });
+                }
+              },
+            });
+          });
+          
+          return profileCommands;
+        },
+      },
+      {
+        id: 'terminal.closeTab',
+        label: 'Close Tab',
+        category: CommandCategory.Terminal,
+        icon: '❌',
+        shortcut: 'Cmd/Ctrl+W',
+        description: 'Close the current tab',
+        action: () => {
+          if (activeTab && activeTab !== sessionsId) {
+            closeTab(activeTab);
+          }
+        },
+        enabled: () => activeTab !== sessionsId,
+      },
+      {
+        id: 'terminal.splitHorizontal',
+        label: 'Split Pane Horizontal',
+        category: CommandCategory.Terminal,
+        icon: '⬌',
+        shortcut: 'Cmd/Ctrl+Shift+H',
+        description: 'Split the current pane horizontally',
+        action: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          const pane = t?.activePane ?? (t?.panes[0] || null);
+          if (pane) splitPane(pane, 'row');
+        },
+        enabled: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          return Boolean(t && t.panes.length > 0);
+        },
+      },
+      {
+        id: 'terminal.splitVertical',
+        label: 'Split Pane Vertical',
+        category: CommandCategory.Terminal,
+        icon: '⬍',
+        shortcut: 'Cmd/Ctrl+Shift+V',
+        description: 'Split the current pane vertically',
+        action: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          const pane = t?.activePane ?? (t?.panes[0] || null);
+          if (pane) splitPane(pane, 'column');
+        },
+        enabled: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          return Boolean(t && t.panes.length > 0);
+        },
+      },
+      {
+        id: 'terminal.nextTab',
+        label: 'Next Tab',
+        category: CommandCategory.Terminal,
+        icon: '→',
+        shortcut: 'Ctrl+Tab',
+        description: 'Switch to the next tab',
+        action: () => {
+          const idx = tabs.findIndex((t) => t.id === activeTab);
+          if (idx !== -1) {
+            const next = (idx + 1) % tabs.length;
+            setActiveTab(tabs[next].id);
+          }
+        },
+      },
+      {
+        id: 'terminal.prevTab',
+        label: 'Previous Tab',
+        category: CommandCategory.Terminal,
+        icon: '←',
+        shortcut: 'Ctrl+Shift+Tab',
+        description: 'Switch to the previous tab',
+        action: () => {
+          const idx = tabs.findIndex((t) => t.id === activeTab);
+          if (idx !== -1) {
+            const next = (idx - 1 + tabs.length) % tabs.length;
+            setActiveTab(tabs[next].id);
+          }
+        },
+      },
+      
+      // View commands
+      {
+        id: 'view.toggleGit',
+        label: 'Toggle Git Panel',
+        category: CommandCategory.View,
+        icon: '🔀',
+        description: 'Show/hide the Git panel',
+        action: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          if (t) {
+            const newView = t.view === 'git' ? 'terminal' : 'git';
+            setTabs((prev) => prev.map((tb) => 
+              tb.id === activeTab ? { ...tb, view: newView } : tb
+            ));
+          }
+        },
+        enabled: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          return Boolean(t && t.kind !== 'settings' && t.cwd);
+        },
+      },
+      {
+        id: 'view.toggleFiles',
+        label: 'Toggle File Explorer',
+        category: CommandCategory.View,
+        icon: '📁',
+        description: 'Show/hide the file explorer',
+        action: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          if (t) {
+            const newView = t.view === 'files' ? 'terminal' : 'files';
+            setTabs((prev) => prev.map((tb) => 
+              tb.id === activeTab ? { ...tb, view: newView } : tb
+            ));
+          }
+        },
+        enabled: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          return Boolean(t && t.kind !== 'settings');
+        },
+      },
+      {
+        id: 'view.togglePorts',
+        label: 'Toggle Ports Panel',
+        category: CommandCategory.View,
+        icon: '🔌',
+        description: 'Show/hide the ports panel',
+        action: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          if (t) {
+            const newView = t.view === 'ports' ? 'terminal' : 'ports';
+            setTabs((prev) => prev.map((tb) => 
+              tb.id === activeTab ? { ...tb, view: newView } : tb
+            ));
+          }
+        },
+        enabled: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          return Boolean(t && t.kind === 'ssh');
+        },
+      },
+      
+      // Settings commands
+      {
+        id: 'settings.open',
+        label: 'Open Settings',
+        category: CommandCategory.Settings,
+        icon: '⚙️',
+        description: 'Open the settings panel',
+        action: () => {
+          // Check if settings tab already exists
+          const settingsTab = tabs.find(t => t.kind === 'settings');
+          if (settingsTab) {
+            setActiveTab(settingsTab.id);
+          } else {
+            const id = crypto.randomUUID();
+            setTabs((prev) => [...prev, { 
+              id, 
+              kind: 'settings', 
+              cwd: null, 
+              panes: [], 
+              activePane: null, 
+              status: {} 
+            }]);
+            setActiveTab(id);
+          }
+        },
+      },
+      
+      // Session commands  
+      {
+        id: 'session.openWelcome',
+        label: 'Open Welcome Screen',
+        category: CommandCategory.Session,
+        icon: '🏠',
+        description: 'Return to the welcome screen',
+        action: () => {
+          setActiveTab(sessionsId);
+        },
+      },
+      
+      // Other commands
+      {
+        id: 'app.checkUpdates',
+        label: 'Check for Updates',
+        category: CommandCategory.Settings,
+        icon: '🔄',
+        description: 'Check for application updates',
+        action: () => checkForUpdatesInteractive(),
+      },
+      {
+        id: 'app.compose',
+        label: 'Compose with AI',
+        category: CommandCategory.Terminal,
+        icon: '🤖',
+        shortcut: 'Cmd/Ctrl+K',
+        description: 'Open AI compose assistant',
+        action: () => setComposeOpen(true),
+        enabled: () => {
+          const t = tabs.find((x) => x.id === activeTab);
+          return Boolean(t && t.activePane);
+        },
+      },
+    ];
+    
+    // We'll register local profiles separately after they load
+    
+    // Register SSH profile commands dynamically
+    if (sshProfiles && sshProfiles.length > 0) {
+      sshProfiles.forEach(profile => {
+        commands.push({
+          id: `ssh.connect.${profile.id}`,
+          label: `SSH: ${profile.name}`,
+          category: CommandCategory.SSH,
+          icon: '🔐',
+          description: `Connect to ${profile.user}@${profile.host}`,
+          keywords: [profile.host, profile.user || '', profile.name],
+          action: async () => {
+            const id = crypto.randomUUID();
+            setTabs((prev) => [...prev, { 
+              id, 
+              kind: 'ssh',
+              profileId: profile.id,
+              cwd: null, 
+              panes: [], 
+              activePane: null, 
+              status: {} 
+            }]);
+            setActiveTab(id);
+            
+            // Resolve effective settings with inheritance
+            try {
+              const { getProfilesTree, resolveEffectiveSettings } = await import('@/store/persist');
+              const tree = await getProfilesTree();
+              
+              // Find the profile node in the tree
+              let profileNodeId = null;
+              const findProfileNode = (node: any) => {
+                if (node.type === 'profile' && node.ref?.id === profile.id) {
+                  profileNodeId = node.id;
+                  return;
+                }
+                if (node.children) {
+                  for (const child of node.children) {
+                    findProfileNode(child);
+                  }
+                }
+              };
+              if (tree) {
+                findProfileNode(tree);
+              }
+              
+              if (profileNodeId && tree) {
+                const effective = resolveEffectiveSettings({ 
+                  root: tree, 
+                  nodeId: profileNodeId, 
+                  profileKind: 'ssh', 
+                  profileSettings: { 
+                    terminal: profile.terminal, 
+                    shell: profile.shell, 
+                    advanced: profile.advanced, 
+                    ssh: { 
+                      host: profile.host, 
+                      port: profile.port, 
+                      user: profile.user, 
+                      auth: profile.auth 
+                    } 
+                  } 
+                });
+                
+                await openSshFor(id, {
+                  host: effective.ssh?.host ?? profile.host,
+                  port: effective.ssh?.port ?? profile.port,
+                  user: effective.ssh?.user ?? profile.user,
+                  auth: effective.ssh?.auth ?? (profile.auth || { agent: true }),
+                  cwd: profile.path,
+                  profileId: profile.id,
+                  profileName: profile.name,
+                  terminal: effective.terminal,
+                  shell: effective.shell,
+                  advanced: effective.advanced,
+                  os: profile.os,
+                  _resolved: true // Mark that settings are already resolved
+                });
+              } else {
+                // Fallback if profile not in tree
+                await openSshFor(id, {
+                  profileId: profile.id,
+                  profileName: profile.name,
+                  host: profile.host,
+                  port: profile.port,
+                  user: profile.user,
+                  path: profile.path,
+                  auth: profile.auth || { agent: true },
+                  _resolved: true // Still mark as resolved to avoid re-fetching
+                });
+              }
+            } catch (err) {
+              console.error('Failed to resolve effective settings:', err);
+              // Fallback
+              await openSshFor(id, {
+                profileId: profile.id,
+                profileName: profile.name,
+                host: profile.host,
+                port: profile.port,
+                user: profile.user,
+                path: profile.path,
+                auth: profile.auth || { agent: true },
+                _resolved: true
+              });
+            }
+          },
+        });
+      });
+    }
+    
+    // Register theme commands
+    const themeList = getThemeList();
+    themeList.forEach(theme => {
+      commands.push({
+        id: `theme.switch.${theme.id}`,
+        label: `Theme: ${theme.name}`,
+        category: CommandCategory.Theme,
+        icon: '🎨',
+        description: theme.dark ? 'Dark theme' : 'Light theme',
+        keywords: [theme.dark ? 'dark' : 'light'],
+        action: async () => {
+          const config = await loadGlobalConfig();
+          config.terminal.theme = theme.id;
+          await saveGlobalConfig(config);
+          show({ title: `Theme changed to ${theme.name}`, kind: 'success' });
+          // Reload to apply theme
+          window.location.reload();
+        },
+      });
+    });
+    
+    commandRegistry.registerAll(commands);
+  }, [tabs, activeTab, sessionsId, sshProfiles]);
   // Simple bell sound using WebAudio
   const audioCtxRef = React.useRef<AudioContext | null>(null);
   function ringBell() {
@@ -232,6 +754,48 @@ export default function App() {
       window.removeEventListener('profiles-unlocked', handleProfilesUnlocked);
     };
   }, []);
+  
+  // Register commands when dependencies change
+  React.useEffect(() => {
+    registerCommands();
+  }, [registerCommands]);
+  
+  // Register local profiles as commands when they load
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { getLocalProfiles } = await import('@/store/persist');
+        const localProfiles = await getLocalProfiles();
+        
+        // Register each local profile as a command
+        localProfiles.forEach(profile => {
+          commandRegistry.register({
+            id: `local.open.${profile.id}`,
+            label: `Local: ${profile.name}`,
+            category: CommandCategory.Terminal,
+            icon: '📁',
+            description: `Open terminal at ${profile.path}`,
+            keywords: [profile.path, profile.name],
+            action: async () => {
+              const id = crypto.randomUUID();
+              setTabs((prev) => [...prev, { 
+                id, 
+                kind: 'local',
+                cwd: null, 
+                panes: [], 
+                activePane: null, 
+                status: {} 
+              }]);
+              setActiveTab(id);
+              await openSessionFor(id, { cwd: profile.path });
+            },
+          });
+        });
+      } catch (e) {
+        logger.warn('Failed to load local profiles for commands:', e);
+      }
+    })();
+  }, []); // Run once on mount
 
   async function checkForUpdatesInteractive() {
     if (updateChecking) return;
@@ -2031,6 +2595,14 @@ export default function App() {
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
+      
+      // Check for command palette shortcut first (works globally)
+      if (meta && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+        return;
+      }
+      
       // Avoid when typing in inputs/textareas
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -2574,6 +3146,10 @@ export default function App() {
           />
         </div>
       )}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
       {customPortDialog && (
         <div style={{ 
           position: 'fixed', 

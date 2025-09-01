@@ -48,6 +48,17 @@ fn default_port() -> u16 {
     22
 }
 
+/// Check if a string is an IP address (IPv4 or IPv6)
+fn is_ip_address(host: &str) -> bool {
+    // Check for IPv4
+    if host.parse::<std::net::Ipv4Addr>().is_ok() {
+        return true;
+    }
+    // Check for IPv6 (including bracketed format)
+    let clean_host = host.trim_start_matches('[').trim_end_matches(']');
+    clean_host.parse::<std::net::Ipv6Addr>().is_ok()
+}
+
 /// Helper to retry operations that might return WouldBlock in non-blocking mode
 fn retry_would_block<T, F>(mut f: F, max_retries: u32) -> Result<T, String>
 where
@@ -81,9 +92,21 @@ fn establish_ssh_connection(
     auth: &Option<SshAuth>,
     _trust_host: bool,
 ) -> Result<(TcpStream, ssh2::Session), String> {
-    let host_lc = host.to_ascii_lowercase();
-    let addr = format!("{}:{}", host_lc, port);
-    let tcp = TcpStream::connect(&addr).map_err(|e| format!("tcp connect: {e}"))?;
+    // Only lowercase DNS hostnames, not IP addresses
+    let host_normalized = if is_ip_address(host) {
+        host.to_string()
+    } else {
+        host.to_ascii_lowercase()
+    };
+    let addr = format!("{}:{}", host_normalized, port);
+    let tcp = TcpStream::connect(&addr).map_err(|e| {
+        // Add helpful message for macOS local network permission issues
+        if e.raw_os_error() == Some(65) {
+            format!("tcp connect: {} (Error 65: No route to host - If connecting to a local network device, check System Settings → Privacy & Security → Local Network permissions for JaTerm)", e)
+        } else {
+            format!("tcp connect: {e}")
+        }
+    })?;
     
     // Configure TCP socket
     tcp.set_read_timeout(None).ok();
@@ -148,10 +171,21 @@ pub async fn ssh_connect(
     state: State<'_, crate::state::app_state::AppState>,
     profile: SshProfile,
 ) -> Result<String, String> {
-    // Normalize hostnames to lowercase for consistency (DNS is case-insensitive)
-    let host_lc = profile.host.to_ascii_lowercase();
-    let addr = format!("{}:{}", host_lc, profile.port);
-    let tcp = TcpStream::connect(&addr).map_err(|e| format!("tcp connect: {e}"))?;
+    // Only lowercase DNS hostnames, not IP addresses
+    let host_normalized = if is_ip_address(&profile.host) {
+        profile.host.clone()
+    } else {
+        profile.host.to_ascii_lowercase()
+    };
+    let addr = format!("{}:{}", host_normalized, profile.port);
+    let tcp = TcpStream::connect(&addr).map_err(|e| {
+        // Add helpful message for macOS local network permission issues
+        if e.raw_os_error() == Some(65) {
+            format!("tcp connect: {} (Error 65: No route to host - If connecting to a local network device, check System Settings → Privacy & Security → Local Network permissions for JaTerm)", e)
+        } else {
+            format!("tcp connect: {e}")
+        }
+    })?;
     // Explicitly set NO timeout on the TCP socket - crucial for SSH channel operations
     tcp.set_read_timeout(None).ok();
     tcp.set_write_timeout(None).ok();
@@ -177,8 +211,8 @@ pub async fn ssh_connect(
             let kh_path = std::path::PathBuf::from(home).join(".ssh/known_hosts");
             let _ = kh.read_file(&kh_path, ssh2::KnownHostFileKind::OpenSSH);
             if let Some((key, _)) = sess.host_key() {
-                let hostport = format!("{}:{}", host_lc, profile.port);
-                match kh.check(&host_lc, key) {
+                let hostport = format!("{}:{}", host_normalized, profile.port);
+                match kh.check(&host_normalized, key) {
                     ssh2::CheckResult::Match => {}
                     ssh2::CheckResult::NotFound => {
                         // Prompt user unless trust_host is set
@@ -203,7 +237,7 @@ pub async fn ssh_connect(
                                 let _ = std::fs::create_dir_all(parent);
                             }
                             // Append line "host keytype key"
-                            let line = format!("{} {} {}\n", host_lc, kt, b64);
+                            let line = format!("{} {} {}\n", host_normalized, kt, b64);
                             use std::io::Write as IoWrite;
                             if let Ok(mut f) = std::fs::OpenOptions::new()
                                 .create(true)
@@ -238,7 +272,7 @@ pub async fn ssh_connect(
                             };
                             let prompt = serde_json::json!({
                               "error": "KNOWN_HOSTS_PROMPT",
-                              "host": host_lc,
+                              "host": host_normalized,
                               "port": profile.port,
                               "keyType": kt,
                               "fingerprintSHA256": fp
@@ -269,7 +303,7 @@ pub async fn ssh_connect(
                             if let Some(parent) = kh_path.parent() {
                                 let _ = std::fs::create_dir_all(parent);
                             }
-                            let line = format!("{} {} {}\n", host_lc, kt, b64);
+                            let line = format!("{} {} {}\n", host_normalized, kt, b64);
                             use std::io::Write as IoWrite;
                             if let Ok(mut f) = std::fs::OpenOptions::new()
                                 .create(true)
@@ -310,7 +344,7 @@ pub async fn ssh_connect(
                             };
                             let prompt = serde_json::json!({
                               "error": "KNOWN_HOSTS_PROMPT",
-                              "host": host_lc,
+                              "host": host_normalized,
                               "port": profile.port,
                               "keyType": kt,
                               "fingerprintSHA256": fp
@@ -386,7 +420,7 @@ pub async fn ssh_connect(
     // Start watchdog for git status and port detection (non-blocking)
     let session_id_for_watchdog = format!("ssh_{}", nanoid::nanoid!(8));
     let app_for_watchdog = app.clone();
-    let host_for_watchdog = host_lc.clone();
+    let host_for_watchdog = host_normalized.clone();
     let port_for_watchdog = profile.port;
     let user_for_watchdog = profile.user.clone();
     let session_id_clone = session_id_for_watchdog.clone();
@@ -435,7 +469,7 @@ pub async fn ssh_connect(
                 tcp,
                 sess,
                 lock: std::sync::Arc::new(std::sync::Mutex::new(())),
-                host: host_lc,
+                host: host_normalized,
                 port: profile.port,
                 user: profile.user.clone(),
                 auth: profile.auth.clone(),
