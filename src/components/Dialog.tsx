@@ -1,5 +1,4 @@
 import React, { useEffect, useRef } from 'react';
-import { FiX } from 'react-icons/fi';
 
 interface DialogProps {
   isOpen: boolean;
@@ -54,8 +53,9 @@ export function Dialog({ isOpen, onClose, title, children, className = '' }: Dia
               onClick={onClose}
               className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
               aria-label="Close dialog"
+              style={{ fontSize: '20px', lineHeight: '20px' }}
             >
-              <FiX className="w-5 h-5" />
+              ×
             </button>
           </div>
           

@@ -4,7 +4,6 @@ import { profileManager } from '@/services/profileManager';
 import { show } from '@/components/notifications';
 import { Dialog } from '@/components/Dialog';
 import ProfileEditor from './ProfileEditor';
-import { FiPlus, FiEdit2, FiTrash2, FiCopy, FiDownload, FiUpload, FiCheck } from 'react-icons/fi';
 
 interface ProfileManagerProps {
   isOpen: boolean;
@@ -278,7 +277,7 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
                 onClick={handleCreateProfile}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
               >
-                <FiPlus className="w-4 h-4" />
+                <span className="nf-icon" style={{ fontSize: '14px' }}>{'\uf067'}</span>
                 New Profile
               </button>
             </div>
@@ -307,7 +306,7 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
                       )}
                     </div>
                     {profile.id === defaultProfileId && (
-                      <FiCheck className="w-4 h-4 text-green-500" title="Default" />
+                      <span className="nf-icon" style={{ fontSize: '14px', color: '#10b981' }} title="Default">{'\uf00c'}</span>
                     )}
                   </button>
                 ))}
@@ -344,7 +343,7 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
                         className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
                         title="Set as default"
                       >
-                        <FiCheck className="w-4 h-4" />
+                        <span className="nf-icon" style={{ fontSize: '16px' }}>{'\uf00c'}</span>
                       </button>
                     )}
                     <button
@@ -352,14 +351,14 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
                       className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
                       title="Duplicate"
                     >
-                      <FiCopy className="w-4 h-4" />
+                      <span className="nf-icon" style={{ fontSize: '16px' }}>{'\uf0c5'}</span>
                     </button>
                     <button
                       onClick={() => handleEditProfile(selectedProfile)}
                       className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
                       title={selectedProfile.isBuiltIn ? "Customize" : "Edit"}
                     >
-                      <FiEdit2 className="w-4 h-4" />
+                      <span className="nf-icon" style={{ fontSize: '16px' }}>{'\uf044'}</span>
                     </button>
                     {!selectedProfile.isBuiltIn && (
                       <button
@@ -367,7 +366,7 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
                         className="p-2 text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
                         title="Delete"
                       >
-                        <FiTrash2 className="w-4 h-4" />
+                        <span className="nf-icon" style={{ fontSize: '16px' }}>{'\uf1f8'}</span>
                       </button>
                     )}
                   </div>
@@ -496,14 +495,14 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
               onClick={handleExport}
               className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
             >
-              <FiDownload className="w-4 h-4" />
+              <span className="nf-icon" style={{ fontSize: '14px' }}>{'\uf019'}</span>
               Export
             </button>
             <button
               onClick={handleImport}
               className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
             >
-              <FiUpload className="w-4 h-4" />
+              <span className="nf-icon" style={{ fontSize: '14px' }}>{'\uf093'}</span>
               Import
             </button>
           </div>
