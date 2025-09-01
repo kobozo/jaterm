@@ -3,11 +3,12 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { addRecent } from '@/store/recents';
 import { getRecentSessions, removeRecentSession, clearRecentSessions, getRecentSshSessions, removeRecentSshSession, clearRecentSshSessions } from '@/store/sessions';
-import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, ensureProfilesTree, saveProfilesTree, resolveEffectiveSettings, type LocalProfile, type SshProfileStored, type ProfilesTreeNode } from '@/store/persist';
+import { getLocalProfiles, getSshProfiles, saveLocalProfile, saveSshProfile, deleteLocalProfile, deleteSshProfile, ensureProfilesTree, saveProfilesTree, resolveEffectiveSettings, type LocalProfile, type SshProfileStored, type ProfilesTreeNode, type TerminalSettings, type ShellSettings } from '@/store/persist';
 import { getThemeList, themes } from '@/config/themes';
 import { sshConnect, sshDisconnect, sshHomeDir, sshSftpList, onSshUploadProgress, sshSftpMkdirs, sshSftpWrite, sshExec, scanSshKeys, type SshKeyInfo } from '@/types/ipc';
 import { ensureHelper } from '@/services/helper';
 import { useToasts } from '@/store/toasts';
+import { TerminalSettingsEditor } from '@/components/TerminalSettingsEditor';
 
 import type { RecentSession, RecentSshSession } from '@/store/sessions';
 
@@ -186,7 +187,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
   const [localProfiles, setLocalProfiles] = useState<LocalProfile[]>([]);
   const [sshProfiles, setSshProfiles] = useState<SshProfileStored[]>([]);
   const [lpOpen, setLpOpen] = useState(false);
-  const [lpForm, setLpForm] = useState<{ id?: string; name: string; path: string }>({ name: '', path: '' });
+  const [lpForm, setLpForm] = useState<{ id?: string; name: string; path: string; terminal?: TerminalSettings; shell?: ShellSettings }>({ name: '', path: '' });
   const [spOpen, setSpOpen] = useState(false);
   const [spForm, setSpForm] = useState<{ 
     id?: string; 
@@ -205,6 +206,8 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
     shellOverride?: string;
     defaultForwards?: Array<{ type: 'L' | 'R'; srcHost: string; srcPort: number; dstHost: string; dstPort: number }>;
     // Terminal settings
+    terminal?: TerminalSettings;
+    shell?: ShellSettings;
     theme?: string;
     fontSize?: number;
     fontFamily?: string;
@@ -219,6 +222,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
   const [inheritContextNodeId, setInheritContextNodeId] = useState<string | null>(null);
   const [inheritContextFolderId, setInheritContextFolderId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'basic' | 'environment' | 'forwarding' | 'terminal'>('basic');
+  const [lpActiveTab, setLpActiveTab] = useState<'basic' | 'terminal'>('basic');
   const [browse, setBrowse] = useState<{ sessionId: string; cwd: string; entries: { name: string; path: string; is_dir: boolean }[] } | null>(null);
   // Global search state
   const [search, setSearch] = useState('');
@@ -806,23 +810,6 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                 onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10b981'; e.currentTarget.style.color = 'white'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#10b981'; }}
               >New SSH Profile</button>
-              {onOpenProfileManager && (
-                <button 
-                  onClick={onOpenProfileManager}
-                  style={{
-                    padding: '6px 12px',
-                    backgroundColor: 'transparent',
-                    color: '#6366f1',
-                    border: '1px solid #6366f1',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#6366f1'; e.currentTarget.style.color = 'white'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#6366f1'; }}
-                  title="Manage terminal profiles (Cmd/Ctrl+Shift+T)"
-                >Terminal Profiles</button>
-              )}
               <span style={{ flex: 1 }} />
               <button 
                 onClick={() => {
@@ -1104,25 +1091,93 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
 
       {lpOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 420 }}>
-            <h3 style={{ marginTop: 0 }}>{lpForm.id ? 'Edit' : 'New'} Local Profile</h3>
-            <label>Name<input style={{ width: '100%' }} value={lpForm.name} onChange={(e) => setLpForm({ ...lpForm, name: e.target.value })} /></label>
-            <label>Path<input style={{ width: '100%' }} value={lpForm.path} onChange={(e) => setLpForm({ ...lpForm, path: e.target.value })} placeholder="/absolute/path" /></label>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-              <button onClick={() => setLpOpen(false)}>Cancel</button>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, minWidth: 580, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '16px 16px 0', borderBottom: '1px solid #444' }}>
+              <h3 style={{ margin: 0 }}>{lpForm.id ? 'Edit' : 'New'} Local Profile</h3>
+              {/* Tab Navigation */}
+              <div style={{ display: 'flex', gap: 0, marginTop: 12 }}>
+                <button 
+                  onClick={() => setLpActiveTab('basic')} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: lpActiveTab === 'basic' ? '#333' : 'transparent', 
+                    border: 'none',
+                    borderBottom: lpActiveTab === 'basic' ? '2px solid #0078d4' : '2px solid transparent',
+                    color: lpActiveTab === 'basic' ? '#fff' : '#aaa',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Basic
+                </button>
+                <button 
+                  onClick={() => setLpActiveTab('terminal')} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: lpActiveTab === 'terminal' ? '#333' : 'transparent',
+                    border: 'none', 
+                    borderBottom: lpActiveTab === 'terminal' ? '2px solid #0078d4' : '2px solid transparent',
+                    color: lpActiveTab === 'terminal' ? '#fff' : '#aaa',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Terminal
+                </button>
+              </div>
+            </div>
+            
+            {/* Tab Content */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {lpActiveTab === 'basic' && (
+                <div style={{ padding: 16 }}>
+                  <label>Name<input style={{ width: '100%' }} value={lpForm.name} onChange={(e) => setLpForm({ ...lpForm, name: e.target.value })} /></label>
+                  <label>Path<input style={{ width: '100%' }} value={lpForm.path} onChange={(e) => setLpForm({ ...lpForm, path: e.target.value })} placeholder="/absolute/path" /></label>
+                </div>
+              )}
+              
+              {lpActiveTab === 'terminal' && (
+                <div style={{ padding: '16px', overflowY: 'auto' }}>
+                  <TerminalSettingsEditor
+                    terminalSettings={lpForm.terminal || {}}
+                    shellSettings={lpForm.shell || {}}
+                    onTerminalChange={(settings) => setLpForm({ ...lpForm, terminal: settings })}
+                    onShellChange={(settings) => setLpForm({ ...lpForm, shell: settings })}
+                  />
+                </div>
+              )}
+            </div>
+            
+            {/* Footer */}
+            <div style={{ padding: 16, borderTop: '1px solid #444', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => { setLpOpen(false); setLpActiveTab('basic'); }}>Cancel</button>
               <button onClick={async () => { 
                 if (!lpForm.path || lpForm.path.trim() === '') {
                   alert('Path is required for local profile');
                   return;
                 }
-                if (!lpForm.id) lpForm.id = crypto.randomUUID(); 
-                await saveLocalProfile(lpForm as any); 
+                if (!lpForm.id) lpForm.id = crypto.randomUUID();
+                
+                const profile: LocalProfile = {
+                  id: lpForm.id,
+                  name: lpForm.name,
+                  path: lpForm.path
+                };
+                
+                // Add terminal and shell settings if provided
+                if (lpForm.terminal && Object.keys(lpForm.terminal).length > 0) {
+                  profile.terminal = lpForm.terminal;
+                }
+                if (lpForm.shell && Object.keys(lpForm.shell).length > 0) {
+                  profile.shell = lpForm.shell;
+                }
+                
+                await saveLocalProfile(profile); 
                 setLocalProfiles(await getLocalProfiles()); 
                 if (tree && !hasProfileNode(tree, 'local', lpForm.id)) {
                   const dest = currentFolderId;
                   updateTree((root) => addProfileNode(root, 'local', lpForm.id!, dest));
                 }
-                setLpOpen(false); 
+                setLpOpen(false);
+                setLpActiveTab('basic');
               }}>Save</button>
             </div>
           </div>
@@ -1161,6 +1216,19 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                   }}
                 >
                   Environment
+                </button>
+                <button 
+                  onClick={() => setActiveTab('terminal')} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: activeTab === 'terminal' ? '#333' : 'transparent',
+                    border: 'none', 
+                    borderBottom: activeTab === 'terminal' ? '2px solid #0078d4' : '2px solid transparent',
+                    color: activeTab === 'terminal' ? '#fff' : '#aaa',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Terminal
                 </button>
                 <button 
                   onClick={() => setActiveTab('forwarding')} 
@@ -1494,6 +1562,17 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                 </div>
               )}
               
+              {activeTab === 'terminal' && (
+                <div style={{ padding: '16px', overflowY: 'auto', maxHeight: 'calc(80vh - 150px)' }}>
+                  <TerminalSettingsEditor
+                    terminalSettings={spForm.terminal || {}}
+                    shellSettings={spForm.shell || {}}
+                    onTerminalChange={(settings) => setSpForm({ ...spForm, terminal: settings })}
+                    onShellChange={(settings) => setSpForm({ ...spForm, shell: settings })}
+                  />
+                </div>
+              )}
+              
               {activeTab === 'forwarding' && (
                 <div>
                   <label style={{ display: 'block', marginBottom: 4 }}>Default Port Forwards</label>
@@ -1706,13 +1785,14 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                   if (!spInherit.sshAuth) profile.auth = spForm.authType === 'agent' ? { agent: true } : spForm.authType === 'password' ? { password: spForm.password } : { keyPath: spForm.keyPath, passphrase: spForm.passphrase };
                   
                   // Add shell settings if provided
-                  if (spForm.envVars?.length || spForm.initCommands?.length || spForm.shellOverride) {
-                    profile.shell = {};
+                  if (spForm.shell || spForm.envVars?.length || spForm.initCommands?.length || spForm.shellOverride) {
+                    profile.shell = spForm.shell || {};
+                    // Merge old format environment variables
                     if (spForm.envVars?.length) {
-                      profile.shell.env = Object.fromEntries(spForm.envVars.map(v => [v.key, v.value]));
+                      profile.shell.env = { ...profile.shell.env, ...Object.fromEntries(spForm.envVars.map(v => [v.key, v.value])) };
                     }
                     if (spForm.initCommands?.length) {
-                      profile.shell.initCommands = spForm.initCommands;
+                      profile.shell.initCommands = [...(profile.shell.initCommands || []), ...spForm.initCommands];
                     }
                     if (spForm.shellOverride) {
                       profile.shell.shell = spForm.shellOverride;
@@ -1724,8 +1804,9 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                     profile.advanced = { defaultForwards: spForm.defaultForwards };
                   }
                   
-                  // Add terminal settings only for fields not inheriting
-                  const term: any = {};
+                  // Add terminal settings - merge both new format and old format
+                  const term: any = spForm.terminal || {};
+                  // Add old format terminal settings if not inheriting
                   if (!spInherit.theme && spForm.theme) term.theme = spForm.theme;
                   if (!spInherit.fontSize && spForm.fontSize) term.fontSize = spForm.fontSize;
                   if (!spInherit.fontFamily && spForm.fontFamily) term.fontFamily = spForm.fontFamily;

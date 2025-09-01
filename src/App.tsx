@@ -26,7 +26,6 @@ import { gitStatusViaHelper } from '@/services/git';
 import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
 import HelperConsentModal from '@/components/HelperConsentModal';
 import KeyGenerationModal from '@/components/KeyGenerationModal';
-import ProfileManager from '@/components/ProfileManager';
 import { logger } from '@/services/logger';
 import { telemetry, TelemetryEvent } from '@/services/telemetry';
 import { featureFlags } from '@/services/features';
@@ -74,7 +73,6 @@ export default function App() {
   const tabsRef = useRef<Tab[]>(tabs);
   const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
-  const [profileManagerOpen, setProfileManagerOpen] = useState(false);
   // Map channel IDs to SSH session IDs (for splits with independent connections)
   const [channelToSession, setChannelToSession] = useState<Record<string, string>>({});
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
@@ -396,28 +394,11 @@ export default function App() {
       // Load terminal profile if specified
       let shellProgram = undefined;
       let shellArgs = undefined;
-      let envVars = {};
-      let startupCommands = [];
+      let envVars: Record<string, string> = {};
+      let startupCommands: string[] = [];
       
-      if (opts.terminalProfileId) {
-        const { profileManager } = await import('@/services/profileManager');
-        await profileManager.initialize();
-        const profile = profileManager.getProfile(opts.terminalProfileId);
-        
-        if (profile) {
-          // Apply shell configuration from profile
-          if (profile.shell) {
-            shellProgram = profile.shell.program;
-            shellArgs = profile.shell.args;
-            envVars = profile.shell.env || {};
-          }
-          
-          // Get startup commands
-          if (profile.startup) {
-            startupCommands = profile.startup.commands || [];
-          }
-        }
-      }
+      // Terminal profiles are now part of local/SSH profiles
+      // This functionality has been moved to the profile system
       
       // Use default shell from settings if no profile shell specified
       const config = getCachedConfig();
@@ -425,8 +406,7 @@ export default function App() {
       
       const res = await ptyOpen({ 
         cwd: abs,
-        shell: shellProgram || defaultShell || undefined,
-        args: shellArgs
+        shell: shellProgram || defaultShell || undefined
       });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
       const sid = String(id);
@@ -434,20 +414,13 @@ export default function App() {
       // Apply environment variables from profile
       if (Object.keys(envVars).length > 0) {
         for (const [key, value] of Object.entries(envVars)) {
-          const exportCmd = `export ${key}="${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
+          const exportCmd = `export ${key}="${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
           await ptyWrite({ ptyId: sid, data: exportCmd });
         }
       }
       
       // Run startup commands from profile
       if (startupCommands.length > 0) {
-        // Add a small delay if specified in profile
-        const profile = opts.terminalProfileId ? 
-          (await import('@/services/profileManager')).profileManager.getProfile(opts.terminalProfileId) : null;
-        if (profile?.startup?.delay) {
-          await new Promise(resolve => setTimeout(resolve, profile.startup.delay));
-        }
-        
         for (const cmd of startupCommands) {
           await ptyWrite({ ptyId: sid, data: cmd + '\n' });
         }
@@ -2099,7 +2072,7 @@ export default function App() {
       // Terminal Profile Manager: Meta+Shift+T
       if (meta && e.shiftKey && (e.key === 'T' || e.key === 't')) {
         e.preventDefault();
-        setProfileManagerOpen(true);
+        // Terminal profiles are now in profile dialogs
       }
       // Split shortcuts: Meta+Shift+H/V
       if (meta && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
@@ -2578,7 +2551,6 @@ export default function App() {
                 ) : (
                   <Sessions
                     sshProfiles={sshProfiles}
-                    onOpenProfileManager={() => setProfileManagerOpen(true)}
                     onOpenFolder={(p) => {
                       const id = crypto.randomUUID();
                       setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
@@ -2897,31 +2869,6 @@ export default function App() {
           } catch (e) {
             logger.error('Failed to reload profiles:', e);
           }
-        }}
-      />
-      <ProfileManager
-        isOpen={profileManagerOpen}
-        onClose={() => setProfileManagerOpen(false)}
-        onSelectProfile={async (profile) => {
-          // Create a new tab with the selected profile
-          const newTabId = crypto.randomUUID();
-          const newTab: Tab = {
-            id: newTabId,
-            kind: 'local',
-            terminalProfileId: profile.id,
-            cwd: null,
-            panes: [],
-            activePane: null,
-            status: {}
-          };
-          setTabs(prev => [...prev, newTab]);
-          setActiveTab(newTabId);
-          
-          // Open a terminal with the selected profile
-          const defaultCwd = profile.shell?.cwd || await getDefaultWorkingDirectory() || await resolvePathAbsolute('~');
-          await openFolderFor(newTabId, defaultCwd, {
-            terminalProfileId: profile.id
-          });
         }}
       />
       <Toaster />
