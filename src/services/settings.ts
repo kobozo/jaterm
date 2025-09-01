@@ -85,6 +85,22 @@ function mergeWithDefaults(partial: Partial<GlobalConfig>): GlobalConfig {
     terminal: { ...DEFAULT_CONFIG.terminal, ...partial.terminal },
     editor: { ...DEFAULT_CONFIG.editor, ...partial.editor },
     ssh: { ...DEFAULT_CONFIG.ssh, ...partial.ssh },
+    ai: { 
+      ...DEFAULT_CONFIG.ai, 
+      ...partial.ai,
+      providers: {
+        ...DEFAULT_CONFIG.ai.providers,
+        ...partial.ai?.providers
+      },
+      generation: {
+        ...DEFAULT_CONFIG.ai.generation,
+        ...partial.ai?.generation
+      },
+      privacy: {
+        ...DEFAULT_CONFIG.ai.privacy,
+        ...partial.ai?.privacy
+      }
+    },
     advanced: { ...DEFAULT_CONFIG.advanced, ...partial.advanced }
   };
 }

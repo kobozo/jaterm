@@ -5,6 +5,7 @@ export interface GlobalConfig {
   terminal: TerminalSettings;
   editor: EditorSettings;
   ssh: SshDefaultSettings;
+  ai: AiSettings;
   advanced: AdvancedSettings;
 }
 
@@ -49,6 +50,48 @@ export interface SshDefaultSettings {
   helperAutoConsent: 'ask' | 'always' | 'never';
 }
 
+export interface AiSettings {
+  enabled: boolean;
+  defaultProvider: 'openai' | 'anthropic' | 'azure' | 'ollama' | 'huggingface';
+  providers: {
+    openai?: {
+      apiKey: string; // Encrypted using existing system
+      model: string; // gpt-4, gpt-3.5-turbo, etc.
+      baseUrl?: string; // For OpenAI-compatible APIs
+    };
+    anthropic?: {
+      apiKey: string; // Encrypted
+      model: string; // claude-3-opus, claude-3-sonnet, etc.
+    };
+    azure?: {
+      apiKey: string; // Encrypted
+      endpoint: string;
+      deploymentName: string;
+      apiVersion: string;
+    };
+    ollama?: {
+      baseUrl: string; // Default: http://localhost:11434
+      model: string; // llama2, codellama, mistral, etc.
+      keepAlive?: string; // How long to keep model in memory
+    };
+    huggingface?: {
+      apiToken: string; // Encrypted
+      model: string; // Model ID from HF Hub
+      endpoint?: string; // For dedicated endpoints
+    };
+  };
+  generation: {
+    temperature: number;
+    maxTokens: number;
+    systemPrompt?: string; // Custom system prompt
+  };
+  privacy: {
+    sendContext: boolean; // Send directory/git context
+    storeHistory: boolean; // Store command history
+    offlineOnly: boolean; // Only use local models
+  };
+}
+
 export interface AdvancedSettings {
   logLevel: 'error' | 'warn' | 'info' | 'debug';
   enableTelemetry: boolean;
@@ -91,6 +134,25 @@ export const DEFAULT_CONFIG: GlobalConfig = {
     autoReconnect: true,
     reconnectDelay: 5,
     helperAutoConsent: 'ask'
+  },
+  ai: {
+    enabled: false,
+    defaultProvider: 'ollama',
+    providers: {
+      ollama: {
+        baseUrl: 'http://localhost:11434',
+        model: 'llama2'
+      }
+    },
+    generation: {
+      temperature: 0.7,
+      maxTokens: 2000
+    },
+    privacy: {
+      sendContext: true,
+      storeHistory: true,
+      offlineOnly: false
+    }
   },
   advanced: {
     logLevel: 'error',

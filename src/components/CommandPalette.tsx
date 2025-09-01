@@ -3,6 +3,8 @@ import Fuse from 'fuse.js';
 import { Command, CommandCategory } from '@/types/commands';
 import { commandRegistry } from '@/services/commandRegistry';
 import { useToasts } from '@/store/toasts';
+import { aiService } from '@/services/ai';
+import { CommandSuggestion } from '@/types/ai';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -29,6 +31,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   const [recentCommands, setRecentCommands] = useState<Command[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [navigationStack, setNavigationStack] = useState<{ commands: Command[], query: string }[]>([]);
+  const [aiSuggestions, setAiSuggestions] = useState<CommandSuggestion[]>([]);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
   
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -102,8 +107,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         threshold: 0.3,
       });
       filtered = query ? sshFuse.search(query).map(r => r.item) : sshCommands;
-    } else if (query.startsWith('#')) {
-      // Git commands
+    } else if (query.startsWith('?')) {
+      // Git commands (changed from # to ?)
       query = query.substring(1).trim();
       const gitCommands = allCommands.filter(
         cmd => cmd.category === CommandCategory.Git
@@ -113,6 +118,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         threshold: 0.3,
       });
       filtered = query ? gitFuse.search(query).map(r => r.item) : gitCommands;
+    } else if (query.startsWith('#')) {
+      // AI command generation
+      query = query.substring(1).trim();
+      // This will be handled by AI generation
+      filtered = [];
     } else {
       // Regular fuzzy search
       filtered = fuse.search(query).map(result => result.item);

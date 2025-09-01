@@ -15,6 +15,7 @@ import { logger } from '@/services/logger';
 import { telemetry, TelemetryEvent } from '@/services/telemetry';
 import { featureFlags, ExperimentalFeature } from '@/services/features';
 import { LogViewerModal } from './LogViewerModal';
+import { AiSettingsTab } from './AiSettingsTab';
 
 interface SettingsPaneProps {
   onClose?: () => void;
@@ -22,7 +23,7 @@ interface SettingsPaneProps {
 
 export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
   const { show } = useToasts();
-  const [activeTab, setActiveTab] = useState<'general' | 'terminal' | 'editor' | 'ssh' | 'advanced'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'terminal' | 'editor' | 'ssh' | 'ai' | 'advanced'>('general');
   const [config, setConfig] = useState<GlobalConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
@@ -254,6 +255,9 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
         </button>
         <button onClick={() => setActiveTab('ssh')} style={tabButtonStyle(activeTab === 'ssh')}>
           SSH
+        </button>
+        <button onClick={() => setActiveTab('ai')} style={tabButtonStyle(activeTab === 'ai')}>
+          AI
         </button>
         <button onClick={() => setActiveTab('advanced')} style={tabButtonStyle(activeTab === 'advanced')}>
           Advanced
@@ -623,6 +627,17 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
               </select>
             </div>
           </div>
+        )}
+
+        {activeTab === 'ai' && config && (
+          <AiSettingsTab
+            settings={config.ai}
+            onChange={(aiSettings) => {
+              const newConfig = { ...config, ai: aiSettings };
+              setConfig(newConfig);
+              setIsDirty(true);
+            }}
+          />
         )}
 
         {activeTab === 'advanced' && (
