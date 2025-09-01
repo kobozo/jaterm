@@ -4,16 +4,11 @@ pub mod context;
 
 use anyhow::Result;
 use langchain_rust::{
-    chain::{Chain, ChainError},
-    llm::LLM,
-    prompt::HumanMessagePromptTemplate,
-    schemas::Message,
+    language_models::llm::LLM,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-use crate::state::app_state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
@@ -121,7 +116,7 @@ impl AiService {
         let config_guard = self.config.read().await;
         let config = config_guard.as_ref().ok_or_else(|| anyhow::anyhow!("AI config not loaded"))?;
         
-        command_generator::generate_command(llm.as_ref(), prompt, context, config).await
+        command_generator::generate_command(llm.as_ref().as_ref(), prompt, context, config).await
     }
 
     pub async fn test_connection(&self) -> Result<bool> {

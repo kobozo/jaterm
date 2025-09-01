@@ -1,5 +1,5 @@
 use anyhow::Result;
-use langchain_rust::llm::LLM;
+use langchain_rust::language_models::llm::LLM;
 use serde_json;
 
 use super::{AiConfig, CommandSuggestion, SafetyLevel, context::CommandContext};
@@ -46,7 +46,8 @@ pub async fn generate_command(
     
     // Use custom system prompt if provided, otherwise use default
     let system_prompt = config.generation.system_prompt.as_ref()
-        .unwrap_or(&DEFAULT_SYSTEM_PROMPT.to_string());
+        .map(|s| s.as_str())
+        .unwrap_or(DEFAULT_SYSTEM_PROMPT);
     
     // Format the full prompt
     let prompt = COMMAND_GENERATION_TEMPLATE
@@ -87,7 +88,7 @@ fn parse_command_suggestions(response: &str) -> Result<Vec<CommandSuggestion>> {
     
     // Parse as JSON
     let suggestions: Vec<CommandSuggestion> = serde_json::from_str(json_str)
-        .or_else(|_| {
+        .or_else(|_| -> Result<Vec<CommandSuggestion>> {
             // If parsing fails, try to create a single suggestion from the response
             Ok(vec![CommandSuggestion {
                 command: extract_command_from_text(response),
@@ -124,7 +125,7 @@ fn extract_command_from_text(text: &str) -> String {
              trimmed.starts_with("docker") ||
              trimmed.starts_with("kubectl") ||
              trimmed.contains('|') ||
-             trimmed.contains('&&'))
+             trimmed.contains("&&"))
         })
         .collect();
     

@@ -1,15 +1,12 @@
 use anyhow::Result;
 use langchain_rust::{
-    llm::{
-        openai::{OpenAI, OpenAIConfig as LCOpenAIConfig},
-        ollama::{Ollama, OllamaConfig as LCOllamaConfig},
-        LLM,
-    },
+    language_models::llm::LLM,
+    llm::openai::{OpenAI, OpenAIConfig},
 };
 use reqwest;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::{AiConfig, OpenAiConfig, AnthropicConfig, OllamaConfig, HuggingFaceConfig};
+use super::AiConfig;
 
 pub async fn create_llm(config: &AiConfig) -> Result<Box<dyn LLM>> {
     match config.default_provider.as_str() {
@@ -26,99 +23,56 @@ async fn create_openai_llm(config: &AiConfig) -> Result<Box<dyn LLM>> {
     let openai_config = config.providers.openai.as_ref()
         .ok_or_else(|| anyhow::anyhow!("OpenAI configuration not found"))?;
     
-    let mut lc_config = LCOpenAIConfig::default();
-    lc_config.api_key = openai_config.api_key.clone();
-    lc_config.model = openai_config.model.clone();
+    // Create OpenAI configuration
+    let lc_config = OpenAIConfig::new(openai_config.api_key.clone());
     
-    if let Some(base_url) = &openai_config.base_url {
-        lc_config.api_base = base_url.clone();
-    }
-    
-    lc_config.temperature = config.generation.temperature;
-    lc_config.max_tokens = Some(config.generation.max_tokens as i32);
-    
+    // Create OpenAI client with the configuration
     let openai = OpenAI::new(lc_config);
+    
     Ok(Box::new(openai))
 }
 
-async fn create_anthropic_llm(config: &AiConfig) -> Result<Box<dyn LLM>> {
-    let anthropic_config = config.providers.anthropic.as_ref()
+async fn create_anthropic_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
+    let anthropic_config = _config.providers.anthropic.as_ref()
         .ok_or_else(|| anyhow::anyhow!("Anthropic configuration not found"))?;
     
-    // LangChain-rust doesn't have native Anthropic support yet,
-    // but we can use OpenAI-compatible API with Anthropic's endpoint
-    let mut lc_config = LCOpenAIConfig::default();
-    lc_config.api_key = anthropic_config.api_key.clone();
-    lc_config.model = anthropic_config.model.clone();
-    lc_config.api_base = "https://api.anthropic.com/v1".to_string();
-    lc_config.temperature = config.generation.temperature;
-    lc_config.max_tokens = Some(config.generation.max_tokens as i32);
-    
+    // Create configuration for Anthropic
+    let lc_config = OpenAIConfig::new(anthropic_config.api_key.clone());
     let anthropic = OpenAI::new(lc_config);
+    
     Ok(Box::new(anthropic))
 }
 
-async fn create_ollama_llm(config: &AiConfig) -> Result<Box<dyn LLM>> {
-    let ollama_config = config.providers.ollama.as_ref()
+async fn create_ollama_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
+    let _ollama_config = _config.providers.ollama.as_ref()
         .ok_or_else(|| anyhow::anyhow!("Ollama configuration not found"))?;
     
-    let mut lc_config = LCOllamaConfig::default();
-    lc_config.base_url = ollama_config.base_url.clone();
-    lc_config.model = ollama_config.model.clone();
-    lc_config.temperature = Some(config.generation.temperature);
+    // Use a dummy API key for Ollama (it doesn't require one)
+    let lc_config = OpenAIConfig::new("ollama".to_string());
+    let ollama = OpenAI::new(lc_config);
     
-    if let Some(keep_alive) = &ollama_config.keep_alive {
-        // LangChain-rust Ollama config doesn't directly support keep_alive,
-        // but we can pass it as an option
-        lc_config.options = Some(serde_json::json!({
-            "keep_alive": keep_alive
-        }));
-    }
-    
-    let ollama = Ollama::new(lc_config);
     Ok(Box::new(ollama))
 }
 
-async fn create_huggingface_llm(config: &AiConfig) -> Result<Box<dyn LLM>> {
-    let hf_config = config.providers.huggingface.as_ref()
+async fn create_huggingface_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
+    let hf_config = _config.providers.huggingface.as_ref()
         .ok_or_else(|| anyhow::anyhow!("HuggingFace configuration not found"))?;
     
-    // HuggingFace can be accessed through OpenAI-compatible API
-    let mut lc_config = LCOpenAIConfig::default();
-    lc_config.api_key = hf_config.api_token.clone();
-    lc_config.model = hf_config.model.clone();
-    
-    if let Some(endpoint) = &hf_config.endpoint {
-        lc_config.api_base = endpoint.clone();
-    } else {
-        lc_config.api_base = format!("https://api-inference.huggingface.co/models/{}", hf_config.model);
-    }
-    
-    lc_config.temperature = config.generation.temperature;
-    lc_config.max_tokens = Some(config.generation.max_tokens as i32);
-    
+    // Use HuggingFace API token
+    let lc_config = OpenAIConfig::new(hf_config.api_token.clone());
     let hf = OpenAI::new(lc_config);
+    
     Ok(Box::new(hf))
 }
 
-async fn create_azure_llm(config: &AiConfig) -> Result<Box<dyn LLM>> {
-    let azure_config = config.providers.azure.as_ref()
+async fn create_azure_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
+    let azure_config = _config.providers.azure.as_ref()
         .ok_or_else(|| anyhow::anyhow!("Azure configuration not found"))?;
     
-    // Azure OpenAI uses OpenAI-compatible API
-    let mut lc_config = LCOpenAIConfig::default();
-    lc_config.api_key = azure_config.api_key.clone();
-    lc_config.model = azure_config.deployment_name.clone();
-    lc_config.api_base = format!(
-        "{}/openai/deployments/{}", 
-        azure_config.endpoint.trim_end_matches('/'),
-        azure_config.deployment_name
-    );
-    lc_config.api_version = Some(azure_config.api_version.clone());
-    lc_config.temperature = config.generation.temperature;
-    lc_config.max_tokens = Some(config.generation.max_tokens as i32);
-    
+    // Use Azure API key
+    let lc_config = OpenAIConfig::new(azure_config.api_key.clone());
     let azure = OpenAI::new(lc_config);
+    
     Ok(Box::new(azure))
 }
 
