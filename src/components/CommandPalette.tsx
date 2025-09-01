@@ -28,6 +28,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   const [filteredCommands, setFilteredCommands] = useState<Command[]>([]);
   const [recentCommands, setRecentCommands] = useState<Command[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [navigationStack, setNavigationStack] = useState<{ commands: Command[], query: string }[]>([]);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -165,7 +166,29 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
           break;
         case 'Escape':
           e.preventDefault();
-          onClose();
+          // If we have a navigation stack, go back
+          if (navigationStack.length > 0) {
+            const previous = navigationStack[navigationStack.length - 1];
+            setNavigationStack(prev => prev.slice(0, -1));
+            
+            // Reload main commands if going back to root
+            if (navigationStack.length === 1) {
+              const commands = commandRegistry.getEnabled();
+              setAllCommands(commands);
+              setFilteredCommands(previous.commands);
+              const recent = commandRegistry.getRecentCommands(5);
+              setRecentCommands(recent);
+            } else {
+              setAllCommands(previous.commands);
+              setFilteredCommands(previous.commands);
+              setRecentCommands([]);
+            }
+            
+            setSearchQuery(previous.query);
+            setSelectedIndex(0);
+          } else {
+            onClose();
+          }
           break;
       }
     };
@@ -195,16 +218,52 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       inputRef.current.focus();
       setSearchQuery('');
       setSelectedIndex(0);
+      setNavigationStack([]);
     }
   }, [isOpen]);
 
   const executeCommand = useCallback(async (command: Command) => {
     if (isExecuting) return;
     
+    // Check if command has subCommands
+    if (command.subCommands) {
+      setIsExecuting(true);
+      try {
+        const subCommands = await command.subCommands();
+        if (subCommands.length > 0) {
+          // Push current state to navigation stack
+          setNavigationStack(prev => [...prev, { commands: filteredCommands, query: searchQuery }]);
+          // Show subcommands
+          setAllCommands(subCommands);
+          setFilteredCommands(subCommands);
+          setSearchQuery('');
+          setSelectedIndex(0);
+          setRecentCommands([]);
+        }
+      } catch (error) {
+        show({
+          title: 'Failed to load options',
+          message: error instanceof Error ? error.message : 'Unknown error',
+          kind: 'error',
+        });
+      } finally {
+        setIsExecuting(false);
+      }
+      return;
+    }
+    
     setIsExecuting(true);
     try {
-      await commandRegistry.execute(command.id);
-      onClose();
+      // Check if this is a dynamically created command (from subCommands)
+      // These won't be in the registry, so execute directly
+      if (navigationStack.length > 0 && command.action) {
+        await command.action();
+        onClose();
+      } else {
+        // Regular command - execute through registry
+        await commandRegistry.execute(command.id);
+        onClose();
+      }
     } catch (error) {
       show({
         title: 'Command failed',
@@ -214,7 +273,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     } finally {
       setIsExecuting(false);
     }
-  }, [isExecuting, onClose, show]);
+  }, [isExecuting, onClose, show, filteredCommands, searchQuery, navigationStack]);
 
   if (!isOpen) return null;
 
@@ -333,7 +392,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Type to search commands... (> commands, : settings, @ SSH, # Git)"
+            placeholder={navigationStack.length > 0 ? "Select an option..." : "Type to search commands... (> commands, : settings, @ SSH, # Git)"}
             style={{
               width: '100%',
               padding: '12px',
@@ -413,7 +472,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
           color: '#999',
         }}>
           <div>
-            <kbd>↑↓</kbd> Navigate • <kbd>Enter</kbd> Execute • <kbd>Esc</kbd> Close
+            <kbd>↑↓</kbd> Navigate • <kbd>Enter</kbd> Execute • <kbd>Esc</kbd> {navigationStack.length > 0 ? 'Back' : 'Close'}
           </div>
           <div>
             {filteredCommands.length} command{filteredCommands.length !== 1 ? 's' : ''}

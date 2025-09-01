@@ -21,6 +21,7 @@ export interface Command {
   enabled?: () => boolean;
   visible?: () => boolean;
   keywords?: string[];
+  subCommands?: () => Command[] | Promise<Command[]>;
 }
 
 export interface CommandGroup {

@@ -28,6 +28,7 @@ import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
 import { gitStatusViaHelper } from '@/services/git';
 import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
+import { homeDir } from '@tauri-apps/api/path';
 import HelperConsentModal from '@/components/HelperConsentModal';
 import KeyGenerationModal from '@/components/KeyGenerationModal';
 import { logger } from '@/services/logger';
@@ -123,6 +124,170 @@ export default function App() {
         shortcut: 'Cmd/Ctrl+T',
         description: 'Open a new terminal tab',
         action: () => newTab(),
+        subCommands: async () => {
+          const { getLocalProfiles, getSshProfiles } = await import('@/store/persist');
+          const localProfiles = await getLocalProfiles();
+          const sshProfiles = await getSshProfiles();
+          
+          const profileCommands: Command[] = [];
+          
+          // Add local terminal option
+          profileCommands.push({
+            id: 'terminal.newTab.local',
+            label: 'Local Terminal',
+            category: CommandCategory.Terminal,
+            icon: '💻',
+            description: 'Open a local terminal',
+            action: async () => {
+              const cwd = await homeDir();
+              const id = crypto.randomUUID();
+              setTabs(prev => [...prev, { 
+                id, 
+                kind: 'local',
+                cwd: null, 
+                panes: [], 
+                activePane: null, 
+                status: {} 
+              }]);
+              setActiveTab(id);
+              await openSessionFor(id, { cwd });
+            },
+          });
+          
+          // Add local profiles
+          localProfiles.forEach(profile => {
+            profileCommands.push({
+              id: `terminal.profile.local.${profile.id}`,
+              label: profile.name,
+              category: CommandCategory.Terminal,
+              icon: '📁',
+              description: `Open at ${profile.path}`,
+              keywords: [profile.path],
+              action: async () => {
+                const id = crypto.randomUUID();
+                setTabs(prev => [...prev, { 
+                  id, 
+                  kind: 'local',
+                  cwd: null, 
+                  panes: [], 
+                  activePane: null, 
+                  status: {} 
+                }]);
+                setActiveTab(id);
+                await openSessionFor(id, { cwd: profile.path });
+              },
+            });
+          });
+          
+          // Add SSH profiles
+          sshProfiles.forEach(profile => {
+            profileCommands.push({
+              id: `terminal.profile.ssh.${profile.id}`,
+              label: profile.name,
+              category: CommandCategory.Terminal,
+              icon: '🔐',
+              description: `SSH to ${profile.user}@${profile.host}`,
+              keywords: [profile.host, profile.user],
+              action: async () => {
+                const id = crypto.randomUUID();
+                setTabs(prev => [...prev, { 
+                  id, 
+                  kind: 'ssh',
+                  profileId: profile.id,
+                  cwd: null, 
+                  panes: [], 
+                  activePane: null, 
+                  status: {} 
+                }]);
+                setActiveTab(id);
+                
+                // Resolve effective settings with inheritance
+                try {
+                  const { getProfilesTree, resolveEffectiveSettings, findPathToNode } = await import('@/store/persist');
+                  const tree = await getProfilesTree();
+                  
+                  // Find the profile node in the tree
+                  let profileNodeId = null;
+                  const findProfileNode = (node: any, path: string[]) => {
+                    if (node.type === 'profile' && node.ref?.id === profile.id) {
+                      profileNodeId = node.id;
+                      return;
+                    }
+                    if (node.children) {
+                      for (const child of node.children) {
+                        findProfileNode(child, [...path, node.id]);
+                      }
+                    }
+                  };
+                  if (tree) {
+                    findProfileNode(tree, []);
+                  }
+                  
+                  if (profileNodeId && tree) {
+                    const effective = resolveEffectiveSettings({ 
+                      root: tree, 
+                      nodeId: profileNodeId, 
+                      profileKind: 'ssh', 
+                      profileSettings: { 
+                        terminal: profile.terminal, 
+                        shell: profile.shell, 
+                        advanced: profile.advanced, 
+                        ssh: { 
+                          host: profile.host, 
+                          port: profile.port, 
+                          user: profile.user, 
+                          auth: profile.auth 
+                        } 
+                      } 
+                    });
+                    
+                    await openSshFor(id, {
+                      host: effective.ssh?.host ?? profile.host,
+                      port: effective.ssh?.port ?? profile.port,
+                      user: effective.ssh?.user ?? profile.user,
+                      auth: effective.ssh?.auth ?? (profile.auth || { agent: true }),
+                      cwd: profile.path,
+                      profileId: profile.id,
+                      profileName: profile.name,
+                      terminal: effective.terminal,
+                      shell: effective.shell,
+                      advanced: effective.advanced,
+                      os: profile.os,
+                      _resolved: true // Mark that settings are already resolved
+                    });
+                  } else {
+                    // Fallback if profile not in tree
+                    await openSshFor(id, {
+                      profileId: profile.id,
+                      profileName: profile.name,
+                      host: profile.host,
+                      port: profile.port,
+                      user: profile.user,
+                      path: profile.path,
+                      auth: profile.auth || { agent: true },
+                      _resolved: true // Still mark as resolved to avoid re-fetching
+                    });
+                  }
+                } catch (err) {
+                  console.error('Failed to resolve effective settings:', err);
+                  // Fallback
+                  await openSshFor(id, {
+                    profileId: profile.id,
+                    profileName: profile.name,
+                    host: profile.host,
+                    port: profile.port,
+                    user: profile.user,
+                    path: profile.path,
+                    auth: profile.auth || { agent: true },
+                    _resolved: true
+                  });
+                }
+              },
+            });
+          });
+          
+          return profileCommands;
+        },
       },
       {
         id: 'terminal.closeTab',
@@ -328,6 +493,8 @@ export default function App() {
       },
     ];
     
+    // We'll register local profiles separately after they load
+    
     // Register SSH profile commands dynamically
     if (sshProfiles && sshProfiles.length > 0) {
       sshProfiles.forEach(profile => {
@@ -336,13 +503,102 @@ export default function App() {
           label: `SSH: ${profile.name}`,
           category: CommandCategory.SSH,
           icon: '🔐',
-          description: `Connect to ${profile.host}`,
-          keywords: [profile.host, profile.user || ''],
-          action: () => {
+          description: `Connect to ${profile.user}@${profile.host}`,
+          keywords: [profile.host, profile.user || '', profile.name],
+          action: async () => {
             const id = crypto.randomUUID();
-            setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
+            setTabs((prev) => [...prev, { 
+              id, 
+              kind: 'ssh',
+              profileId: profile.id,
+              cwd: null, 
+              panes: [], 
+              activePane: null, 
+              status: {} 
+            }]);
             setActiveTab(id);
-            openSshFor(id, { profileId: profile.id });
+            
+            // Resolve effective settings with inheritance
+            try {
+              const { getProfilesTree, resolveEffectiveSettings } = await import('@/store/persist');
+              const tree = await getProfilesTree();
+              
+              // Find the profile node in the tree
+              let profileNodeId = null;
+              const findProfileNode = (node: any) => {
+                if (node.type === 'profile' && node.ref?.id === profile.id) {
+                  profileNodeId = node.id;
+                  return;
+                }
+                if (node.children) {
+                  for (const child of node.children) {
+                    findProfileNode(child);
+                  }
+                }
+              };
+              if (tree) {
+                findProfileNode(tree);
+              }
+              
+              if (profileNodeId && tree) {
+                const effective = resolveEffectiveSettings({ 
+                  root: tree, 
+                  nodeId: profileNodeId, 
+                  profileKind: 'ssh', 
+                  profileSettings: { 
+                    terminal: profile.terminal, 
+                    shell: profile.shell, 
+                    advanced: profile.advanced, 
+                    ssh: { 
+                      host: profile.host, 
+                      port: profile.port, 
+                      user: profile.user, 
+                      auth: profile.auth 
+                    } 
+                  } 
+                });
+                
+                await openSshFor(id, {
+                  host: effective.ssh?.host ?? profile.host,
+                  port: effective.ssh?.port ?? profile.port,
+                  user: effective.ssh?.user ?? profile.user,
+                  auth: effective.ssh?.auth ?? (profile.auth || { agent: true }),
+                  cwd: profile.path,
+                  profileId: profile.id,
+                  profileName: profile.name,
+                  terminal: effective.terminal,
+                  shell: effective.shell,
+                  advanced: effective.advanced,
+                  os: profile.os,
+                  _resolved: true // Mark that settings are already resolved
+                });
+              } else {
+                // Fallback if profile not in tree
+                await openSshFor(id, {
+                  profileId: profile.id,
+                  profileName: profile.name,
+                  host: profile.host,
+                  port: profile.port,
+                  user: profile.user,
+                  path: profile.path,
+                  auth: profile.auth || { agent: true },
+                  _resolved: true // Still mark as resolved to avoid re-fetching
+                });
+              }
+            } catch (err) {
+              console.error('Failed to resolve effective settings:', err);
+              // Fallback
+              await openSshFor(id, {
+                profileId: profile.id,
+                profileName: profile.name,
+                host: profile.host,
+                port: profile.port,
+                user: profile.user,
+                path: profile.path,
+                auth: profile.auth || { agent: true },
+                _resolved: true
+              });
+            }
           },
         });
       });
@@ -503,6 +759,43 @@ export default function App() {
   React.useEffect(() => {
     registerCommands();
   }, [registerCommands]);
+  
+  // Register local profiles as commands when they load
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { getLocalProfiles } = await import('@/store/persist');
+        const localProfiles = await getLocalProfiles();
+        
+        // Register each local profile as a command
+        localProfiles.forEach(profile => {
+          commandRegistry.register({
+            id: `local.open.${profile.id}`,
+            label: `Local: ${profile.name}`,
+            category: CommandCategory.Terminal,
+            icon: '📁',
+            description: `Open terminal at ${profile.path}`,
+            keywords: [profile.path, profile.name],
+            action: async () => {
+              const id = crypto.randomUUID();
+              setTabs((prev) => [...prev, { 
+                id, 
+                kind: 'local',
+                cwd: null, 
+                panes: [], 
+                activePane: null, 
+                status: {} 
+              }]);
+              setActiveTab(id);
+              await openSessionFor(id, { cwd: profile.path });
+            },
+          });
+        });
+      } catch (e) {
+        logger.warn('Failed to load local profiles for commands:', e);
+      }
+    })();
+  }, []); // Run once on mount
 
   async function checkForUpdatesInteractive() {
     if (updateChecking) return;
@@ -2302,6 +2595,14 @@ export default function App() {
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
+      
+      // Check for command palette shortcut first (works globally)
+      if (meta && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+        return;
+      }
+      
       // Avoid when typing in inputs/textareas
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -2344,11 +2645,6 @@ export default function App() {
       if (meta && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setComposeOpen(true);
-      }
-      // Command Palette: Meta/Ctrl+Shift+P
-      if (meta && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
-        e.preventDefault();
-        setCommandPaletteOpen(true);
       }
       // Next/Prev tab: Ctrl+Tab / Ctrl+Shift+Tab (Meta-less to avoid browser conflict in app window)
       if (e.ctrlKey && !e.metaKey && e.key === 'Tab') {
