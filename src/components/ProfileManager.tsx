@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { TerminalProfile, validateProfile } from '@/types/terminalProfile';
 import { profileManager } from '@/services/profileManager';
-import { show } from '@/components/notifications';
+import { useToasts } from '@/store/toasts';
 import { Dialog } from '@/components/Dialog';
 import ProfileEditor from './ProfileEditor';
 
@@ -12,6 +12,7 @@ interface ProfileManagerProps {
 }
 
 export default function ProfileManager({ isOpen, onClose, onSelectProfile }: ProfileManagerProps) {
+  const { show: addToast } = useToasts();
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const [groupedProfiles, setGroupedProfiles] = useState<Map<string, TerminalProfile[]>>(new Map());
   const [selectedProfile, setSelectedProfile] = useState<TerminalProfile | null>(null);
@@ -43,7 +44,7 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
       }
     } catch (error) {
       console.error('Failed to load profiles:', error);
-      show({ title: 'Error', message: 'Failed to load profiles', kind: 'error' });
+      addToast({ title: 'Error', message: 'Failed to load profiles', kind: 'error' } as any);
     } finally {
       setLoading(false);
     }
@@ -72,30 +73,30 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
     try {
       const errors = validateProfile(profile);
       if (errors.length > 0) {
-        show({ 
+        addToast({ 
           title: 'Validation Error', 
           message: errors.join(', '), 
           kind: 'error' 
-        });
+        } as any);
         return;
       }
 
       if (profiles.find(p => p.id === profile.id)) {
         // Update existing
         await profileManager.updateProfile(profile.id, profile);
-        show({ 
+        addToast({ 
           title: 'Profile Updated', 
           message: `${profile.name} has been updated`, 
           kind: 'success' 
-        });
+        } as any);
       } else {
         // Create new
         await profileManager.createProfile(profile);
-        show({ 
+        addToast({ 
           title: 'Profile Created', 
           message: `${profile.name} has been created`, 
           kind: 'success' 
-        });
+        } as any);
       }
 
       setShowEditor(false);
@@ -103,32 +104,32 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
       await loadProfiles();
     } catch (error) {
       console.error('Failed to save profile:', error);
-      show({ 
+      addToast({ 
         title: 'Error', 
         message: `Failed to save profile: ${error}`, 
         kind: 'error' 
-      });
+      } as any);
     }
   };
 
   const handleDeleteProfile = async (profile: TerminalProfile) => {
     if (profile.isBuiltIn) {
-      show({ 
+      addToast({ 
         title: 'Cannot Delete', 
         message: 'Built-in profiles cannot be deleted', 
         kind: 'warning' 
-      });
+      } as any);
       return;
     }
 
     if (confirm(`Are you sure you want to delete "${profile.name}"?`)) {
       try {
         await profileManager.deleteProfile(profile.id);
-        show({ 
+        addToast({ 
           title: 'Profile Deleted', 
           message: `${profile.name} has been deleted`, 
           kind: 'success' 
-        });
+        } as any);
         
         if (selectedProfile?.id === profile.id) {
           setSelectedProfile(null);
@@ -137,11 +138,11 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
         await loadProfiles();
       } catch (error) {
         console.error('Failed to delete profile:', error);
-        show({ 
+        addToast({ 
           title: 'Error', 
           message: `Failed to delete profile: ${error}`, 
           kind: 'error' 
-        });
+        } as any);
       }
     }
   };
@@ -149,20 +150,20 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
   const handleDuplicateProfile = async (profile: TerminalProfile) => {
     try {
       const newProfile = await profileManager.duplicateProfile(profile.id);
-      show({ 
+      addToast({ 
         title: 'Profile Duplicated', 
         message: `Created "${newProfile.name}"`, 
         kind: 'success' 
-      });
+      } as any);
       await loadProfiles();
       setSelectedProfile(newProfile);
     } catch (error) {
       console.error('Failed to duplicate profile:', error);
-      show({ 
+      addToast({ 
         title: 'Error', 
         message: `Failed to duplicate profile: ${error}`, 
         kind: 'error' 
-      });
+      } as any);
     }
   };
 
@@ -170,18 +171,18 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
     try {
       await profileManager.setDefaultProfile(profile.id);
       setDefaultProfileId(profile.id);
-      show({ 
+      addToast({ 
         title: 'Default Profile Set', 
         message: `${profile.name} is now the default profile`, 
         kind: 'success' 
-      });
+      } as any);
     } catch (error) {
       console.error('Failed to set default profile:', error);
-      show({ 
+      addToast({ 
         title: 'Error', 
         message: `Failed to set default profile: ${error}`, 
         kind: 'error' 
-      });
+      } as any);
     }
   };
 
@@ -196,18 +197,18 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
       a.click();
       URL.revokeObjectURL(url);
       
-      show({ 
+      addToast({ 
         title: 'Profiles Exported', 
         message: 'Custom profiles have been exported', 
         kind: 'success' 
-      });
+      } as any);
     } catch (error) {
       console.error('Failed to export profiles:', error);
-      show({ 
+      addToast({ 
         title: 'Error', 
         message: 'Failed to export profiles', 
         kind: 'error' 
-      });
+      } as any);
     }
   };
 
@@ -224,20 +225,20 @@ export default function ProfileManager({ isOpen, onClose, onSelectProfile }: Pro
         const text = await file.text();
         const count = await profileManager.importProfiles(text, false);
         
-        show({ 
+        addToast({ 
           title: 'Profiles Imported', 
           message: `Imported ${count} profile${count !== 1 ? 's' : ''}`, 
           kind: 'success' 
-        });
+        } as any);
         
         await loadProfiles();
       } catch (error) {
         console.error('Failed to import profiles:', error);
-        show({ 
+        addToast({ 
           title: 'Error', 
           message: `Failed to import profiles: ${error}`, 
           kind: 'error' 
-        });
+        } as any);
       }
     };
     
