@@ -26,6 +26,7 @@ import { gitStatusViaHelper } from '@/services/git';
 import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
 import HelperConsentModal from '@/components/HelperConsentModal';
 import KeyGenerationModal from '@/components/KeyGenerationModal';
+import ProfileManager from '@/components/ProfileManager';
 import { logger } from '@/services/logger';
 import { telemetry, TelemetryEvent } from '@/services/telemetry';
 import { featureFlags } from '@/services/features';
@@ -73,6 +74,7 @@ export default function App() {
   const tabsRef = useRef<Tab[]>(tabs);
   const [activeTab, setActiveTab] = useState<string>(sessionsId);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [profileManagerOpen, setProfileManagerOpen] = useState(false);
   // Map channel IDs to SSH session IDs (for splits with independent connections)
   const [channelToSession, setChannelToSession] = useState<Record<string, string>>({});
   const [customPortDialog, setCustomPortDialog] = useState<{ sessionId: string; remotePort: number } | null>(null);
@@ -2094,6 +2096,11 @@ export default function App() {
       // Avoid when typing in inputs/textareas
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      // Terminal Profile Manager: Meta+Shift+T
+      if (meta && e.shiftKey && (e.key === 'T' || e.key === 't')) {
+        e.preventDefault();
+        setProfileManagerOpen(true);
+      }
       // Split shortcuts: Meta+Shift+H/V
       if (meta && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
         e.preventDefault();
@@ -2571,6 +2578,7 @@ export default function App() {
                 ) : (
                   <Sessions
                     sshProfiles={sshProfiles}
+                    onOpenProfileManager={() => setProfileManagerOpen(true)}
                     onOpenFolder={(p) => {
                       const id = crypto.randomUUID();
                       setTabs((prev) => [...prev, { id, cwd: null, panes: [], activePane: null, status: {} }]);
@@ -2889,6 +2897,31 @@ export default function App() {
           } catch (e) {
             logger.error('Failed to reload profiles:', e);
           }
+        }}
+      />
+      <ProfileManager
+        isOpen={profileManagerOpen}
+        onClose={() => setProfileManagerOpen(false)}
+        onSelectProfile={async (profile) => {
+          // Create a new tab with the selected profile
+          const newTabId = crypto.randomUUID();
+          const newTab: Tab = {
+            id: newTabId,
+            kind: 'local',
+            terminalProfileId: profile.id,
+            cwd: null,
+            panes: [],
+            activePane: null,
+            status: {}
+          };
+          setTabs(prev => [...prev, newTab]);
+          setActiveTab(newTabId);
+          
+          // Open a terminal with the selected profile
+          const defaultCwd = profile.shell?.cwd || await getDefaultWorkingDirectory() || await resolvePathAbsolute('~');
+          await openFolderFor(newTabId, defaultCwd, {
+            terminalProfileId: profile.id
+          });
         }}
       />
       <Toaster />

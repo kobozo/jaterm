@@ -141,9 +141,10 @@ type Props = {
   onOpenSession?: (session: RecentSession) => void;
   onOpenSsh?: (opts: { host: string; port?: number; user: string; auth: { password?: string; keyPath?: string; passphrase?: string; agent?: boolean }; cwd?: string; profileId?: string; profileName?: string; os?: string; terminal?: any; shell?: any; advanced?: any; _resolved?: boolean }) => void;
   sshProfiles?: SshProfileStored[];
+  onOpenProfileManager?: () => void;
 };
 
-export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshProfiles: passedSshProfiles }: Props) {
+export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshProfiles: passedSshProfiles, onOpenProfileManager }: Props) {
   const { show, update, dismiss } = useToasts();
   const [recentSessions, setRecentSessions] = useState<{ cwd: string; closedAt: number; panes?: number }[]>([]);
   const [recentSsh, setRecentSsh] = useState<RecentSshSession[]>([]);
@@ -805,6 +806,23 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                 onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10b981'; e.currentTarget.style.color = 'white'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#10b981'; }}
               >New SSH Profile</button>
+              {onOpenProfileManager && (
+                <button 
+                  onClick={onOpenProfileManager}
+                  style={{
+                    padding: '6px 12px',
+                    backgroundColor: 'transparent',
+                    color: '#6366f1',
+                    border: '1px solid #6366f1',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#6366f1'; e.currentTarget.style.color = 'white'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#6366f1'; }}
+                  title="Manage terminal profiles (Cmd/Ctrl+Shift+T)"
+                >Terminal Profiles</button>
+              )}
               <span style={{ flex: 1 }} />
               <button 
                 onClick={() => {
