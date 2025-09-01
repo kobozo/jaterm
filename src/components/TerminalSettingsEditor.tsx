@@ -85,7 +85,7 @@ export function TerminalSettingsEditor({
             >
               <option value="">Default</option>
               {themes.map(theme => (
-                <option key={theme} value={theme}>{theme}</option>
+                <option key={theme.key} value={theme.key}>{theme.name}</option>
               ))}
             </select>
           </label>
