@@ -1024,7 +1024,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
       </div>
       {sshOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 420 }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, width: '450px', minHeight: '300px' }}>
             <h3 style={{ marginTop: 0 }}>Open SSH Session</h3>
             <div style={{ display: 'grid', gap: 8 }}>
               <label>
@@ -1091,7 +1091,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
 
       {lpOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, minWidth: 580, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, width: '600px', height: '70vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px 16px 0', borderBottom: '1px solid #444' }}>
               <h3 style={{ margin: 0 }}>{lpForm.id ? 'Edit' : 'New'} Local Profile</h3>
               {/* Tab Navigation */}
@@ -1186,7 +1186,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
 
       {spOpen && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)' }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, minWidth: 580, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, width: '700px', height: '75vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px 16px 0', borderBottom: '1px solid #444' }}>
               <h3 style={{ margin: 0 }}>{spForm.id ? 'Edit' : 'New'} SSH Profile</h3>
               {/* Tab Navigation */}
@@ -1242,19 +1242,6 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
                   }}
                 >
                   Forwarding
-                </button>
-                <button 
-                  onClick={() => setActiveTab('terminal')} 
-                  style={{ 
-                    padding: '8px 16px', 
-                    background: activeTab === 'terminal' ? '#333' : 'transparent',
-                    border: 'none',
-                    borderBottom: activeTab === 'terminal' ? '2px solid #0078d4' : '2px solid transparent',
-                    color: activeTab === 'terminal' ? '#fff' : '#aaa',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Terminal
                 </button>
               </div>
             </div>
@@ -1840,7 +1827,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
       {/* New Folder dialog */}
       {folderDialog && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.35)', zIndex: 999 }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 380 }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, width: '400px', minHeight: '180px' }}>
             <h3 style={{ marginTop: 0 }}>New Folder</h3>
             <label>
               Name
@@ -1931,7 +1918,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
 
       {browse && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.45)' }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 520 }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, width: '550px', height: '450px', display: 'flex', flexDirection: 'column' }}>
             <h3 style={{ marginTop: 0 }}>Browse Remote</h3>
             <div style={{ marginBottom: 8 }}>Path: {browse.cwd}</div>
             <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid #444', borderRadius: 4 }}>
@@ -1954,7 +1941,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
       )}
       {folderSettingsDialog && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.45)', zIndex: 999 }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, minWidth: 620, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 0, borderRadius: 8, width: '650px', height: '70vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px 16px 0', borderBottom: '1px solid #444' }}>
               <h3 style={{ margin: 0 }}>Folder Settings</h3>
               {/* Tabs matching profile modal */}
@@ -2199,7 +2186,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
 
       {moveDialog && (
         <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.45)', zIndex: 999 }}>
-          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, minWidth: 420 }}>
+          <div style={{ background: '#1e1e1e', color: '#eee', padding: 16, borderRadius: 8, width: '450px', minHeight: '250px' }}>
             <h3 style={{ marginTop: 0 }}>Move Profile</h3>
             <div style={{ marginBottom: 8, fontSize: 12, color: '#bbb' }}>Select destination folder</div>
             <select style={{ width: '100%' }} value={moveDialog.destId || ''} onChange={(e) => setMoveDialog({ ...moveDialog, destId: e.target.value })}>
