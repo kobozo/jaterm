@@ -1135,7 +1135,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
               )}
               
               {lpActiveTab === 'terminal' && (
-                <div style={{ padding: '16px', overflowY: 'auto' }}>
+                <div style={{ padding: '16px' }}>
                   <TerminalSettingsEditor
                     terminalSettings={lpForm.terminal || {}}
                     shellSettings={lpForm.shell || {}}
@@ -1563,7 +1563,7 @@ export default function Welcome({ onOpenFolder, onOpenSession, onOpenSsh, sshPro
               )}
               
               {activeTab === 'terminal' && (
-                <div style={{ padding: '16px', overflowY: 'auto', maxHeight: 'calc(80vh - 150px)' }}>
+                <div style={{ padding: '16px' }}>
                   <TerminalSettingsEditor
                     terminalSettings={spForm.terminal || {}}
                     shellSettings={spForm.shell || {}}
