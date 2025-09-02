@@ -24,7 +24,8 @@ async fn create_openai_llm(config: &AiConfig) -> Result<Box<dyn LLM>> {
         .ok_or_else(|| anyhow::anyhow!("OpenAI configuration not found"))?;
     
     // Create OpenAI configuration
-    let lc_config = OpenAIConfig::new(openai_config.api_key.clone());
+    let lc_config = OpenAIConfig::new()
+        .with_api_key(openai_config.api_key.clone());
     
     // Create OpenAI client with the configuration
     let openai = OpenAI::new(lc_config);
@@ -37,18 +38,21 @@ async fn create_anthropic_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
         .ok_or_else(|| anyhow::anyhow!("Anthropic configuration not found"))?;
     
     // Create configuration for Anthropic
-    let lc_config = OpenAIConfig::new(anthropic_config.api_key.clone());
+    let lc_config = OpenAIConfig::new()
+        .with_api_key(anthropic_config.api_key.clone());
     let anthropic = OpenAI::new(lc_config);
     
     Ok(Box::new(anthropic))
 }
 
 async fn create_ollama_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
-    let _ollama_config = _config.providers.ollama.as_ref()
+    let ollama_config = _config.providers.ollama.as_ref()
         .ok_or_else(|| anyhow::anyhow!("Ollama configuration not found"))?;
     
     // Use a dummy API key for Ollama (it doesn't require one)
-    let lc_config = OpenAIConfig::new("ollama".to_string());
+    let lc_config = OpenAIConfig::new()
+        .with_api_key("ollama".to_string())
+        .with_api_base(ollama_config.base_url.clone());
     let ollama = OpenAI::new(lc_config);
     
     Ok(Box::new(ollama))
@@ -59,7 +63,8 @@ async fn create_huggingface_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
         .ok_or_else(|| anyhow::anyhow!("HuggingFace configuration not found"))?;
     
     // Use HuggingFace API token
-    let lc_config = OpenAIConfig::new(hf_config.api_token.clone());
+    let lc_config = OpenAIConfig::new()
+        .with_api_key(hf_config.api_token.clone());
     let hf = OpenAI::new(lc_config);
     
     Ok(Box::new(hf))
@@ -70,7 +75,8 @@ async fn create_azure_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
         .ok_or_else(|| anyhow::anyhow!("Azure configuration not found"))?;
     
     // Use Azure API key
-    let lc_config = OpenAIConfig::new(azure_config.api_key.clone());
+    let lc_config = OpenAIConfig::new()
+        .with_api_key(azure_config.api_key.clone());
     let azure = OpenAI::new(lc_config);
     
     Ok(Box::new(azure))

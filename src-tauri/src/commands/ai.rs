@@ -24,7 +24,7 @@ pub async fn ai_initialize(
     let ai_service = AiService::new();
     
     // Decrypt API keys if they're encrypted
-    let mut decrypted_config = config.clone();
+    let decrypted_config = config.clone();
     
     // TODO: Decrypt API keys using the encryption service
     // For now, we'll use them as-is
