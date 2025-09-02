@@ -1,6 +1,14 @@
 import React from 'react';
 
-type Tab = { id: string; title: string; icon?: string; isWelcome?: boolean; indicator?: 'activity' | 'bell' };
+type Tab = { 
+  id: string; 
+  title: string; 
+  icon?: string; 
+  isWelcome?: boolean; 
+  indicator?: 'activity' | 'bell';
+  profileIcon?: string; // Terminal profile icon
+  profileColor?: string; // Terminal profile color
+};
 
 type Props = {
   tabs: Tab[];
@@ -54,7 +62,24 @@ export default function TabsBar({ tabs, activeId, onSelect, onClose, onAdd }: Pr
               {t.icon}
             </span>
           )}
-          <span style={{ maxWidth: 180, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          {t.profileIcon && (
+            <span 
+              style={{ 
+                fontSize: '14px',
+                marginLeft: t.icon ? -4 : 0
+              }} 
+              title="Terminal Profile"
+            >
+              {t.profileIcon}
+            </span>
+          )}
+          <span style={{ 
+            maxWidth: 180, 
+            textOverflow: 'ellipsis', 
+            overflow: 'hidden', 
+            whiteSpace: 'nowrap',
+            color: t.profileColor || 'inherit'
+          }}>
             {t.title}
           </span>
           {!t.isWelcome && (
