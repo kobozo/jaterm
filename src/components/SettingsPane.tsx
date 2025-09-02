@@ -23,7 +23,7 @@ interface SettingsPaneProps {
 
 export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
   const { show } = useToasts();
-  const [activeTab, setActiveTab] = useState<'general' | 'terminal' | 'editor' | 'ssh' | 'ai' | 'advanced'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'terminal' | 'shell' | 'editor' | 'ssh' | 'ai' | 'advanced'>('general');
   const [config, setConfig] = useState<GlobalConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
@@ -43,9 +43,9 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
       setConfig(loaded);
       setIsDirty(false);
       // Check if the current shell is a custom one
-      if (loaded.general.defaultShell && 
+      if (loaded.shell?.defaultShell && 
           availableShells.length > 0 &&
-          !availableShells.some(s => s.path === loaded.general.defaultShell)) {
+          !availableShells.some(s => s.path === loaded.shell?.defaultShell)) {
         setShowCustomShell(true);
       }
     } catch (error) {
@@ -188,6 +188,15 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
     marginBottom: '20px'
   };
 
+  const buttonStyle = (bgColor: string) => ({
+    padding: '8px 16px',
+    background: bgColor,
+    border: 'none',
+    color: '#fff',
+    borderRadius: 4,
+    cursor: 'pointer'
+  });
+
   return (
     <div style={{ 
       height: '100%', 
@@ -250,6 +259,9 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
         <button onClick={() => setActiveTab('terminal')} style={tabButtonStyle(activeTab === 'terminal')}>
           Terminal
         </button>
+        <button onClick={() => setActiveTab('shell')} style={tabButtonStyle(activeTab === 'shell')}>
+          Shell
+        </button>
         <button onClick={() => setActiveTab('editor')} style={tabButtonStyle(activeTab === 'editor')}>
           Editor
         </button>
@@ -282,66 +294,6 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
                 <span>Automatically check for updates</span>
               </label>
 
-              <label style={labelStyle}>Default Shell</label>
-              <select
-                style={{ ...inputStyle, marginBottom: showCustomShell ? '8px' : '12px' }}
-                value={showCustomShell ? 'custom' : (config.general.defaultShell || '')}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === 'custom') {
-                    setShowCustomShell(true);
-                  } else {
-                    setShowCustomShell(false);
-                    updateConfig(c => { 
-                      c.general.defaultShell = value || undefined; 
-                    });
-                  }
-                }}
-              >
-                <option value="">System Default</option>
-                {availableShells.map(shell => (
-                  <option key={shell.path} value={shell.path}>
-                    {shell.name}
-                  </option>
-                ))}
-                <option value="custom">Custom...</option>
-              </select>
-              
-              {showCustomShell && (
-                <>
-                  <input
-                    style={{ ...inputStyle, marginBottom: '12px' }}
-                    value={config.general.defaultShell || ''}
-                    onChange={(e) => updateConfig(c => { 
-                      c.general.defaultShell = e.target.value || undefined; 
-                    })}
-                    placeholder="Enter custom shell path (e.g., /usr/local/bin/fish)"
-                  />
-                </>
-              )}
-
-              <label style={labelStyle}>Default Working Directory</label>
-              <select
-                style={{ ...inputStyle, marginBottom: '12px' }}
-                value={config.general.defaultWorkingDir}
-                onChange={(e) => updateConfig(c => { c.general.defaultWorkingDir = e.target.value as any; })}
-              >
-                <option value="home">Home Directory</option>
-                <option value="lastUsed">Last Used</option>
-                <option value="custom">Custom</option>
-              </select>
-
-              {config.general.defaultWorkingDir === 'custom' && (
-                <>
-                  <label style={labelStyle}>Custom Working Directory</label>
-                  <input
-                    style={{ ...inputStyle, marginBottom: '12px' }}
-                    value={config.general.customWorkingDir || ''}
-                    onChange={(e) => updateConfig(c => { c.general.customWorkingDir = e.target.value || undefined; })}
-                    placeholder="/path/to/directory"
-                  />
-                </>
-              )}
 
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <input
@@ -505,6 +457,125 @@ export const SettingsPane: React.FC<SettingsPaneProps> = ({ onClose }) => {
                   }} />
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'shell' && (
+          <div style={{ maxWidth: '800px' }}>
+            <div style={sectionStyle}>
+              <h3 style={{ marginTop: 0, marginBottom: '16px' }}>Shell Configuration</h3>
+              
+              <label style={labelStyle}>Default Shell</label>
+              <select
+                style={{ ...inputStyle, marginBottom: showCustomShell ? '8px' : '12px' }}
+                value={showCustomShell ? 'custom' : (config.shell.defaultShell || '')}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === 'custom') {
+                    setShowCustomShell(true);
+                  } else {
+                    setShowCustomShell(false);
+                    updateConfig(c => { 
+                      c.shell.defaultShell = value || undefined; 
+                    });
+                  }
+                }}
+              >
+                <option value="">System Default</option>
+                {availableShells.map(shell => (
+                  <option key={shell.path} value={shell.path}>
+                    {shell.name}
+                  </option>
+                ))}
+                <option value="custom">Custom...</option>
+              </select>
+              
+              {showCustomShell && (
+                <>
+                  <input
+                    style={{ ...inputStyle, marginBottom: '12px' }}
+                    value={config.shell.defaultShell || ''}
+                    onChange={(e) => updateConfig(c => { 
+                      c.shell.defaultShell = e.target.value || undefined; 
+                    })}
+                    placeholder="Enter custom shell path (e.g., /usr/local/bin/fish)"
+                  />
+                </>
+              )}
+
+              <label style={labelStyle}>Default Working Directory</label>
+              <select
+                style={{ ...inputStyle, marginBottom: '12px' }}
+                value={config.shell.defaultWorkingDir}
+                onChange={(e) => updateConfig(c => { c.shell.defaultWorkingDir = e.target.value as any; })}
+              >
+                <option value="home">Home Directory</option>
+                <option value="lastUsed">Last Used</option>
+                <option value="custom">Custom</option>
+                <option value="remember">Remember Per Session</option>
+                <option value="default">Always Default</option>
+                <option value="prompt">Prompt Each Time</option>
+              </select>
+
+              {config.shell.defaultWorkingDir === 'custom' && (
+                <>
+                  <label style={labelStyle}>Custom Working Directory</label>
+                  <input
+                    style={{ ...inputStyle, marginBottom: '12px' }}
+                    value={config.shell.customWorkingDir || ''}
+                    onChange={(e) => updateConfig(c => { c.shell.customWorkingDir = e.target.value || undefined; })}
+                    placeholder="/path/to/directory"
+                  />
+                </>
+              )}
+
+              <label style={labelStyle}>Default Environment Variables</label>
+              <textarea
+                style={{ ...inputStyle, marginBottom: '12px', fontFamily: 'monospace', minHeight: '80px' }}
+                value={config.shell.defaultEnv ? Object.entries(config.shell.defaultEnv).map(([k, v]) => `${k}=${v}`).join('\n') : ''}
+                onChange={(e) => {
+                  const env: Record<string, string> = {};
+                  e.target.value.split('\n').forEach(line => {
+                    const [key, ...valueParts] = line.split('=');
+                    if (key && valueParts.length > 0) {
+                      env[key.trim()] = valueParts.join('=').trim();
+                    }
+                  });
+                  updateConfig(c => { 
+                    c.shell.defaultEnv = Object.keys(env).length > 0 ? env : undefined; 
+                  });
+                }}
+                placeholder="TERM=xterm-256color&#10;COLORTERM=truecolor&#10;EDITOR=vim"
+              />
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '12px' }}>
+                One per line in KEY=value format
+              </div>
+
+              <label style={labelStyle}>Default Startup Commands</label>
+              <textarea
+                style={{ ...inputStyle, marginBottom: '12px', fontFamily: 'monospace', minHeight: '80px' }}
+                value={config.shell.defaultInitCommands?.join('\n') || ''}
+                onChange={(e) => {
+                  const commands = e.target.value.split('\n').filter(cmd => cmd.trim());
+                  updateConfig(c => { 
+                    c.shell.defaultInitCommands = commands.length > 0 ? commands : undefined; 
+                  });
+                }}
+                placeholder="source ~/.bashrc&#10;cd ~/projects"
+              />
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '12px' }}>
+                Commands to run when a new terminal starts (one per line)
+              </div>
+            </div>
+            
+            <div style={{ marginTop: '24px', display: 'flex', gap: '8px' }}>
+              <button 
+                style={buttonStyle('#dc3545')}
+                onClick={() => handleReset('shell')}
+              >
+                Reset Shell Settings
+              </button>
             </div>
           </div>
         )}

@@ -45,6 +45,7 @@ export default function App() {
     kind?: 'local' | 'ssh' | 'settings';
     sshSessionId?: string;
     profileId?: string;
+    terminalProfileId?: string; // Terminal profile for local tabs
     openPath?: string | null;
     cwd: string | null;
     panes: string[];
@@ -894,11 +895,11 @@ export default function App() {
   async function getDefaultWorkingDirectory(): Promise<string | null> {
     const config = getCachedConfig();
     
-    if (!config?.general?.defaultWorkingDir) {
+    if (!config?.shell?.defaultWorkingDir) {
       return null;
     }
     
-    switch (config.general.defaultWorkingDir) {
+    switch (config.shell.defaultWorkingDir) {
       case 'home':
         try {
           return await resolvePathAbsolute('~');
@@ -924,11 +925,11 @@ export default function App() {
         }
       
       case 'custom':
-        if (config.general.customWorkingDir) {
+        if (config.shell.customWorkingDir) {
           try {
-            return await resolvePathAbsolute(config.general.customWorkingDir);
+            return await resolvePathAbsolute(config.shell.customWorkingDir);
           } catch {
-            logger.warn('Failed to resolve custom directory:', config.general.customWorkingDir);
+            logger.warn('Failed to resolve custom directory:', config.shell.customWorkingDir);
           }
         }
         return null;
@@ -942,6 +943,7 @@ export default function App() {
     remember?: boolean;
     terminal?: any; // Terminal customization
     shell?: any; // Shell settings
+    terminalProfileId?: string; // Terminal profile ID to use
   } = { remember: true }) {
     if (opts.remember !== false) {
       await addRecent(path);
@@ -952,17 +954,43 @@ export default function App() {
     }
     try {
       const abs = await resolvePathAbsolute(path);
-      // Use default shell from settings if configured
+      
+      // Load terminal profile if specified
+      let shellProgram = undefined;
+      let shellArgs = undefined;
+      let envVars: Record<string, string> = {};
+      let startupCommands: string[] = [];
+      
+      // Terminal profiles are now part of local/SSH profiles
+      // This functionality has been moved to the profile system
+      
+      // Use default shell from settings if no profile shell specified
       const config = getCachedConfig();
-      const defaultShell = config?.general?.defaultShell;
+      const defaultShell = config?.shell?.defaultShell;
+      
       const res = await ptyOpen({ 
         cwd: abs,
-        shell: defaultShell || undefined
+        shell: shellProgram || defaultShell || undefined
       });
       const id = typeof res === 'string' ? res : (res as any).ptyId ?? res;
       const sid = String(id);
       
-      // Apply shell settings if provided
+      // Apply environment variables from profile
+      if (Object.keys(envVars).length > 0) {
+        for (const [key, value] of Object.entries(envVars)) {
+          const exportCmd = `export ${key}="${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
+          await ptyWrite({ ptyId: sid, data: exportCmd });
+        }
+      }
+      
+      // Run startup commands from profile
+      if (startupCommands.length > 0) {
+        for (const cmd of startupCommands) {
+          await ptyWrite({ ptyId: sid, data: cmd + '\n' });
+        }
+      }
+      
+      // Apply shell settings if provided (backwards compatibility)
       if (opts.shell) {
         // Set environment variables
         if (opts.shell.env) {
@@ -984,7 +1012,14 @@ export default function App() {
           await ptyWrite({ ptyId: sid, data: `exec ${opts.shell.shell}\n` });
         }
       }
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, cwd: abs, panes: [sid], activePane: sid, status: { ...t.status, fullPath: abs } } : t)));
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { 
+        ...t, 
+        cwd: abs, 
+        panes: [sid], 
+        activePane: sid, 
+        status: { ...t.status, fullPath: abs },
+        terminalProfileId: opts.terminalProfileId
+      } : t)));
       setActiveTab(tabId);
       // Ensure local helper in background and record status
       try {
@@ -1028,8 +1063,8 @@ export default function App() {
       const config = getCachedConfig();
       let cwd = t.cwd;
       
-      if (config?.general?.defaultWorkingDir) {
-        switch (config.general.defaultWorkingDir) {
+      if (config?.shell?.defaultWorkingDir) {
+        switch (config.shell.defaultWorkingDir) {
           case 'home':
             // Use home directory
             try {
@@ -1051,9 +1086,9 @@ export default function App() {
             break;
           case 'custom':
             // Use custom directory if configured
-            if (config.general.customWorkingDir) {
+            if (config.shell.customWorkingDir) {
               try {
-                cwd = await resolvePathAbsolute(config.general.customWorkingDir);
+                cwd = await resolvePathAbsolute(config.shell.customWorkingDir);
               } catch {
                 // Fallback to current directory if custom path is invalid
               }
@@ -1062,7 +1097,7 @@ export default function App() {
         }
       }
       
-      const defaultShell = config?.general?.defaultShell;
+      const defaultShell = config?.shell?.defaultShell;
       const res = await ptyOpen({ 
         cwd,
         shell: defaultShell || undefined
@@ -2606,6 +2641,11 @@ export default function App() {
       // Avoid when typing in inputs/textareas
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      // Terminal Profile Manager: Meta+Shift+T
+      if (meta && e.shiftKey && (e.key === 'T' || e.key === 't')) {
+        e.preventDefault();
+        // Terminal profiles are now in profile dialogs
+      }
       // Split shortcuts: Meta+Shift+H/V
       if (meta && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
         e.preventDefault();
@@ -2809,7 +2849,25 @@ export default function App() {
           const nonSshBaseTitle = t.title ?? (isSessions ? 'Sessions' : (full ?? ''));
           const title = t.kind === 'ssh' ? (t.title ?? 'SSH') : (nonSshBaseTitle || '');
           const icon = isSessions ? '\uf07c' : (t.kind === 'ssh' ? '\uf0c1' : '\uf120'); // folder-open, link, terminal icons
-          return { id: t.id, title, icon, isWelcome: isSessions, indicator: t.indicator };
+          
+          // Get terminal profile info if available
+          let profileIcon = undefined;
+          let profileColor = undefined;
+          if (t.terminalProfileId) {
+            // We'll load this asynchronously later
+            // For now, just mark that it has a profile
+            profileIcon = '⚡'; // Default profile indicator
+          }
+          
+          return { 
+            id: t.id, 
+            title, 
+            icon, 
+            isWelcome: isSessions, 
+            indicator: t.indicator,
+            profileIcon,
+            profileColor
+          };
         })}
         activeId={activeTab}
         onSelect={(id) => {

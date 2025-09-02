@@ -3,6 +3,7 @@
 export interface GlobalConfig {
   general: GeneralSettings;
   terminal: TerminalSettings;
+  shell: ShellDefaultSettings;
   editor: EditorSettings;
   ssh: SshDefaultSettings;
   ai: AiSettings;
@@ -11,9 +12,6 @@ export interface GlobalConfig {
 
 export interface GeneralSettings {
   autoCheckUpdates: boolean;
-  defaultShell?: string;
-  defaultWorkingDir: 'home' | 'lastUsed' | 'custom';
-  customWorkingDir?: string;
   autoSaveState: boolean;
   stateInterval: number; // seconds
 }
@@ -37,6 +35,14 @@ export interface EditorSettings {
   wordWrap: boolean;
   showLineNumbers: boolean;
   highlightActiveLine: boolean;
+}
+
+export interface ShellDefaultSettings {
+  defaultShell?: string;
+  defaultWorkingDir: 'home' | 'lastUsed' | 'custom' | 'remember' | 'default' | 'prompt';
+  customWorkingDir?: string;
+  defaultEnv?: Record<string, string>;
+  defaultInitCommands?: string[];
 }
 
 export interface SshDefaultSettings {
@@ -102,7 +108,6 @@ export interface AdvancedSettings {
 export const DEFAULT_CONFIG: GlobalConfig = {
   general: {
     autoCheckUpdates: true,
-    defaultWorkingDir: 'home',
     autoSaveState: true,
     stateInterval: 60
   },
@@ -113,12 +118,20 @@ export const DEFAULT_CONFIG: GlobalConfig = {
     cursorStyle: 'block',
     cursorBlink: true,
     theme: 'default',
-    scrollback: 1000,
+    scrollback: 10000,
     bellStyle: 'visual',
     copyOnSelect: false,
     rightClickSelectsWord: true,
     pasteOnMiddleClick: true,
     confirmPaste: true
+  },
+  shell: {
+    defaultWorkingDir: 'home',
+    defaultEnv: {
+      'TERM': 'xterm-256color',
+      'COLORTERM': 'truecolor'
+    },
+    defaultInitCommands: []
   },
   editor: {
     wordWrap: true,
