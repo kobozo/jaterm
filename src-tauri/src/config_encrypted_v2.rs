@@ -243,3 +243,216 @@ pub async fn import_encryption_key(
         .import_encrypted_dek(&data, &password)
         .map_err(|e| e.to_string())
 }
+
+/// Helper function to encrypt sensitive fields in a JSON value
+fn encrypt_sensitive_fields(
+    value: &mut Value,
+    state: &AppState,
+    path: &[String],
+) -> Result<(), String> {
+    // Define sensitive field paths that should be encrypted
+    let sensitive_paths = vec![
+        vec!["ai", "providers", "openai", "apiKey"],
+        vec!["ai", "providers", "anthropic", "apiKey"],
+        vec!["ai", "providers", "azure", "apiKey"],
+        vec!["ai", "providers", "huggingface", "apiToken"],
+    ];
+
+    match value {
+        Value::Object(map) => {
+            for (key, val) in map.iter_mut() {
+                let mut current_path = path.to_vec();
+                current_path.push(key.clone());
+                
+                // Check if current path matches any sensitive path
+                let is_sensitive = sensitive_paths.iter().any(|sp| {
+                    sp.len() == current_path.len() &&
+                    sp.iter().zip(current_path.iter()).all(|(a, b)| a == b)
+                });
+
+                if is_sensitive {
+                    // Encrypt the value if it's a string
+                    if let Value::String(s) = val {
+                        if !s.is_empty() && !s.starts_with("enc:") {
+                            // Encrypt the value
+                            let encrypted = state
+                                .encryption_v2
+                                .encrypt(s)
+                                .map_err(|e| format!("Failed to encrypt field: {}", e))?;
+                            
+                            // Store as JSON with a marker prefix
+                            let encrypted_json = serde_json::to_string(&encrypted)
+                                .map_err(|e| format!("Failed to serialize encrypted data: {}", e))?;
+                            *val = Value::String(format!("enc:{}", encrypted_json));
+                        }
+                    }
+                } else {
+                    // Recurse into nested objects
+                    encrypt_sensitive_fields(val, state, &current_path)?;
+                }
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                encrypt_sensitive_fields(item, state, path)?;
+            }
+        }
+        _ => {}
+    }
+    
+    Ok(())
+}
+
+/// Helper function to decrypt sensitive fields in a JSON value
+fn decrypt_sensitive_fields(
+    value: &mut Value,
+    state: &AppState,
+) -> Result<(), String> {
+    match value {
+        Value::Object(map) => {
+            for val in map.values_mut() {
+                if let Value::String(s) = val {
+                    if let Some(encrypted_json) = s.strip_prefix("enc:") {
+                        // Parse the encrypted data
+                        let encrypted: EncryptedData = serde_json::from_str(encrypted_json)
+                            .map_err(|e| format!("Failed to parse encrypted field: {}", e))?;
+                        
+                        // Decrypt the value
+                        let decrypted = state
+                            .encryption_v2
+                            .decrypt(&encrypted)
+                            .map_err(|e| format!("Failed to decrypt field: {}", e))?;
+                        
+                        *val = Value::String(decrypted);
+                    }
+                } else {
+                    // Recurse into nested objects
+                    decrypt_sensitive_fields(val, state)?;
+                }
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                decrypt_sensitive_fields(item, state)?;
+            }
+        }
+        _ => {}
+    }
+    
+    Ok(())
+}
+
+/// Load config with automatic decryption of sensitive fields
+#[tauri::command]
+pub async fn load_config_v2(
+    app_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let path = crate::config::config_file_path(app_name.as_deref())
+        .map_err(|e| e.to_string())?;
+
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+
+    // Read the config file
+    let contents = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+    
+    let mut config: Value = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+    // Check if encryption is initialized
+    if state.encryption_v2.is_initialized() || state.encryption_v2.initialize().unwrap_or(false) {
+        // Decrypt sensitive fields in place
+        decrypt_sensitive_fields(&mut config, &state)?;
+    }
+
+    Ok(config)
+}
+
+/// Save config with automatic encryption of sensitive fields
+#[tauri::command]
+pub async fn save_config_v2(
+    config: Value,
+    app_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let path = crate::config::config_file_path(app_name.as_deref())
+        .map_err(|e| e.to_string())?;
+
+    let mut config_to_save = config.clone();
+
+    // Check if encryption is initialized
+    if state.encryption_v2.is_initialized() || state.encryption_v2.initialize().unwrap_or(false) {
+        // Encrypt sensitive fields in place
+        encrypt_sensitive_fields(&mut config_to_save, &state, &Vec::new())?;
+    }
+
+    // Serialize the config
+    let data = serde_json::to_vec_pretty(&config_to_save)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    // Write atomically
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, data)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+    fs::rename(&tmp, &path)
+        .map_err(|e| format!("Failed to save config: {}", e))?;
+
+    Ok(())
+}
+
+/// Check if config needs migration to encrypted format
+#[tauri::command]
+pub async fn check_config_needs_encryption_v2(
+    app_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let path = crate::config::config_file_path(app_name.as_deref())
+        .map_err(|e| e.to_string())?;
+
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    // Read the config file
+    let contents = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+    
+    let config: Value = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+    // Check if any API keys are not encrypted
+    let needs_encryption = check_has_unencrypted_keys(&config);
+
+    Ok(needs_encryption)
+}
+
+/// Helper to check if config has unencrypted API keys
+fn check_has_unencrypted_keys(value: &Value) -> bool {
+    // Check AI provider API keys
+    if let Some(ai) = value.get("ai") {
+        if let Some(providers) = ai.get("providers") {
+            // Check each provider
+            for provider in ["openai", "anthropic", "azure"] {
+                if let Some(p) = providers.get(provider) {
+                    if let Some(Value::String(key)) = p.get("apiKey") {
+                        if !key.is_empty() && !key.starts_with("enc:") {
+                            return true;
+                        }
+                    }
+                }
+            }
+            // Check HuggingFace token
+            if let Some(hf) = providers.get("huggingface") {
+                if let Some(Value::String(token)) = hf.get("apiToken") {
+                    if !token.is_empty() && !token.starts_with("enc:") {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}

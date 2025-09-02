@@ -1,7 +1,29 @@
-import { loadConfig, saveConfig } from '@/types/ipc';
+import { loadConfig, saveConfig, loadConfigV2, saveConfigV2, checkConfigNeedsEncryptionV2 } from '@/types/ipc';
 import { GlobalConfig, DEFAULT_CONFIG } from '@/types/settings';
 
 let cachedConfig: GlobalConfig | null = null;
+let useEncryption: boolean | null = null;
+
+/**
+ * Check if we should use encrypted config
+ */
+async function shouldUseEncryption(): Promise<boolean> {
+  if (useEncryption !== null) {
+    return useEncryption;
+  }
+  
+  try {
+    // Try to use V2 encrypted config first
+    await loadConfigV2('jaterm');
+    useEncryption = true;
+    return true;
+  } catch (error) {
+    // Fall back to plain config
+    console.log('Encryption not available, using plain config');
+    useEncryption = false;
+    return false;
+  }
+}
 
 /**
  * Load global configuration from config.json
@@ -9,7 +31,11 @@ let cachedConfig: GlobalConfig | null = null;
  */
 export async function loadGlobalConfig(): Promise<GlobalConfig> {
   try {
-    const data = await loadConfig('jaterm');
+    const encrypted = await shouldUseEncryption();
+    const data = encrypted 
+      ? await loadConfigV2('jaterm')
+      : await loadConfig('jaterm');
+      
     if (data && typeof data === 'object') {
       // Merge with defaults to ensure all fields exist
       cachedConfig = mergeWithDefaults(data as Partial<GlobalConfig>);
@@ -28,11 +54,29 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
  */
 export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
   try {
-    await saveConfig(config, 'jaterm');
+    const encrypted = await shouldUseEncryption();
+    
+    if (encrypted) {
+      await saveConfigV2(config, 'jaterm');
+    } else {
+      await saveConfig(config, 'jaterm');
+    }
+    
     cachedConfig = config;
   } catch (error) {
     console.error('Failed to save config.json:', error);
     throw error;
+  }
+}
+
+/**
+ * Check if config needs encryption migration
+ */
+export async function checkConfigNeedsEncryption(): Promise<boolean> {
+  try {
+    return await checkConfigNeedsEncryptionV2('jaterm');
+  } catch {
+    return false;
   }
 }
 

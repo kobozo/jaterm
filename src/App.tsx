@@ -21,7 +21,7 @@ import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
 import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, sshSetPrimary, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
-import { getCachedConfig, loadGlobalConfig, saveGlobalConfig } from '@/services/settings';
+import { getCachedConfig, loadGlobalConfig, saveGlobalConfig, checkConfigNeedsEncryption } from '@/services/settings';
 import { getThemeList } from '@/config/themes';
 import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
 import { useToasts } from '@/store/toasts';
@@ -2585,11 +2585,20 @@ export default function App() {
         } else {
           // Encryption initialized successfully
           // Check if we need to migrate plain text profiles
-          const needsMigration = await checkProfilesNeedMigrationV2('jaterm');
-          if (needsMigration) {
+          const needsProfileMigration = await checkProfilesNeedMigrationV2('jaterm');
+          if (needsProfileMigration) {
             // Auto-migrate plain text profiles
             await migrateProfilesV2('jaterm');
             addToast({ title: 'Profiles migrated to encrypted format', kind: 'success' } as any);
+          }
+          
+          // Check if we need to encrypt config API keys
+          const needsConfigEncryption = await checkConfigNeedsEncryption();
+          if (needsConfigEncryption) {
+            // Load and re-save config to trigger encryption
+            const config = await loadGlobalConfig();
+            await saveGlobalConfig(config);
+            addToast({ title: 'API keys encrypted for security', kind: 'success' } as any);
           }
         }
         
