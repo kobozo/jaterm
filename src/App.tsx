@@ -480,11 +480,20 @@ export default function App() {
         action: () => checkForUpdatesInteractive(),
       },
       {
+        id: 'app.commandPalette',
+        label: 'Open Command Palette',
+        category: CommandCategory.View,
+        icon: '🎯',
+        shortcut: 'Cmd/Ctrl+K',
+        description: 'Open the command palette for quick access to commands',
+        action: () => setCommandPaletteOpen(true),
+      },
+      {
         id: 'app.compose',
         label: 'Compose with AI',
         category: CommandCategory.Terminal,
         icon: '🤖',
-        shortcut: 'Cmd/Ctrl+K',
+        shortcut: 'Cmd/Ctrl+Shift+K',
         description: 'Open AI compose assistant',
         action: () => setComposeOpen(true),
         enabled: () => {
@@ -2690,8 +2699,13 @@ export default function App() {
         e.preventDefault();
         newTab();
       }
-      // Compose with AI: Meta/Ctrl+K
+      // Command Palette: Meta/Ctrl+K
       if (meta && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+      }
+      // Compose with AI: Meta/Ctrl+Shift+K (alternative shortcut)
+      if (meta && e.shiftKey && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setComposeOpen(true);
       }

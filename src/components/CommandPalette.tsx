@@ -75,6 +75,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         setFilteredCommands(categorized);
       }
       setSelectedIndex(0);
+      setAiPrompt('');
+      setAiSuggestions([]);
       return;
     }
 
@@ -121,16 +123,71 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     } else if (query.startsWith('#')) {
       // AI command generation
       query = query.substring(1).trim();
-      // This will be handled by AI generation
+      setAiPrompt(query);
+      // Don't show regular commands, AI suggestions will be shown
       filtered = [];
     } else {
       // Regular fuzzy search
       filtered = fuse.search(query).map(result => result.item);
+      setAiPrompt('');
+      setAiSuggestions([]);
     }
 
     setFilteredCommands(filtered);
     setSelectedIndex(0);
   }, [searchQuery, allCommands, fuse, recentCommands]);
+
+  // Generate AI suggestions when prompt changes
+  useEffect(() => {
+    if (!aiPrompt || aiPrompt.length < 3) {
+      setAiSuggestions([]);
+      return;
+    }
+
+    // Debounce the AI generation
+    const timer = setTimeout(async () => {
+      setIsGeneratingAi(true);
+      try {
+        const suggestions = await aiService.generateCommand(aiPrompt, true);
+        setAiSuggestions(suggestions);
+        
+        // Convert AI suggestions to commands for display
+        const aiCommands: Command[] = suggestions.map((suggestion, index) => ({
+          id: `ai.suggestion.${index}`,
+          label: suggestion.command,
+          category: CommandCategory.Terminal,
+          icon: suggestion.safetyLevel === 'dangerous' ? '⚠️' : '🤖',
+          description: suggestion.explanation,
+          keywords: [],
+          action: async () => {
+            // Copy command to clipboard or execute
+            if (navigator.clipboard) {
+              await navigator.clipboard.writeText(suggestion.command);
+              show({ 
+                title: 'Command copied', 
+                message: 'Command has been copied to clipboard',
+                kind: 'success' 
+              });
+            }
+            onClose();
+          }
+        }));
+        
+        setFilteredCommands(aiCommands);
+      } catch (error) {
+        console.error('AI generation failed:', error);
+        show({ 
+          title: 'AI generation failed', 
+          message: String(error),
+          kind: 'error' 
+        });
+      } finally {
+        setIsGeneratingAi(false);
+      }
+    }, 500); // Debounce for 500ms
+
+    return () => clearTimeout(timer);
+  }, [aiPrompt, show, onClose]);
 
   // Group commands by category
   const groupCommandsByCategory = (commands: Command[]): Command[] => {
@@ -402,7 +459,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={navigationStack.length > 0 ? "Select an option..." : "Type to search commands... (> commands, : settings, @ SSH, # Git)"}
+            placeholder={
+              navigationStack.length > 0 
+                ? "Select an option..." 
+                : isGeneratingAi 
+                  ? "Generating AI suggestions..." 
+                  : "Type to search commands... (> commands, : settings, @ SSH, ? Git, # AI)"
+            }
             style={{
               width: '100%',
               padding: '12px',
