@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiConfig {
     pub enabled: bool,
     pub default_provider: String,
@@ -29,6 +30,7 @@ pub struct ProvidersConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OpenAiConfig {
     pub api_key: String,
     pub model: String,
@@ -36,12 +38,14 @@ pub struct OpenAiConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AnthropicConfig {
     pub api_key: String,
     pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AzureConfig {
     pub api_key: String,
     pub endpoint: String,
@@ -50,6 +54,7 @@ pub struct AzureConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OllamaConfig {
     pub base_url: String,
     pub model: String,
@@ -57,6 +62,7 @@ pub struct OllamaConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HuggingFaceConfig {
     pub api_token: String,
     pub model: String,
@@ -64,6 +70,7 @@ pub struct HuggingFaceConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GenerationConfig {
     pub temperature: f32,
     pub max_tokens: u32,
@@ -71,6 +78,7 @@ pub struct GenerationConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrivacyConfig {
     pub send_context: bool,
     pub store_history: bool,

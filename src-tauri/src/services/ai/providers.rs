@@ -1,7 +1,11 @@
 use anyhow::Result;
 use langchain_rust::{
+    llm::{
+        openai::{OpenAI, OpenAIConfig},
+        ollama::client::Ollama,
+        claude::Claude,
+    },
     language_models::llm::LLM,
-    llm::openai::{OpenAI, OpenAIConfig},
 };
 use reqwest;
 use serde::Deserialize;
@@ -37,23 +41,22 @@ async fn create_anthropic_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
     let anthropic_config = _config.providers.anthropic.as_ref()
         .ok_or_else(|| anyhow::anyhow!("Anthropic configuration not found"))?;
     
-    // Create configuration for Anthropic
-    let lc_config = OpenAIConfig::new()
-        .with_api_key(anthropic_config.api_key.clone());
-    let anthropic = OpenAI::new(lc_config);
+    // Create Claude instance with builder pattern
+    let claude = Claude::new()
+        .with_api_key(anthropic_config.api_key.clone())
+        .with_model(anthropic_config.model.clone());
     
-    Ok(Box::new(anthropic))
+    Ok(Box::new(claude))
 }
 
 async fn create_ollama_llm(_config: &AiConfig) -> Result<Box<dyn LLM>> {
     let ollama_config = _config.providers.ollama.as_ref()
         .ok_or_else(|| anyhow::anyhow!("Ollama configuration not found"))?;
     
-    // Use a dummy API key for Ollama (it doesn't require one)
-    let lc_config = OpenAIConfig::new()
-        .with_api_key("ollama".to_string())
-        .with_api_base(ollama_config.base_url.clone());
-    let ollama = OpenAI::new(lc_config);
+    // Create Ollama instance with default client
+    // TODO: Configure base URL if different from default
+    let ollama = Ollama::default()
+        .with_model(ollama_config.model.clone());
     
     Ok(Box::new(ollama))
 }
