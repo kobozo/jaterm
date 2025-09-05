@@ -107,3 +107,34 @@ pub async fn ai_explain_command(
         .map(|s| s.explanation.clone())
         .unwrap_or_else(|| "Could not generate explanation".to_string()))
 }
+
+#[tauri::command]
+pub async fn ai_analyze_output(
+    output: String,
+    context: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let ai_service = state.get_ai_service()
+        .ok_or_else(|| "AI service not initialized".to_string())?;
+    
+    let prompt = if let Some(ctx) = context {
+        format!(
+            "Analyze this terminal output and provide insights:\n\nContext: {}\n\nOutput:\n{}",
+            ctx, output
+        )
+    } else {
+        format!(
+            "Analyze this terminal output and explain what happened, identify any errors or important information:\n\n{}",
+            output
+        )
+    };
+    
+    let suggestions = ai_service
+        .generate_command(&prompt, None)
+        .await
+        .map_err(|e| format!("Failed to analyze output: {}", e))?;
+    
+    Ok(suggestions.first()
+        .map(|s| s.explanation.clone())
+        .unwrap_or_else(|| "Could not analyze output".to_string()))
+}

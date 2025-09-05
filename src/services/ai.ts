@@ -74,6 +74,18 @@ class AiService {
     }
   }
 
+  async analyzeTerminalOutput(output: string, context?: string): Promise<string> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      return await invoke<string>('ai_analyze_output', { output, context });
+    } catch (error) {
+      throw new Error(`Failed to analyze output: ${error}`);
+    }
+  }
+
   async updateSettings(settings: AiSettings): Promise<void> {
     const config = await loadGlobalConfig();
     config.ai = settings;

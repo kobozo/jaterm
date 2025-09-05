@@ -635,6 +635,61 @@ export default function App() {
       });
     });
     
+    // Add AI analysis command
+    commands.push({
+      id: 'ai.analyzeOutput',
+      label: 'Analyze Terminal Output with AI',
+      category: CommandCategory.Terminal,
+      icon: '🤖',
+      description: 'Analyze the visible terminal output using AI',
+      keywords: ['ai', 'analyze', 'output', 'explain', 'error'],
+      action: async () => {
+        try {
+          // For now, prompt user to copy text
+          const { aiService } = await import('@/services/ai');
+          
+          // Try to get text from clipboard (user needs to select and copy first)
+          const clipboardText = await navigator.clipboard.readText();
+          
+          if (!clipboardText || clipboardText.trim().length === 0) {
+            show({
+              title: 'No text to analyze',
+              message: 'Please select and copy terminal output first (Cmd+C), then run this command',
+              kind: 'info'
+            });
+            return;
+          }
+          
+          show({
+            title: 'Analyzing output...',
+            message: 'AI is analyzing the terminal output',
+            kind: 'info'
+          });
+          
+          const analysis = await aiService.analyzeTerminalOutput(clipboardText);
+          
+          // Show analysis in a modal or toast
+          show({
+            title: 'AI Analysis',
+            message: analysis,
+            kind: 'success',
+            duration: 10000 // Show for 10 seconds
+          });
+        } catch (error) {
+          show({
+            title: 'Analysis failed',
+            message: String(error),
+            kind: 'error'
+          });
+        }
+      },
+      enabled: () => {
+        // Only enable if AI is configured
+        const config = getCachedConfig();
+        return config?.ai?.enabled === true;
+      }
+    });
+    
     commandRegistry.registerAll(commands);
   }, [tabs, activeTab, sessionsId, sshProfiles]);
   // Simple bell sound using WebAudio
