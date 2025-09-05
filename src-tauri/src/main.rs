@@ -103,7 +103,10 @@ fn main() {
             commands::ai::ai_test_connection,
             commands::ai::ai_list_ollama_models,
             commands::ai::ai_explain_command,
-            commands::ai::ai_analyze_output
+            commands::ai::ai_analyze_output,
+            commands::ai::ai_start_chat,
+            commands::ai::ai_send_message,
+            commands::ai::ai_generate_solution
         ])
         .setup(|app| {
             // Set up the menu

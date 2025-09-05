@@ -1,6 +1,7 @@
 pub mod command_generator;
 pub mod providers;
 pub mod context;
+pub mod chat;
 
 use anyhow::Result;
 use langchain_rust::{

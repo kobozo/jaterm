@@ -86,6 +86,42 @@ class AiService {
     }
   }
 
+  async startChat(terminalOutput: string): Promise<{ chatId: string; analysis: string; hasCliSolution: boolean }> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      return await invoke('ai_start_chat', { terminalOutput });
+    } catch (error) {
+      throw new Error(`Failed to start chat: ${error}`);
+    }
+  }
+
+  async sendChatMessage(chatId: string, message: string): Promise<{ message: string; hasCliSolution: boolean }> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      return await invoke('ai_send_message', { chatId, message });
+    } catch (error) {
+      throw new Error(`Failed to send message: ${error}`);
+    }
+  }
+
+  async generateCliSolution(chatId: string): Promise<{ command: string; explanation: string }> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      return await invoke('ai_generate_solution', { chatId });
+    } catch (error) {
+      throw new Error(`Failed to generate solution: ${error}`);
+    }
+  }
+
   async updateSettings(settings: AiSettings): Promise<void> {
     const config = await loadGlobalConfig();
     config.ai = settings;

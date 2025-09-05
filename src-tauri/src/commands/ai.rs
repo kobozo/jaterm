@@ -138,3 +138,84 @@ pub async fn ai_analyze_output(
         .map(|s| s.explanation.clone())
         .unwrap_or_else(|| "Could not analyze output".to_string()))
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatStartResponse {
+    #[serde(rename = "chatId")]
+    pub chat_id: String,
+    pub analysis: String,
+    #[serde(rename = "hasCliSolution")]
+    pub has_cli_solution: bool,
+}
+
+#[tauri::command]
+pub async fn ai_start_chat(
+    terminal_output: String,
+    state: State<'_, AppState>,
+) -> Result<ChatStartResponse, String> {
+    let ai_service = state.get_ai_service()
+        .ok_or_else(|| "AI service not initialized".to_string())?;
+    
+    let (chat_id, analysis, has_cli_solution) = ai_service
+        .start_chat_session(&terminal_output)
+        .await
+        .map_err(|e| format!("Failed to start chat: {}", e))?;
+    
+    Ok(ChatStartResponse {
+        chat_id,
+        analysis,
+        has_cli_solution,
+    })
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatMessageResponse {
+    pub message: String,
+    #[serde(rename = "hasCliSolution")]
+    pub has_cli_solution: bool,
+}
+
+#[tauri::command]
+pub async fn ai_send_message(
+    chat_id: String,
+    message: String,
+    state: State<'_, AppState>,
+) -> Result<ChatMessageResponse, String> {
+    let ai_service = state.get_ai_service()
+        .ok_or_else(|| "AI service not initialized".to_string())?;
+    
+    let (response, has_cli_solution) = ai_service
+        .send_chat_message(&chat_id, &message)
+        .await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
+    
+    Ok(ChatMessageResponse {
+        message: response,
+        has_cli_solution,
+    })
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CliSolutionResponse {
+    pub command: String,
+    pub explanation: String,
+}
+
+#[tauri::command]
+pub async fn ai_generate_solution(
+    chat_id: String,
+    state: State<'_, AppState>,
+) -> Result<CliSolutionResponse, String> {
+    let ai_service = state.get_ai_service()
+        .ok_or_else(|| "AI service not initialized".to_string())?;
+    
+    let (command, explanation) = ai_service
+        .generate_cli_solution_for_chat(&chat_id)
+        .await
+        .map_err(|e| format!("Failed to generate solution: {}", e))?;
+    
+    Ok(CliSolutionResponse {
+        command,
+        explanation,
+    })
+}
