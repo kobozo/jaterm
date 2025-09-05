@@ -421,7 +421,7 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onSplit?.(id, 'column'); }}>Split Vertically</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onCompose?.(); }}>Compose with AI</div>
-          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); analyzeWithAi(); }}>🤖 Analyze with AI</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); analyzeWithAi(); }}>Analyze with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); copySelection(); }}>Copy Selection</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); pasteClipboard(); }}>Paste</div>
