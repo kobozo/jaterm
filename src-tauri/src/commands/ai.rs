@@ -6,6 +6,7 @@ use crate::services::ai::{AiConfig, AiService, CommandSuggestion, context::Comma
 use crate::state::app_state::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiGenerateRequest {
     pub prompt: String,
     pub include_context: bool,
