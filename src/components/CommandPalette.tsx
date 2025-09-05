@@ -346,9 +346,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
     
     setIsExecuting(true);
     try {
-      // Check if this is a dynamically created command (from subCommands)
+      // Check if this is a dynamically created command (from subCommands or AI suggestions)
       // These won't be in the registry, so execute directly
-      if (navigationStack.length > 0 && command.action) {
+      if ((navigationStack.length > 0 || command.id.startsWith('ai.suggestion.')) && command.action) {
         await command.action();
         onClose();
       } else {
