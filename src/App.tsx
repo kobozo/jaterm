@@ -3230,6 +3230,8 @@ export default function App() {
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
+        activePaneId={tabs.find(t => t.id === activeTab)?.activePane || null}
+        paneKind={tabs.find(t => t.id === activeTab)?.kind}
       />
       {customPortDialog && (
         <div style={{ 

@@ -5,10 +5,13 @@ import { commandRegistry } from '@/services/commandRegistry';
 import { useToasts } from '@/store/toasts';
 import { aiService } from '@/services/ai';
 import { CommandSuggestion } from '@/types/ai';
+import { ptyWrite, sshWrite } from '@/types/ipc';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
+  activePaneId: string | null;
+  paneKind?: string;
 }
 
 const categoryIcons: Record<CommandCategory, string> = {
@@ -23,7 +26,7 @@ const categoryIcons: Record<CommandCategory, string> = {
   [CommandCategory.File]: '📁',
 };
 
-export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
+export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, activePaneId, paneKind }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [allCommands, setAllCommands] = useState<Command[]>([]);
@@ -160,14 +163,36 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
           description: suggestion.explanation,
           keywords: [],
           action: async () => {
-            // Copy command to clipboard or execute
-            if (navigator.clipboard) {
-              await navigator.clipboard.writeText(suggestion.command);
-              show({ 
-                title: 'Command copied', 
-                message: 'Command has been copied to clipboard',
-                kind: 'success' 
-              });
+            // Write command to active terminal
+            if (activePaneId) {
+              try {
+                if (paneKind === 'ssh') {
+                  await sshWrite({ channelId: activePaneId, data: suggestion.command });
+                } else {
+                  await ptyWrite({ ptyId: activePaneId, data: suggestion.command });
+                }
+                show({ 
+                  title: 'Command sent', 
+                  message: 'Command has been sent to terminal',
+                  kind: 'success' 
+                });
+              } catch (error) {
+                show({ 
+                  title: 'Failed to send command', 
+                  message: String(error),
+                  kind: 'error' 
+                });
+              }
+            } else {
+              // Fallback to clipboard if no active terminal
+              if (navigator.clipboard) {
+                await navigator.clipboard.writeText(suggestion.command);
+                show({ 
+                  title: 'Command copied', 
+                  message: 'No active terminal. Command copied to clipboard',
+                  kind: 'info' 
+                });
+              }
             }
             onClose();
           }
