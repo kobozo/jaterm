@@ -7,17 +7,20 @@ import { FitAddon } from '@xterm/addon-fit';
 import { getCachedConfig, saveGlobalConfig } from '@/services/settings';
 import { DEFAULT_CONFIG } from '@/types/settings';
 import PasteConfirmModal from '../PasteConfirmModal';
+import { AiChatModal } from '../AiChatModal';
 
 type Props = { id: string; desiredCwd?: string; onCwd?: (id: string, cwd: string) => void; onFocusPane?: (id: string) => void; onClose?: (id: string) => void; onTitle?: (id: string, title: string) => void; onSplit?: (id: string, dir: 'row' | 'column') => void; onCompose?: () => void; onTerminalEvent?: (id: string, event: any) => void };
 
 export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClose, onTitle, onSplit, onCompose, onTerminalEvent }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const { attach, dispose, term } = useTerminal(id);
+  const { attach, dispose, term, serializeAddon } = useTerminal(id);
   const fitRef = useRef<FitAddon | null>(null);
   const correctedRef = useRef(false);
   const openedAtRef = useRef<number>(Date.now());
   const decoderRef = useRef<TextDecoder | null>(null);
   const IS_DEV = import.meta.env.DEV;
+  const [showAiChat, setShowAiChat] = React.useState(false);
+  const [aiChatBuffer, setAiChatBuffer] = React.useState<string>('');
   
   // Get terminal settings
   const globalConfig = getCachedConfig();
@@ -308,6 +311,39 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
     return () => window.removeEventListener('click', onCloseMenu);
   }, []);
 
+  // Get terminal buffer content
+  const getTerminalBuffer = (): string => {
+    // First check if there's a selection
+    const selection = term.getSelection?.();
+    if (selection && selection.trim()) {
+      return selection;
+    }
+    
+    // Otherwise get the entire visible buffer using serialize addon
+    try {
+      // Serialize the entire buffer (including scrollback)
+      const serialized = serializeAddon.serialize();
+      return serialized;
+    } catch (e) {
+      console.warn('Failed to serialize terminal buffer:', e);
+      // Fallback: manually get visible lines
+      try {
+        const buffer = term.buffer.active;
+        let content = '';
+        for (let i = 0; i < buffer.length; i++) {
+          const line = buffer.getLine(i);
+          if (line) {
+            content += line.translateToString(true) + '\n';
+          }
+        }
+        return content;
+      } catch (err) {
+        console.error('Failed to get terminal buffer:', err);
+        return '';
+      }
+    }
+  };
+
   // Context menu actions
   const copySelection = async () => {
     try {
@@ -332,6 +368,16 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
   };
   const clearBuffer = () => {
     try { term.clear?.(); } catch {}
+  };
+  const analyzeWithAi = () => {
+    const buffer = getTerminalBuffer();
+    if (!buffer || buffer.trim().length === 0) {
+      // Still open chat, but with a message
+      setAiChatBuffer('No terminal output to analyze. You can ask questions about any errors or issues.');
+    } else {
+      setAiChatBuffer(buffer);
+    }
+    setShowAiChat(true);
   };
 
   return (
@@ -375,6 +421,7 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onSplit?.(id, 'column'); }}>Split Vertically</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); onCompose?.(); }}>Compose with AI</div>
+          <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); analyzeWithAi(); }}>Analyze with AI</div>
           <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); copySelection(); }}>Copy Selection</div>
           <div style={{ padding: '6px 10px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenu(null); pasteClipboard(); }}>Paste</div>
@@ -400,6 +447,19 @@ export default function TerminalPane({ id, desiredCwd, onCwd, onFocusPane, onClo
               config.terminal.confirmPaste = false;
               await saveGlobalConfig(config);
             }
+          }}
+        />
+      )}
+      {showAiChat && (
+        <AiChatModal
+          isOpen={showAiChat}
+          onClose={() => setShowAiChat(false)}
+          initialBuffer={aiChatBuffer}
+          onInsertCommand={(command) => {
+            // Send command to terminal
+            ptyWrite({ ptyId: id, data: command });
+            // Optionally close the modal
+            // setShowAiChat(false);
           }}
         />
       )}

@@ -8,6 +8,7 @@ mod encryption;
 mod encryption_v2;
 mod events;
 mod menu;
+mod services;
 mod shell;
 mod state;
 mod utils;
@@ -92,7 +93,20 @@ fn main() {
             config_encrypted_v2::check_profiles_need_migration_v2,
             config_encrypted_v2::migrate_profiles_v2,
             config_encrypted_v2::export_encryption_key,
-            config_encrypted_v2::import_encryption_key
+            config_encrypted_v2::import_encryption_key,
+            config_encrypted_v2::load_config_v2,
+            config_encrypted_v2::save_config_v2,
+            config_encrypted_v2::check_config_needs_encryption_v2,
+            // AI commands
+            commands::ai::ai_initialize,
+            commands::ai::ai_generate_command,
+            commands::ai::ai_test_connection,
+            commands::ai::ai_list_ollama_models,
+            commands::ai::ai_explain_command,
+            commands::ai::ai_analyze_output,
+            commands::ai::ai_start_chat,
+            commands::ai::ai_send_message,
+            commands::ai::ai_generate_solution
         ])
         .setup(|app| {
             // Set up the menu

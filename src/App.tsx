@@ -21,7 +21,7 @@ import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
 import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, sshSetPrimary, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
-import { getCachedConfig, loadGlobalConfig, saveGlobalConfig } from '@/services/settings';
+import { getCachedConfig, loadGlobalConfig, saveGlobalConfig, checkConfigNeedsEncryption } from '@/services/settings';
 import { getThemeList } from '@/config/themes';
 import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
 import { useToasts } from '@/store/toasts';
@@ -480,11 +480,20 @@ export default function App() {
         action: () => checkForUpdatesInteractive(),
       },
       {
+        id: 'app.commandPalette',
+        label: 'Open Command Palette',
+        category: CommandCategory.View,
+        icon: '🎯',
+        shortcut: 'Cmd/Ctrl+K',
+        description: 'Open the command palette for quick access to commands',
+        action: () => setCommandPaletteOpen(true),
+      },
+      {
         id: 'app.compose',
         label: 'Compose with AI',
         category: CommandCategory.Terminal,
         icon: '🤖',
-        shortcut: 'Cmd/Ctrl+K',
+        shortcut: 'Cmd/Ctrl+Shift+K',
         description: 'Open AI compose assistant',
         action: () => setComposeOpen(true),
         enabled: () => {
@@ -624,6 +633,61 @@ export default function App() {
           window.location.reload();
         },
       });
+    });
+    
+    // Add AI analysis command
+    commands.push({
+      id: 'ai.analyzeOutput',
+      label: 'Analyze Terminal Output with AI',
+      category: CommandCategory.Terminal,
+      icon: '🤖',
+      description: 'Analyze the visible terminal output using AI',
+      keywords: ['ai', 'analyze', 'output', 'explain', 'error'],
+      action: async () => {
+        try {
+          // For now, prompt user to copy text
+          const { aiService } = await import('@/services/ai');
+          
+          // Try to get text from clipboard (user needs to select and copy first)
+          const clipboardText = await navigator.clipboard.readText();
+          
+          if (!clipboardText || clipboardText.trim().length === 0) {
+            show({
+              title: 'No text to analyze',
+              message: 'Please select and copy terminal output first (Cmd+C), then run this command',
+              kind: 'info'
+            });
+            return;
+          }
+          
+          show({
+            title: 'Analyzing output...',
+            message: 'AI is analyzing the terminal output',
+            kind: 'info'
+          });
+          
+          const analysis = await aiService.analyzeTerminalOutput(clipboardText);
+          
+          // Show analysis in a modal or toast
+          show({
+            title: 'AI Analysis',
+            message: analysis,
+            kind: 'success',
+            duration: 10000 // Show for 10 seconds
+          });
+        } catch (error) {
+          show({
+            title: 'Analysis failed',
+            message: String(error),
+            kind: 'error'
+          });
+        }
+      },
+      enabled: () => {
+        // Only enable if AI is configured
+        const config = getCachedConfig();
+        return config?.ai?.enabled === true;
+      }
     });
     
     commandRegistry.registerAll(commands);
@@ -2585,11 +2649,20 @@ export default function App() {
         } else {
           // Encryption initialized successfully
           // Check if we need to migrate plain text profiles
-          const needsMigration = await checkProfilesNeedMigrationV2('jaterm');
-          if (needsMigration) {
+          const needsProfileMigration = await checkProfilesNeedMigrationV2('jaterm');
+          if (needsProfileMigration) {
             // Auto-migrate plain text profiles
             await migrateProfilesV2('jaterm');
             addToast({ title: 'Profiles migrated to encrypted format', kind: 'success' } as any);
+          }
+          
+          // Check if we need to encrypt config API keys
+          const needsConfigEncryption = await checkConfigNeedsEncryption();
+          if (needsConfigEncryption) {
+            // Load and re-save config to trigger encryption
+            const config = await loadGlobalConfig();
+            await saveGlobalConfig(config);
+            addToast({ title: 'API keys encrypted for security', kind: 'success' } as any);
           }
         }
         
@@ -2681,8 +2754,13 @@ export default function App() {
         e.preventDefault();
         newTab();
       }
-      // Compose with AI: Meta/Ctrl+K
+      // Command Palette: Meta/Ctrl+K
       if (meta && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+      }
+      // Compose with AI: Meta/Ctrl+Shift+K (alternative shortcut)
+      if (meta && e.shiftKey && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setComposeOpen(true);
       }
@@ -3207,6 +3285,8 @@ export default function App() {
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
+        activePaneId={tabs.find(t => t.id === activeTab)?.activePane || null}
+        paneKind={tabs.find(t => t.id === activeTab)?.kind}
       />
       {customPortDialog && (
         <div style={{ 

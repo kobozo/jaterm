@@ -3,10 +3,15 @@ import Fuse from 'fuse.js';
 import { Command, CommandCategory } from '@/types/commands';
 import { commandRegistry } from '@/services/commandRegistry';
 import { useToasts } from '@/store/toasts';
+import { aiService } from '@/services/ai';
+import { CommandSuggestion } from '@/types/ai';
+import { ptyWrite, sshWrite } from '@/types/ipc';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
+  activePaneId: string | null;
+  paneKind?: string;
 }
 
 const categoryIcons: Record<CommandCategory, string> = {
@@ -21,7 +26,7 @@ const categoryIcons: Record<CommandCategory, string> = {
   [CommandCategory.File]: '📁',
 };
 
-export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
+export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, activePaneId, paneKind }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [allCommands, setAllCommands] = useState<Command[]>([]);
@@ -29,6 +34,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   const [recentCommands, setRecentCommands] = useState<Command[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [navigationStack, setNavigationStack] = useState<{ commands: Command[], query: string }[]>([]);
+  const [aiSuggestions, setAiSuggestions] = useState<CommandSuggestion[]>([]);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
   
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -70,6 +78,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         setFilteredCommands(categorized);
       }
       setSelectedIndex(0);
+      setAiPrompt('');
+      setAiSuggestions([]);
       return;
     }
 
@@ -102,8 +112,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         threshold: 0.3,
       });
       filtered = query ? sshFuse.search(query).map(r => r.item) : sshCommands;
-    } else if (query.startsWith('#')) {
-      // Git commands
+    } else if (query.startsWith('?')) {
+      // Git commands (changed from # to ?)
       query = query.substring(1).trim();
       const gitCommands = allCommands.filter(
         cmd => cmd.category === CommandCategory.Git
@@ -113,14 +123,96 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         threshold: 0.3,
       });
       filtered = query ? gitFuse.search(query).map(r => r.item) : gitCommands;
+    } else if (query.startsWith('#')) {
+      // AI command generation
+      query = query.substring(1).trim();
+      setAiPrompt(query);
+      // Don't show regular commands, AI suggestions will be shown
+      filtered = [];
     } else {
       // Regular fuzzy search
       filtered = fuse.search(query).map(result => result.item);
+      setAiPrompt('');
+      setAiSuggestions([]);
     }
 
     setFilteredCommands(filtered);
     setSelectedIndex(0);
   }, [searchQuery, allCommands, fuse, recentCommands]);
+
+  // Generate AI suggestions when prompt changes
+  useEffect(() => {
+    if (!aiPrompt || aiPrompt.length < 3) {
+      setAiSuggestions([]);
+      return;
+    }
+
+    // Debounce the AI generation
+    const timer = setTimeout(async () => {
+      setIsGeneratingAi(true);
+      try {
+        const suggestions = await aiService.generateCommand(aiPrompt, true);
+        setAiSuggestions(suggestions);
+        
+        // Convert AI suggestions to commands for display
+        const aiCommands: Command[] = suggestions.map((suggestion, index) => ({
+          id: `ai.suggestion.${index}`,
+          label: suggestion.command,
+          category: CommandCategory.Terminal,
+          icon: suggestion.safetyLevel === 'dangerous' ? '⚠️' : '🤖',
+          description: suggestion.explanation,
+          keywords: [],
+          action: async () => {
+            // Write command to active terminal
+            if (activePaneId) {
+              try {
+                if (paneKind === 'ssh') {
+                  await sshWrite({ channelId: activePaneId, data: suggestion.command });
+                } else {
+                  await ptyWrite({ ptyId: activePaneId, data: suggestion.command });
+                }
+                show({ 
+                  title: 'Command sent', 
+                  message: 'Command has been sent to terminal',
+                  kind: 'success' 
+                });
+              } catch (error) {
+                show({ 
+                  title: 'Failed to send command', 
+                  message: String(error),
+                  kind: 'error' 
+                });
+              }
+            } else {
+              // Fallback to clipboard if no active terminal
+              if (navigator.clipboard) {
+                await navigator.clipboard.writeText(suggestion.command);
+                show({ 
+                  title: 'Command copied', 
+                  message: 'No active terminal. Command copied to clipboard',
+                  kind: 'info' 
+                });
+              }
+            }
+            onClose();
+          }
+        }));
+        
+        setFilteredCommands(aiCommands);
+      } catch (error) {
+        console.error('AI generation failed:', error);
+        show({ 
+          title: 'AI generation failed', 
+          message: String(error),
+          kind: 'error' 
+        });
+      } finally {
+        setIsGeneratingAi(false);
+      }
+    }, 500); // Debounce for 500ms
+
+    return () => clearTimeout(timer);
+  }, [aiPrompt, show, onClose]);
 
   // Group commands by category
   const groupCommandsByCategory = (commands: Command[]): Command[] => {
@@ -254,9 +346,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     
     setIsExecuting(true);
     try {
-      // Check if this is a dynamically created command (from subCommands)
+      // Check if this is a dynamically created command (from subCommands or AI suggestions)
       // These won't be in the registry, so execute directly
-      if (navigationStack.length > 0 && command.action) {
+      if ((navigationStack.length > 0 || command.id.startsWith('ai.suggestion.')) && command.action) {
         await command.action();
         onClose();
       } else {
@@ -392,7 +484,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={navigationStack.length > 0 ? "Select an option..." : "Type to search commands... (> commands, : settings, @ SSH, # Git)"}
+            placeholder={
+              navigationStack.length > 0 
+                ? "Select an option..." 
+                : isGeneratingAi 
+                  ? "Generating AI suggestions..." 
+                  : "Type to search commands... (> commands, : settings, @ SSH, ? Git, # AI)"
+            }
             style={{
               width: '100%',
               padding: '12px',
