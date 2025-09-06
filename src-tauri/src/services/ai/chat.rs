@@ -142,21 +142,52 @@ impl ChatManager {
     }
 }
 
+// Store chat sessions in the AI service
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref CHAT_MANAGER: ChatManager = ChatManager::new();
+}
+
 // Integration with the AI service
 impl super::AiService {
     pub async fn start_chat_session(
         &self,
         terminal_output: &str,
     ) -> Result<(String, String, bool)> {
-        // This would integrate with the actual LLM provider
-        // For now, we'll create a basic implementation
+        // Create a new chat session with context
+        let session_id = Uuid::new_v4().to_string();
         
+        // Store the initial context
+        let system_message = ChatMessage {
+            role: "system".to_string(),
+            content: format!(
+                "You are an AI assistant helping to analyze terminal output and solve issues. \
+                Here is the terminal output to analyze:\n\n{}\n\n\
+                Provide a clear analysis of what's happening, identify any errors or issues, \
+                and suggest solutions if applicable. When the user asks follow-up questions, \
+                remember the context of this terminal output and our conversation.",
+                terminal_output
+            ),
+        };
+
+        let session = ChatSession {
+            id: session_id.clone(),
+            messages: vec![system_message.clone()],
+            context: terminal_output.to_string(),
+        };
+
+        // Store the session
+        let mut sessions = CHAT_MANAGER.sessions.write().await;
+        sessions.insert(session_id.clone(), session);
+        drop(sessions);
+
+        // Generate initial analysis
         let prompt = format!(
             "Analyze this terminal output and provide insights:\n\n{}",
             terminal_output
         );
 
-        // Call the LLM to get initial analysis
         let suggestions = self.generate_command(&prompt, None).await?;
         
         let analysis = suggestions
@@ -164,47 +195,110 @@ impl super::AiService {
             .map(|s| s.explanation.clone())
             .unwrap_or_else(|| "Unable to analyze terminal output".to_string());
 
-        // Check if there's a potential CLI solution
-        let has_cli_solution = terminal_output.contains("error") 
-            || terminal_output.contains("failed")
-            || terminal_output.contains("Error");
+        // Add the assistant's response to the session
+        let mut sessions = CHAT_MANAGER.sessions.write().await;
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content: analysis.clone(),
+            });
+        }
 
-        // Generate a session ID
-        let session_id = Uuid::new_v4().to_string();
+        // Only suggest CLI solution if there's an actual error or problem
+        let has_cli_solution = terminal_output.to_lowercase().contains("error") 
+            || terminal_output.to_lowercase().contains("failed")
+            || terminal_output.to_lowercase().contains("not found")
+            || terminal_output.to_lowercase().contains("permission denied");
 
         Ok((session_id, analysis, has_cli_solution))
     }
 
     pub async fn send_chat_message(
         &self,
-        _session_id: &str,
+        session_id: &str,
         message: &str,
     ) -> Result<(String, bool)> {
-        // Generate response using LLM
-        let prompt = format!("User question about terminal output: {}", message);
-        
-        let suggestions = self.generate_command(&prompt, None).await?;
+        // Get the session to maintain context
+        let mut sessions = CHAT_MANAGER.sessions.write().await;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| anyhow::anyhow!("Chat session not found"))?;
+
+        // Add user message to history
+        session.messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: message.to_string(),
+        });
+
+        // Build conversation context for the LLM
+        let mut conversation = String::new();
+        for msg in &session.messages {
+            match msg.role.as_str() {
+                "system" => conversation.push_str(&format!("System: {}\n\n", msg.content)),
+                "user" => conversation.push_str(&format!("User: {}\n\n", msg.content)),
+                "assistant" => conversation.push_str(&format!("Assistant: {}\n\n", msg.content)),
+                _ => {}
+            }
+        }
+        conversation.push_str(&format!("User: {}\n\nAssistant: ", message));
+
+        // Generate response with full context
+        let suggestions = self.generate_command(&conversation, None).await?;
         
         let response = suggestions
             .first()
             .map(|s| s.explanation.clone())
             .unwrap_or_else(|| "I couldn't generate a response".to_string());
 
-        let has_cli_solution = response.contains("command") 
-            || response.contains("run")
-            || response.contains("execute");
+        // Add assistant response to history
+        session.messages.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: response.clone(),
+        });
+
+        // Only detect CLI solution if the response actually contains a command suggestion
+        // Check if the user is asking for a command or if we're suggesting one
+        let is_asking_for_command = message.to_lowercase().contains("how do i") 
+            || message.to_lowercase().contains("command")
+            || message.to_lowercase().contains("fix")
+            || message.to_lowercase().contains("solve")
+            || message.to_lowercase().contains("what should i run");
+
+        let response_has_command = response.contains("```") 
+            || response.contains("run ")
+            || response.contains("execute ")
+            || response.contains("try:");
+
+        let has_cli_solution = is_asking_for_command && response_has_command;
 
         Ok((response, has_cli_solution))
     }
 
     pub async fn generate_cli_solution_for_chat(
         &self,
-        _session_id: &str,
+        session_id: &str,
     ) -> Result<(String, String)> {
-        // Generate a CLI solution
-        let prompt = "Generate a command line solution for the discussed issue";
+        // Get the session context
+        let sessions = CHAT_MANAGER.sessions.read().await;
+        let session = sessions
+            .get(session_id)
+            .ok_or_else(|| anyhow::anyhow!("Chat session not found"))?;
+
+        // Build context for solution generation
+        let mut context = format!("Based on this terminal output:\n{}\n\n", session.context);
+        context.push_str("And our conversation:\n");
         
-        let suggestions = self.generate_command(prompt, None).await?;
+        // Include recent messages for context
+        let recent_messages = session.messages.iter().rev().take(4).rev();
+        for msg in recent_messages {
+            if msg.role != "system" {
+                context.push_str(&format!("{}: {}\n", msg.role, msg.content));
+            }
+        }
+        
+        context.push_str("\nGenerate a specific command line solution that will solve the issue discussed.");
+
+        let suggestions = self.generate_command(&context, None).await?;
         
         if let Some(suggestion) = suggestions.first() {
             Ok((suggestion.command.clone(), suggestion.explanation.clone()))
