@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::encryption::EncryptionManager;
 use crate::encryption_v2::EncryptionManager as EncryptionManagerV2;
+use crate::services::ai::AiService;
 use portable_pty::{Child, MasterPty, PtySize};
 use ssh2::{Channel, Session as SshSessionInner};
 use std::net::TcpStream;
@@ -22,6 +23,7 @@ pub struct AppState {
     pub inner: Shared<Inner>,
     pub encryption: Arc<EncryptionManager>,
     pub encryption_v2: Arc<EncryptionManagerV2>,
+    pub ai_service: Arc<Mutex<Option<AiService>>>,
 }
 
 pub struct Inner {
@@ -50,7 +52,20 @@ impl Default for AppState {
             })),
             encryption,
             encryption_v2,
+            ai_service: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+impl AppState {
+    pub fn set_ai_service(&self, service: AiService) {
+        let mut ai_guard = self.ai_service.lock().unwrap();
+        *ai_guard = Some(service);
+    }
+
+    pub fn get_ai_service(&self) -> Option<AiService> {
+        let ai_guard = self.ai_service.lock().unwrap();
+        ai_guard.clone()
     }
 }
 

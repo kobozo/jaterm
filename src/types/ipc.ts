@@ -381,6 +381,17 @@ export function saveConfig(config: any, appName?: string): Promise<void> {
   return invoke('save_config', { appName, config } as any);
 }
 
+// V2 encrypted config commands
+export function loadConfigV2(appName?: string): Promise<any> {
+  return invoke('load_config_v2', { appName } as any);
+}
+export function saveConfigV2(config: any, appName?: string): Promise<void> {
+  return invoke('save_config_v2', { appName, config } as any);
+}
+export function checkConfigNeedsEncryptionV2(appName?: string): Promise<boolean> {
+  return invoke('check_config_needs_encryption_v2', { appName } as any);
+}
+
 // Shell helpers
 export function installZshOsc7(): Promise<boolean> {
   return invoke('install_zsh_osc7');
