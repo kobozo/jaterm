@@ -20,10 +20,48 @@ import { MasterKeyDialog } from '@/components/MasterKeyDialog';
 import { addRecent } from '@/store/recents';
 import { saveAppState, loadAppState } from '@/store/persist';
 import { addRecentSession } from '@/store/sessions';
-import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, sshSetPrimary, encryptionStatus, checkProfilesNeedMigration } from '@/types/ipc';
-import { getCachedConfig, loadGlobalConfig, saveGlobalConfig, checkConfigNeedsEncryption } from '@/services/settings';
+import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, sshSetPrimary, checkProfilesNeedMigration } from '@/types/ipc';
+import { getCachedConfig, loadGlobalConfig, saveGlobalConfig } from '@/services/settings';
 import { getThemeList } from '@/config/themes';
 import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
+import { ensureEncryptionReady } from '@/services/encryptionGate';
+import { useToasts } from '@/store/toasts';
+import { ensureHelper, ensureLocalHelper } from '@/services/helper';
+import { gitStatusViaHelper } from '@/services/git';
+import { TerminalEventDetector, debounce } from '@/services/terminalEvents';
+import { homeDir } from '@tauri-apps/api/path';
+import HelperConsentModal from '@/components/HelperConsentModal';
+import KeyGenerationModal from '@/components/KeyGenerationModal';
+import { logger } from '@/services/logger';
+import { telemetry, TelemetryEvent } from '@/services/telemetry';
+import { featureFlags } from '@/services/features';
+import React, { useState, useRef, useEffect } from 'react';
+import SplitView from '@/components/SplitView';
+import FileExplorerWithEditor from '@/components/FileExplorerWithEditor';
+import TerminalPane from '@/components/TerminalPane/TerminalPane';
+import RemoteTerminalPane from '@/components/RemoteTerminalPane';
+import GitStatusBar from '@/components/GitStatusBar';
+import GitTools from '@/components/GitTools';
+import { SettingsPane } from '@/components/SettingsPane';
+import PortsPanel from '@/components/PortsPanel';
+import Sessions from '@/components/sessions';
+import type { LayoutShape } from '@/store/sessions';
+import ComposeDrawer from '@/components/ComposeDrawer';
+import { CommandPalette } from '@/components/CommandPalette';
+import { commandRegistry } from '@/services/commandRegistry';
+import { Command, CommandCategory } from '@/types/commands';
+import TabsBar from '@/components/TabsBar';
+import SplitTree, { LayoutNode, LayoutSplit, LayoutLeaf } from '@/components/SplitTree';
+import Toaster from '@/components/Toaster';
+import { MasterKeyDialog } from '@/components/MasterKeyDialog';
+import { addRecent } from '@/store/recents';
+import { saveAppState, loadAppState } from '@/store/persist';
+import { addRecentSession } from '@/store/sessions';
+import { appQuit, installZshOsc7, installBashOsc7, installFishOsc7, openPathSystem, ptyOpen, ptyKill, ptyWrite, resolvePathAbsolute, sshCloseShell, sshConnect, sshDisconnect, sshOpenShell, sshWrite, sshSetPrimary, checkProfilesNeedMigration } from '@/types/ipc';
+import { getCachedConfig, loadGlobalConfig, saveGlobalConfig } from '@/services/settings';
+import { getThemeList } from '@/config/themes';
+import { initEncryption, encryptionNeedsSetup, checkProfilesNeedMigrationV2, migrateProfilesV2 } from '@/services/api/encryption_v2';
+import { ensureEncryptionReady } from '@/services/encryptionGate';
 import { useToasts } from '@/store/toasts';
 import { ensureHelper, ensureLocalHelper } from '@/services/helper';
 import { gitStatusViaHelper } from '@/services/git';
@@ -480,20 +518,11 @@ export default function App() {
         action: () => checkForUpdatesInteractive(),
       },
       {
-        id: 'app.commandPalette',
-        label: 'Open Command Palette',
-        category: CommandCategory.View,
-        icon: '🎯',
-        shortcut: 'Cmd/Ctrl+K',
-        description: 'Open the command palette for quick access to commands',
-        action: () => setCommandPaletteOpen(true),
-      },
-      {
         id: 'app.compose',
         label: 'Compose with AI',
         category: CommandCategory.Terminal,
         icon: '🤖',
-        shortcut: 'Cmd/Ctrl+Shift+K',
+        shortcut: 'Cmd/Ctrl+K',
         description: 'Open AI compose assistant',
         action: () => setComposeOpen(true),
         enabled: () => {
@@ -633,61 +662,6 @@ export default function App() {
           window.location.reload();
         },
       });
-    });
-    
-    // Add AI analysis command
-    commands.push({
-      id: 'ai.analyzeOutput',
-      label: 'Analyze Terminal Output with AI',
-      category: CommandCategory.Terminal,
-      icon: '🤖',
-      description: 'Analyze the visible terminal output using AI',
-      keywords: ['ai', 'analyze', 'output', 'explain', 'error'],
-      action: async () => {
-        try {
-          // For now, prompt user to copy text
-          const { aiService } = await import('@/services/ai');
-          
-          // Try to get text from clipboard (user needs to select and copy first)
-          const clipboardText = await navigator.clipboard.readText();
-          
-          if (!clipboardText || clipboardText.trim().length === 0) {
-            show({
-              title: 'No text to analyze',
-              message: 'Please select and copy terminal output first (Cmd+C), then run this command',
-              kind: 'info'
-            });
-            return;
-          }
-          
-          show({
-            title: 'Analyzing output...',
-            message: 'AI is analyzing the terminal output',
-            kind: 'info'
-          });
-          
-          const analysis = await aiService.analyzeTerminalOutput(clipboardText);
-          
-          // Show analysis in a modal or toast
-          show({
-            title: 'AI Analysis',
-            message: analysis,
-            kind: 'success',
-            duration: 10000 // Show for 10 seconds
-          });
-        } catch (error) {
-          show({
-            title: 'Analysis failed',
-            message: String(error),
-            kind: 'error'
-          });
-        }
-      },
-      enabled: () => {
-        // Only enable if AI is configured
-        const config = getCachedConfig();
-        return config?.ai?.enabled === true;
-      }
     });
     
     commandRegistry.registerAll(commands);
@@ -2097,13 +2071,17 @@ export default function App() {
           if (p && hasUsableAuth(p.auth as any)) {
             authToUse = (p.auth as any);
           } else {
-            const { encryptionStatus } = await import('@/types/ipc');
-            const enc = await encryptionStatus();
-            if (!enc.has_master_key) {
-              // Ask user to unlock master key and abort this attempt
-              setMasterKeyDialog({ isOpen: true, mode: 'unlock' });
-              alert('This profile is encrypted. Please unlock your master key and try again.');
+            // Lazily request unlock/setup only when needed
+            const ok = await ensureEncryptionReady('Unlock encrypted SSH profile');
+            if (!ok) {
+              alert('This profile appears to be encrypted. Please unlock your master key to use it.');
               return;
+            }
+            // Re-fetch profiles after unlock
+            const profiles2 = await getSshProfiles();
+            const p2 = profiles2.find(pr => pr.id === opts.profileId);
+            if (p2 && hasUsableAuth(p2.auth as any)) {
+              authToUse = (p2.auth as any);
             }
           }
         } catch {}
@@ -2633,37 +2611,25 @@ export default function App() {
       try {
         // Initialize new encryption system
         const initialized = await initEncryption();
-        
-        if (!initialized) {
-          // DEK not found in keychain, check what we need to do
-          const needsSetup = await encryptionNeedsSetup();
-          const needsMigration = await checkProfilesNeedMigrationV2('jaterm');
-          
-          if (needsSetup) {
-            // First time setup - need to create master password
-            setMasterKeyDialog({ isOpen: true, mode: 'setup', isMigration: needsMigration });
-          } else {
-            // Have encrypted DEK but no keychain access - need master password to recover
-            setMasterKeyDialog({ isOpen: true, mode: 'unlock' });
-          }
-        } else {
+
+        if (initialized) {
           // Encryption initialized successfully
           // Check if we need to migrate plain text profiles
-          const needsProfileMigration = await checkProfilesNeedMigrationV2('jaterm');
-          if (needsProfileMigration) {
+          const needsMigration = await checkProfilesNeedMigrationV2('jaterm');
+          if (needsMigration) {
             // Auto-migrate plain text profiles
             await migrateProfilesV2('jaterm');
             addToast({ title: 'Profiles migrated to encrypted format', kind: 'success' } as any);
           }
-          
-          // Check if we need to encrypt config API keys
-          const needsConfigEncryption = await checkConfigNeedsEncryption();
-          if (needsConfigEncryption) {
-            // Load and re-save config to trigger encryption
-            const config = await loadGlobalConfig();
-            await saveGlobalConfig(config);
-            addToast({ title: 'API keys encrypted for security', kind: 'success' } as any);
-          }
+        } else {
+          // Do not prompt on startup; defer until first encrypted access.
+          // Optionally, inform users that encryption can be set up from Settings.
+          try {
+            const needsMigration = await checkProfilesNeedMigrationV2('jaterm');
+            if (needsMigration) {
+              addToast({ title: 'Profiles can be migrated to encrypted storage', message: 'Open Settings → Security to migrate when ready.', kind: 'info' } as any);
+            }
+          } catch {}
         }
         
         const s = await loadAppState();
@@ -2697,6 +2663,16 @@ export default function App() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Global listener to open the Master Key dialog on demand
+  React.useEffect(() => {
+    const handler = (e: any) => {
+      const mode = e?.detail?.mode === 'setup' ? 'setup' : 'unlock';
+      setMasterKeyDialog((prev) => ({ isOpen: true, mode, isMigration: prev.isMigration }));
+    };
+    window.addEventListener('open-master-key-dialog', handler as any);
+    return () => window.removeEventListener('open-master-key-dialog', handler as any);
   }, []);
 
   // Keyboard shortcuts
@@ -2754,13 +2730,8 @@ export default function App() {
         e.preventDefault();
         newTab();
       }
-      // Command Palette: Meta/Ctrl+K
+      // Compose with AI: Meta/Ctrl+K
       if (meta && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        setCommandPaletteOpen(true);
-      }
-      // Compose with AI: Meta/Ctrl+Shift+K (alternative shortcut)
-      if (meta && e.shiftKey && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setComposeOpen(true);
       }
@@ -3285,8 +3256,6 @@ export default function App() {
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
-        activePaneId={tabs.find(t => t.id === activeTab)?.activePane || null}
-        paneKind={tabs.find(t => t.id === activeTab)?.kind}
       />
       {customPortDialog && (
         <div style={{ 
@@ -3509,7 +3478,10 @@ export default function App() {
         isOpen={masterKeyDialog.isOpen}
         mode={masterKeyDialog.mode}
         isMigration={masterKeyDialog.isMigration}
-        onClose={() => setMasterKeyDialog({ ...masterKeyDialog, isOpen: false })}
+        onClose={() => {
+          setMasterKeyDialog({ ...masterKeyDialog, isOpen: false });
+          try { window.dispatchEvent(new CustomEvent('master-key-dialog-closed')); } catch {}
+        }}
         onSuccess={async () => {
           setMasterKeyDialog({ ...masterKeyDialog, isOpen: false });
           addToast({ title: masterKeyDialog.isMigration ? 'Profiles encrypted successfully' : 'Master key unlocked successfully', kind: 'success' } as any);
